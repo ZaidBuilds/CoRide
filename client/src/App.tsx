@@ -3,7 +3,9 @@ import { io, Socket } from 'socket.io-client';
 import { Radio } from 'lucide-react';
 import { DiscoveryScreen } from './components/DiscoveryScreen';
 import { ChatView } from './components/ChatView';
+import { FriendsTab } from './components/FriendsTab';
 import type { MetroFriend } from './components/FriendsTab';
+import { ContextConfidenceBadge } from './components/ContextConfidenceBadge';
 import { StationPicker } from './components/StationPicker';
 import { LiveRoomHeader } from './components/LiveRoomHeader';
 import { EngagementHub } from './components/engagement/EngagementHub';
@@ -31,7 +33,7 @@ import type {
 
 const API = 'http://localhost:4000';
 
-type View = 'home' | 'people' | 'discover' | 'chat' | 'chats' | 'connect' | 'profile' | 'profileStats' | 'liveTracking' | 'station' | 'train' | 'friends';
+type View = 'home' | 'people' | 'discover' | 'liveTracking' | 'chat' | 'chats' | 'connect' | 'profile' | 'friends';
 
 export function App() {
   const [socket, setSocket] = useState<Socket | null>(null);
@@ -466,7 +468,7 @@ export function App() {
   const activeRoom = view === 'chat' ? (chatTarget === 'station' ? stationRoom : trainRoom) : null;
   const friendIds = friends.map(f => f.friendId);
   const activePeopleRoom = trainRoom || stationRoom;
-  const navActive: NavView = view === 'home' ? 'home' : view === 'people' || view === 'station' || view === 'train' || view === 'discover' || view === 'liveTracking' || view === 'connect' ? 'people' : view === 'chats' || view === 'chat' || view === 'friends' ? 'chats' : view === 'profile' || view === 'profileStats' ? 'profile' : 'home';
+  const navActive: NavView = view === 'home' ? 'home' : view === 'people' || view === 'discover' || view === 'liveTracking' || view === 'connect' ? 'people' : view === 'chats' || view === 'chat' || view === 'friends' ? 'chats' : view === 'profile' ? 'profile' : 'home';
 
   const handleBottomNav = (v: NavView) => {
     if (v === 'home') setView('home');
@@ -557,9 +559,12 @@ export function App() {
             <StationPicker onConfirm={(st,_line)=> handleStationPicked(st)} onDismiss={()=> setShowStationPicker(false)} />
           )}
           {context && (
-            <div style={{ marginTop:12, display:'flex', alignItems:'center', justifyContent:'space-between', padding:'8px 12px', borderRadius:'var(--radius-md)', background:'var(--bg-surface)', border:'1px solid var(--border-subtle)', fontSize:11, color:'var(--text-muted)' }}>
-              <span style={{ display:'flex', alignItems:'center', gap:6 }}><Radio size={12} style={{ color: hasManualOverride?'var(--accent-emerald)':'var(--accent-blue)' }}/> {hasManualOverride?'Confirmed':'Auto'}: <strong style={{ color:'var(--text-primary)' }}>{context.stationName}</strong></span>
-              <button onClick={()=> setShowStationPicker(true)} style={{ background:'none', border:'none', color:'var(--accent-violet)', fontSize:11, fontWeight:700 }}>Change</button>
+            <div style={{ marginTop:12, display:'flex', flexDirection:'column', gap:8, padding:'10px 12px', borderRadius:'var(--radius-md)', background:'var(--bg-surface)', border:'1px solid var(--border-subtle)' }}>
+              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+                <span style={{ display:'flex', alignItems:'center', gap:6, fontSize:11, color:'var(--text-muted)' }}><Radio size={12} style={{ color: hasManualOverride?'var(--accent-emerald)':'var(--accent-blue)' }}/> {hasManualOverride?'Confirmed':'Auto'}: <strong style={{ color:'var(--text-primary)' }}>{context.stationName}</strong></span>
+                <button onClick={()=> setShowStationPicker(true)} style={{ background:'none', border:'none', color:'var(--accent-violet)', fontSize:11, fontWeight:700 }}>Change</button>
+              </div>
+              <ContextConfidenceBadge context={context} />
             </div>
           )}
         </>
@@ -647,25 +652,23 @@ export function App() {
       {view === 'connect' && user && (
         <ConnectScreen currentUser={user} socket={socket} />
       )}
-      {(view === 'friends') && user && (
-        <ConnectScreen currentUser={user} socket={socket} />
+      {view === 'friends' && user && (
+        <FriendsTab
+          friends={friends}
+          currentUser={user}
+          activeDMs={friendDMs}
+          selectedFriend={selectedFriend}
+          onSelectFriend={setSelectedFriend}
+          onSendDM={handleSendDM}
+        />
       )}
 
       {/* Profile Stats — 10 + Detail */}
       {view === 'profile' && user && (
         <ProfileStatsScreen user={user} />
       )}
-      {view === 'profileStats' && user && (
-        <ProfileStatsScreen user={user} />
-      )}
 
-      {/* Fallback for legacy station/train views */}
-      {(view === 'station' || view === 'train') && (()=>{ const r = view==='station'?stationRoom:trainRoom; return r && user ? (
-        <>
-          <DiscoveryScreen room={r} context={context} currentUser={user} friendIds={friendIds} ranked={rankedMap[r.id]} vibe={vibeMap[r.id]} onConnect={handleConnect} onBlock={handleBlock} onReport={handleReport} onOpenChat={()=> openChat(view)} onProfileOpen={handleProfileOpen} />
-          <div style={{ marginTop:14 }}><EngagementHub room={r} snapshot={engagement[r.id]||null} currentUser={user} socket={socket} onReaction={(tid,emoji,ttype,rid)=> handleReaction(tid,emoji,ttype as any,rid)} /></div>
-        </>
-      ) : null; })()}
+
 
       {/* Profile editor overlay */}
       {showProfileEditor && user && (
