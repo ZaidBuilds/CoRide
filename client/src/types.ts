@@ -44,7 +44,8 @@ export interface UserProfile {
   activity: ActivityType;
   joinedAt: number;
   karmaScore: number;
-  isVerifiedPhone: boolean;
+  // phone removed — no phone field
+  isVerifiedPhone?: boolean;
   presenceTier?: PresenceTier;
   trustTier?: 'newcomer' | 'regular' | 'trusted' | 'verified';
   trustBadge?: string;

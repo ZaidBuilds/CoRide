@@ -43,7 +43,8 @@ export interface UserProfile {
   activity: ActivityType; // STILL, WALKING, IN_VEHICLE
   joinedAt: number;
   karmaScore: number;
-  isVerifiedPhone: boolean;
+  // phone removed — no phone verification for MVP (real data via presence + reputation)
+  isVerifiedPhone?: boolean;
   trustTier?: 'newcomer' | 'regular' | 'trusted' | 'verified';
 }
 

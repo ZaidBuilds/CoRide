@@ -108,7 +108,7 @@ export const ProfileEditor: React.FC<Props> = ({ user, onClose, onSaved }) => {
             <button onClick={save} disabled={saving} className="btn-primary" style={{ flex:1, justifyContent:'center', opacity: saving?0.6:1 }}><Save size={14}/> {saving?'Saving…':'Save'}</button>
           </div>
           {msg && <div style={{ fontSize:12, color:'var(--accent-emerald)', textAlign:'center' }}>{msg}</div>}
-          <div style={{ fontSize:10, color:'var(--text-muted)', textAlign:'center', marginTop:4 }}>Karma {user.karmaScore} • {(user as any).trustBadge || ''} • Verified phone</div>
+          <div style={{ fontSize:10, color:'var(--text-muted)', textAlign:'center', marginTop:4 }}>Karma {user.karmaScore} • {(user as any).trustBadge || 'Regular'} • Real-time presence</div>
         </div>
       </div>
     </div>

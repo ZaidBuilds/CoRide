@@ -132,8 +132,30 @@ export class RoomManager {
     room.expiresAt = Date.now() + ttlMs;
   }
 
-  /** Seed demo commuters into a room */
+  /** Seed demo commuters into a room — disabled in REAL_DATA mode */
   private seedRoom(room: ContextRoom): void {
+    const isReal = process.env.REAL_DATA === 'true' || process.env.MOCK_SEEDS === 'false';
+    if (isReal) {
+      // Real mode: no mock travelers — welcome reflects real count (0-1)
+      const welcomeContent = room.type === 'station'
+        ? `📍 ${room.stationName} — ${room.userIds.size || 1} traveler here now. Be the first to say hi!`
+        : `🚇 ${room.lineName} · ${room.scheduleLabel || 'Train'} (${room.direction}) — ${room.userIds.size || 1} traveler onboard.`;
+      room.messages.push({
+        id: uuidv4(),
+        roomId: room.id,
+        senderId: 'system',
+        senderUsername: '@CoRide',
+        senderPseudonym: 'CoRide',
+        senderAvatarId: 'system',
+        senderAvatarBg: 'linear-gradient(135deg, #0ea5e9, #6366f1)',
+        content: welcomeContent,
+        timestamp: Date.now(),
+        isSystem: true,
+        type: 'join_alert'
+      });
+      return;
+    }
+
     const seedData = [
       { name: 'CosmicTiger', tags: ['music', 'coding'], emoji: '🎧', tier: 'active' as const },
       { name: 'DelhiNomad', tags: ['gaming', 'anime'], emoji: '🎮', tier: 'active' as const },
@@ -162,8 +184,7 @@ export class RoomManager {
         collegeOrTag: s.emoji,
         activity: room.type === 'train' ? 'IN_VEHICLE' : 'WALKING',
         joinedAt: Date.now() - Math.floor(Math.random() * 300_000),
-        karmaScore: 120,
-        isVerifiedPhone: true
+        karmaScore: 120
       };
 
       this.userProfiles.set(userId, profile);

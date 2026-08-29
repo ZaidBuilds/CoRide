@@ -281,8 +281,7 @@ app.get('/api/auth/random-profile', (_req, res) => {
     collegeOrTag: 'Metro Commuter',
     activity: 'STILL',
     joinedAt: Date.now(),
-    karmaScore: 100,
-    isVerifiedPhone: true
+    karmaScore: 100
   };
   // persist for retention
   persistence.appendProfile(profile);
