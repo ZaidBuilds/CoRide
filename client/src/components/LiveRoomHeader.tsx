@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Radio, Users } from 'lucide-react';
+import { Radio, Users, Train } from 'lucide-react';
 import type { ContextRoom } from '../types';
 
 interface Props {
@@ -10,13 +10,11 @@ interface Props {
 function shortDirection(dir?: string): string {
   if (!dir) return '';
   const raw = dir.replace(/^Towards\s+/i, '').trim();
-  // "Noida Electronic City / Vaishali" -> "Noida"
   const first = raw.split(/[\/,]/)[0]?.trim() || raw;
   return first.split(/\s+/)[0] || raw;
 }
 
 function formatISTNow(): string {
-  // Show IST time for Delhi commuters
   try {
     return new Date().toLocaleTimeString('en-IN', {
       hour: 'numeric',
@@ -41,79 +39,45 @@ export const LiveRoomHeader: React.FC<Props> = ({ room, compact }) => {
 
   const dirShort = shortDirection(room.direction);
   const line = room.lineName || 'Metro';
-  // Product moment: “Blue Line · Noida · 9:07 AM — 38 travelers online.”
   const count = room.userCount ?? room.users?.length ?? 0;
 
   if (compact) {
     return (
       <div style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 8,
-        padding: '6px 12px',
-        borderRadius: 'var(--radius-full)',
-        background: 'rgba(99,102,241,0.12)',
-        border: '1px solid rgba(99,102,241,0.22)',
-        fontSize: 12,
-        fontWeight: 700,
-        color: 'var(--text-primary)'
+        display:'inline-flex', alignItems:'center', gap:8,
+        padding:'6px 12px', borderRadius:'var(--radius-full)',
+        background:'rgba(123,93,255,0.12)', border:'1px solid rgba(123,93,255,0.22)',
+        fontSize:12, fontWeight:700, color:'#C4B5FF'
       }}>
-        <span style={{ width: 8, height: 8, borderRadius: '50%', background: room.lineColor || 'var(--accent-indigo)', display: 'inline-block', boxShadow: `0 0 6px ${room.lineColor}` }} />
+        <span style={{ width:8,height:8, borderRadius:'50%', background: room.lineColor || '#7B5DFF', display:'inline-block', boxShadow:`0 0 6px ${room.lineColor}` }} />
         {line} · {dirShort} · {now} — {count} online
-        <Radio size={12} className="animate-pulse-glow" style={{ color: 'var(--presence-active)' }} />
+        <Radio size={12} className="animate-pulse-glow" style={{ color:'var(--presence-active)' }} />
       </div>
     );
   }
 
+  // Figma 02 purple card style
   return (
     <div style={{
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      gap: 12,
-      padding: '10px 14px',
-      borderRadius: 'var(--radius-lg)',
-      background: 'linear-gradient(135deg, rgba(99,102,241,0.18), rgba(14,165,233,0.12))',
-      border: '1px solid rgba(99,102,241,0.25)',
-      backdropFilter: 'blur(12px)'
+      display:'flex', alignItems:'center', gap:12,
+      padding:'14px',
+      borderRadius:'var(--radius-xl)',
+      background:'linear-gradient(135deg, #2A1A5E 0%, #1E1A3A 100%)',
+      border:'1px solid rgba(123,93,255,0.28)',
+      boxShadow:'0 8px 32px rgba(0,0,0,0.35)'
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-        <div style={{
-          width: 10, height: 10, borderRadius: '50%',
-          background: room.lineColor || 'var(--accent-indigo)',
-          boxShadow: `0 0 10px ${room.lineColor || '#6366f1'}`,
-          flexShrink: 0
-        }} className="animate-pulse-glow" />
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 13, fontWeight: 900, color: 'var(--text-primary)', lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {line} · {dirShort} · {now}
-          </div>
-          <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-              <Users size={11} /> {count} travelers online
-            </span>
-            {room.scheduleLabel && <span>• {room.scheduleLabel}</span>}
-          </div>
+      <div style={{ width:40, height:40, borderRadius:'50%', background:'#7B5DFF', display:'flex', alignItems:'center', justifyContent:'center', color:'white', flexShrink:0 }}>
+        <Train size={20} />
+      </div>
+      <div style={{ flex:1, minWidth:0 }}>
+        <div style={{ fontSize:14, fontWeight:800, color:'white', display:'flex', alignItems:'center', gap:6 }}>
+          {line} <span style={{ opacity:0.5 }}>•</span> {dirShort} <span style={{ opacity:0.5 }}>•</span> {now}
+        </div>
+        <div style={{ fontSize:12, color:'#C4B5FF', marginTop:2, display:'flex', alignItems:'center', gap:6 }}>
+          <Users size={12} /> {count} travelers online — Live
         </div>
       </div>
-      <div style={{
-        padding: '4px 10px',
-        borderRadius: 'var(--radius-full)',
-        background: 'rgba(34,197,94,0.12)',
-        border: '1px solid rgba(34,197,94,0.3)',
-        color: 'var(--presence-active)',
-        fontSize: 10,
-        fontWeight: 800,
-        letterSpacing: '0.06em',
-        textTransform: 'uppercase',
-        display: 'flex',
-        alignItems: 'center',
-        gap: 6,
-        flexShrink: 0
-      }}>
-        <Radio size={10} />
-        Live
-      </div>
+      <div style={{ width:10,height:10, borderRadius:'50%', background:'var(--presence-active)', boxShadow:'0 0 8px var(--presence-active)', flexShrink:0 }} className="animate-pulse-glow" />
     </div>
   );
 };
