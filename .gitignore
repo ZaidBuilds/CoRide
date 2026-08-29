@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+client/node_modules/
+server/node_modules/
+
+# Build
+client/dist/
+server/dist/
+dist/
+
+# Env
+.env
+server/.env
+client/.env
+*.local
+
+# Runtime data (ephemeral) — keep examples
+server/src/data/store.json
+server/dist/data/store.json
+server/dist/data/analytics.log
+**/analytics.log
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+.idea
+
+# Temp
+C:/Users/zaidn/AppData/Local/Temp/opencode/
