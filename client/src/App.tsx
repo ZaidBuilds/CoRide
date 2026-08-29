@@ -13,6 +13,11 @@ import { BottomNav, type NavView } from './components/BottomNav';
 import { HomeScreen } from './components/HomeScreen';
 import { ConnectScreen } from './components/ConnectScreen';
 import { ProfileDrawer } from './components/ProfileDrawer';
+import { OnboardingScreen } from './components/OnboardingScreen';
+import { DiscoverAroundYou } from './components/DiscoverAroundYou';
+import { ChatsScreen } from './components/ChatsScreen';
+import { LiveTrackingScreen } from './components/LiveTrackingScreen';
+import { ProfileStatsScreen } from './components/ProfileStatsScreen';
 import { useCommuteNotifications } from './hooks/useCommuteNotifications';
 import { track } from './utils/analytics';
 import type { EngagementSnapshot } from './types/engagement';
@@ -26,7 +31,7 @@ import type {
 
 const API = 'http://localhost:4000';
 
-type View = 'home' | 'people' | 'chat' | 'chats' | 'connect' | 'profile' | 'station' | 'train' | 'friends';
+type View = 'home' | 'people' | 'discover' | 'chat' | 'chats' | 'connect' | 'profile' | 'profileStats' | 'liveTracking' | 'station' | 'train' | 'friends';
 
 export function App() {
   const [socket, setSocket] = useState<Socket | null>(null);
@@ -48,7 +53,9 @@ export function App() {
   const [rankedMap, setRankedMap] = useState<Record<string, any[]>>({});
   const [vibeMap, setVibeMap] = useState<Record<string, any[]>>({});
   const [showProfileEditor, setShowProfileEditor] = useState(false);
-  void beachhead; void setSelectedFriend;
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  // used to silence noUnusedLocals for demo state
+  const _keep1 = beachhead; const _keep2 = setSelectedFriend; void _keep1; void _keep2;
   const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null);
   const routeHistoryRef = useRef<{ lat: number; lng: number; t: number }[]>([]);
   const lastPosRef = useRef<{ lat: number; lng: number } | null>(null);
@@ -191,6 +198,15 @@ export function App() {
   useEffect(() => {
     fetch(`${API}/api/metro/beachhead`).then(r => r.json()).then(setBeachhead).catch(() => {});
   }, []);
+
+  // Onboarding check — if tags <2 or no onboard flag, show
+  useEffect(() => {
+    if (!user) return;
+    const hasTags = user.interestTags && user.interestTags.length >= 2;
+    if (!hasTags && !localStorage.getItem('coride_onboarded')) {
+      setShowOnboarding(true);
+    }
+  }, [user]);
 
   // Geolocation
   useEffect(() => {
@@ -450,17 +466,18 @@ export function App() {
   const activeRoom = view === 'chat' ? (chatTarget === 'station' ? stationRoom : trainRoom) : null;
   const friendIds = friends.map(f => f.friendId);
   const activePeopleRoom = trainRoom || stationRoom;
-  const navActive: NavView = view === 'home' ? 'home' : view === 'people' || view === 'station' || view === 'train' ? 'people' : view === 'connect' || view === 'friends' ? 'chats' : view === 'profile' ? 'profile' : view === 'chat' ? 'chats' : 'home';
+  const navActive: NavView = view === 'home' ? 'home' : view === 'people' || view === 'station' || view === 'train' || view === 'discover' || view === 'liveTracking' || view === 'connect' ? 'people' : view === 'chats' || view === 'chat' || view === 'friends' ? 'chats' : view === 'profile' || view === 'profileStats' ? 'profile' : 'home';
 
   const handleBottomNav = (v: NavView) => {
     if (v === 'home') setView('home');
     else if (v === 'people') setView('people');
     else if (v === 'chats') {
-      setView('connect');
+      setView('chats');
       if (user) {
         fetch(`${API}/api/friends/${user.id}`).then(r=>r.json()).then(d=> setFriends((d.friends||[]).map((f: FriendEntry)=>({ id:f.id, friendId:f.id, friendProfile:f.profile, connectedAtLine:'', connectedAtStation:'', createdAt:Date.now(), unreadCount:0 }))));
       }
     }
+    else if (v === 'connect') setView('connect');
     else if (v === 'profile') setView('profile');
   };
 
@@ -479,6 +496,13 @@ export function App() {
 
   return (
     <div style={{ maxWidth: 520, margin: '0 auto', padding: '16px 12px 86px', minHeight:'100vh', background:'var(--bg-base)' }}>
+      {showOnboarding && user && (
+        <OnboardingScreen
+          user={user}
+          onComplete={(np)=>{ setUser(np); setShowOnboarding(false); localStorage.setItem('coride_onboarded','1'); showToast('Welcome aboard! 🎉'); }}
+          onSkip={()=>{ setShowOnboarding(false); localStorage.setItem('coride_onboarded','1'); }}
+        />
+      )}
       {/* Home */}
       {view === 'home' && (
         <>
@@ -541,13 +565,31 @@ export function App() {
         </>
       )}
 
+      {/* Discover Around You — 07 */}
+      {view === 'discover' && user && activePeopleRoom && (
+        <DiscoverAroundYou
+          user={user}
+          room={activePeopleRoom}
+          ranked={rankedMap[activePeopleRoom.id]}
+          engagement={engagement}
+          onProfile={(u)=> setSelectedUser(u)}
+          onJoinRoom={()=> { setChatTarget('train'); setView('chat'); }}
+          onSeeAllPeople={()=> setView('people')}
+        />
+      )}
+
+      {/* Live Tracking — 09 */}
+      {view === 'liveTracking' && (
+        <LiveTrackingScreen onBack={()=> setView('people')} />
+      )}
+
       {/* Chat — 04 Train Room */}
       {view === 'chat' && activeRoom && user && (
         <ChatView
           room={activeRoom}
           currentUser={user}
           onSendMessage={handleSendMessage}
-          onBack={()=> setView('people')}
+          onBack={()=> setView(activePeopleRoom ? 'people' : 'home')}
           socket={socket}
           typingUsers={typingUsers[activeRoom.id] || []}
           reactions={engagement[activeRoom.id]?.reactions as any}
@@ -555,32 +597,66 @@ export function App() {
         />
       )}
 
-      {/* Connect / Friend Requests — 05 + Chats DM */}
-      {(view === 'connect' || view === 'friends' || view === 'chats') && user && (
+      {/* Chats List — 08 */}
+      {view === 'chats' && user && (
+        <>
+          {selectedFriend ? (
+            <div style={{ paddingBottom: 12 }}>
+              <button onClick={()=> setSelectedFriend(null)} style={{ marginBottom:12, background:'var(--bg-surface)', border:'1px solid var(--border-subtle)', color:'var(--text-secondary)', padding:'8px 12px', borderRadius:999, fontSize:12, display:'flex', alignItems:'center', gap:6 }}>
+                ← Back to Chats
+              </button>
+              <div className="glass-panel" style={{ padding:16 }}>
+                <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:12 }}>
+                  <div style={{ width:36,height:36, borderRadius:'50%', background: selectedFriend.friendProfile.avatarBg, display:'flex', alignItems:'center', justifyContent:'center', color:'white', fontWeight:800 }}>{selectedFriend.friendProfile.pseudonym[0]}</div>
+                  <div>
+                    <div style={{ fontWeight:800, color:'white' }}>{selectedFriend.friendProfile.pseudonym}</div>
+                    <div style={{ fontSize:11, color:'var(--text-muted)' }}>Metro Friend • Real-time</div>
+                  </div>
+                </div>
+                <div style={{ maxHeight: 320, overflowY:'auto', display:'flex', flexDirection:'column', gap:8, marginBottom:12 }}>
+                  {friendDMs.filter(dm=> (dm.senderId===user.id && dm.receiverId===selectedFriend.friendId) || (dm.senderId===selectedFriend.friendId && dm.receiverId===user.id)).map(dm=>{
+                    const isMe = dm.senderId===user.id;
+                    return (
+                      <div key={dm.id} style={{ alignSelf: isMe?'flex-end':'flex-start', maxWidth:'78%', padding:'10px 14px', borderRadius: isMe?'18px 18px 6px 18px':'18px 18px 18px 6px', background: isMe?'#7B5DFF':'var(--bg-surface)', border: isMe?'none':'1px solid var(--border-subtle)', color: isMe?'white':'var(--text-primary)', fontSize:13 }}>
+                        {dm.content}
+                      </div>
+                    );
+                  })}
+                </div>
+                <form onSubmit={(e)=>{ e.preventDefault(); const inp=(e.target as any).elements.msg.value; if(!inp.trim())return; handleSendDM(selectedFriend.friendId, inp.trim()); (e.target as any).elements.msg.value=''; }} style={{ display:'flex', gap:8 }}>
+                  <input name="msg" placeholder={`Message ${selectedFriend.friendProfile.pseudonym}...`} style={{ flex:1, padding:'10px 14px', borderRadius:999, background:'var(--bg-surface)', border:'1px solid var(--border-subtle)', color:'white', fontSize:13 }} />
+                  <button type="submit" style={{ width:36,height:36, borderRadius:'50%', background:'#7B5DFF', border:'none', color:'white', display:'flex', alignItems:'center', justifyContent:'center' }}>➤</button>
+                </form>
+              </div>
+            </div>
+          ) : (
+            <ChatsScreen
+              user={user}
+              friends={friends}
+              onSelect={(id)=> {
+                const f = friends.find(x=> (x.friendId===id || x.id===id));
+                if (f) setSelectedFriend(f);
+                else showToast('Chat opened');
+              }}
+            />
+          )}
+        </>
+      )}
+
+      {/* Connect — 05 */}
+      {view === 'connect' && user && (
+        <ConnectScreen currentUser={user} socket={socket} />
+      )}
+      {(view === 'friends') && user && (
         <ConnectScreen currentUser={user} socket={socket} />
       )}
 
-      {/* Profile — 03 */}
+      {/* Profile Stats — 10 + Detail */}
       {view === 'profile' && user && (
-        <div style={{ paddingBottom: 12 }}>
-          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:12 }}>
-            <h2 style={{ fontSize:20, fontWeight:900 }}>Profile</h2>
-            <button onClick={()=> setShowProfileEditor(true)} style={{ padding:'8px 14px', borderRadius:999, background:'#7B5DFF', color:'white', border:'none', fontWeight:700, fontSize:12 }}>Edit</button>
-          </div>
-          <ProfileDrawer
-            user={user}
-            isMe={true}
-            isFriend={false}
-            onClose={()=> setView('home')}
-            onConnect={()=>{}}
-            onBlock={()=>{}}
-            onReport={()=>{}}
-            onMessage={()=> setView('connect')}
-          />
-          <div style={{ marginTop:12 }}>
-            <SavedCommutes userId={user.id} onUse={handleUseCommute} />
-          </div>
-        </div>
+        <ProfileStatsScreen user={user} />
+      )}
+      {view === 'profileStats' && user && (
+        <ProfileStatsScreen user={user} />
       )}
 
       {/* Fallback for legacy station/train views */}
@@ -630,7 +706,9 @@ export function App() {
         </div>
       )}
 
-      <BottomNav active={navActive} onNavigate={handleBottomNav} unreadChats={friendDMs.filter(d=> !d.read && d.receiverId===user?.id).length} />
+      {view !== 'chat' && !showOnboarding && (
+        <BottomNav active={navActive} onNavigate={handleBottomNav} unreadChats={friendDMs.filter(d=> !d.read && d.receiverId===user?.id).length} />
+      )}
     </div>
   );
 }
