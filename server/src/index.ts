@@ -423,6 +423,18 @@ app.get('/api/connections/pending/:userId', (req, res) => {
   }));
   res.json({ pending: enriched });
 });
+app.get('/api/connections/sent/:userId', (req, res) => {
+  const sent = connectionManager.getSentRequestsFor(req.params.userId);
+  const enriched = sent.map(req => ({
+    ...req,
+    toProfile: roomManager.getUserProfile(req.toUserId)
+  }));
+  res.json({ sent: enriched });
+});
+app.get('/api/connections/history/:userId', (req, res) => {
+  const all = connectionManager.getAllRequestsFor(req.params.userId);
+  res.json({ history: all });
+});
 
 // DM history (REST fallback for initial load)
 app.get('/api/dm/:userId/:friendId', (req, res) => {

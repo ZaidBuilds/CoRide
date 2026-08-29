@@ -193,6 +193,26 @@ export class ConnectionManager {
     return pending;
   }
 
+  public getSentRequestsFor(userId: string): ConnectionRequest[] {
+    const sent: ConnectionRequest[] = [];
+    for (const req of this.requests.values()) {
+      if (req.fromUserId === userId && req.status === 'pending') {
+        sent.push(req);
+      }
+    }
+    return sent;
+  }
+
+  public getAllRequestsFor(userId: string): ConnectionRequest[] {
+    const all: ConnectionRequest[] = [];
+    for (const req of this.requests.values()) {
+      if ((req.fromUserId === userId || req.toUserId === userId)) {
+        all.push(req);
+      }
+    }
+    return all.sort((a,b)=> b.createdAt - a.createdAt);
+  }
+
   // ─── Friendships ───
 
   private addFriend(userA: string, userB: string): void {
