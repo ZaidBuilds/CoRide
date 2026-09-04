@@ -76,7 +76,7 @@ export const DiscoveryScreen: React.FC<Props> = ({
 
       {/* Purple travelers online card — Figma 02 */}
       <div style={{
-        background:'linear-gradient(135deg, #2A1A5E 0%, #1E1A3A 100%)',
+        background:'linear-gradient(135deg, var(--bg-accent-wash-2) 0%, var(--bg-accent-wash) 100%)',
         border:'1px solid rgba(123,93,255,0.28)',
         borderRadius:'var(--radius-xl)',
         padding:14,
@@ -85,17 +85,17 @@ export const DiscoveryScreen: React.FC<Props> = ({
         gap:12,
         marginBottom:12
       }}>
-        <div style={{ width:40, height:40, borderRadius:'50%', background:'#7B5DFF', display:'flex', alignItems:'center', justifyContent:'center', color:'white' }}>
+        <div style={{ width:40, height:40, borderRadius:'50%', background:'var(--accent-purple)', display:'flex', alignItems:'center', justifyContent:'center', color:'white' }}>
           <Train size={20} />
         </div>
         <div style={{ flex:1 }}>
-          <div style={{ fontSize:14, fontWeight:800, color:'white', display:'flex', alignItems:'center', gap:6 }}>
+          <div style={{ fontSize:14, fontWeight:800, color:'var(--text-primary)', display:'flex', alignItems:'center', gap:6 }}>
             {room.userCount || baseList.length} travelers online <span style={{ width:7,height:7, borderRadius:'50%', background:'var(--presence-active)', boxShadow:'0 0 6px var(--presence-active)', display:'inline-block' }} />
           </div>
-          <div style={{ fontSize:12, color:'#C4B5FF', marginTop:2 }}>Next: {nextStation} ({nextTime})</div>
+          <div style={{ fontSize:12, color:'var(--accent-purple-text)', marginTop:2 }}>Next: {nextStation} ({nextTime})</div>
         </div>
         <button style={{
-          padding:'7px 12px', borderRadius:'var(--radius-full)', background:'rgba(123,93,255,0.18)', border:'1px solid rgba(123,93,255,0.32)', color:'#C4B5FF', fontSize:11, fontWeight:700, display:'flex', alignItems:'center', gap:6
+          padding:'7px 12px', borderRadius:'var(--radius-full)', background:'rgba(123,93,255,0.18)', border:'1px solid rgba(123,93,255,0.32)', color:'var(--accent-purple-text)', fontSize:11, fontWeight:700, display:'flex', alignItems:'center', gap:6
         }}>
           <Info size={12}/> Train Info
         </button>
@@ -115,7 +115,7 @@ export const DiscoveryScreen: React.FC<Props> = ({
             onClick={()=> setFilter(tab.id as any)}
             style={{
               flex:1, padding:'8px 0', borderRadius:'var(--radius-full)', border:'none',
-              background: filter===tab.id ? '#7B5DFF' : 'transparent',
+              background: filter===tab.id ? 'var(--accent-purple)' : 'transparent',
               color: filter===tab.id ? 'white' : 'var(--text-muted)',
               fontSize:12, fontWeight:800, display:'flex', alignItems:'center', justifyContent:'center', gap:6, cursor:'pointer'
             }}
@@ -129,8 +129,8 @@ export const DiscoveryScreen: React.FC<Props> = ({
       {/* Vibe strip */}
       {vibe && vibe.length > 0 && filter==='all' && (
         <div style={{ marginBottom:12, padding:'12px', borderRadius:'var(--radius-lg)', background:'linear-gradient(135deg, rgba(123,93,255,0.10), rgba(139,92,246,0.06))', border:'1px solid rgba(123,93,255,0.14)' }}>
-          <div style={{ fontSize:11, fontWeight:800, color:'var(--accent-violet)', display:'flex', alignItems:'center', gap:6, marginBottom:8 }}>
-            ✨ People you may vibe with <span style={{ marginLeft:'auto', fontSize:10, padding:'2px 6px', borderRadius:999, background:'rgba(123,93,255,0.14)', border:'1px solid rgba(123,93,255,0.22)' }}>{vibe.length}</span>
+          <div style={{ fontSize:11, fontWeight:800, color:'var(--accent-purple-text)', display:'flex', alignItems:'center', gap:6, marginBottom:8 }}>
+            ✨ People you may vibe with <span style={{ marginLeft:'auto', fontSize:11, padding:'2px 6px', borderRadius:999, background:'rgba(123,93,255,0.14)', border:'1px solid rgba(123,93,255,0.22)' }}>{vibe.length}</span>
           </div>
           <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
             {vibe.map(r=> (
@@ -188,14 +188,14 @@ export const DiscoveryScreen: React.FC<Props> = ({
         <button style={{ display:'flex', alignItems:'center', gap:8, padding:'10px 18px', borderRadius:'var(--radius-full)', background:'var(--bg-surface)', border:'1px solid var(--border-card)', color:'var(--text-secondary)', fontWeight:700, fontSize:12 }}>
           <SlidersHorizontal size={14}/> Filters
         </button>
-        <button style={{ width:44, height:44, borderRadius:'50%', background:'var(--bg-surface)', border:'1px solid var(--border-card)', display:'flex', alignItems:'center', justifyContent:'center', color:'var(--text-secondary)' }}>
+        <button aria-label="Search travellers" style={{ width:44, height:44, borderRadius:'50%', background:'var(--bg-surface)', border:'1px solid var(--border-card)', display:'flex', alignItems:'center', justifyContent:'center', color:'var(--text-secondary)' }}>
           <Search size={18}/>
         </button>
       </div>
 
       {/* Chat CTA hidden -> moved to Home Quick Actions, but keep for station/train chat */}
       <div style={{ display:'flex', justifyContent:'center', marginTop:14 }}>
-        <button onClick={onOpenChat} style={{ padding:'10px 18px', borderRadius:'var(--radius-full)', background:'rgba(123,93,255,0.14)', border:'1px solid rgba(123,93,255,0.28)', color:'#C4B5FF', fontWeight:700, fontSize:12, display:'flex', alignItems:'center', gap:6 }}>
+        <button onClick={onOpenChat} style={{ padding:'10px 18px', borderRadius:'var(--radius-full)', background:'rgba(123,93,255,0.14)', border:'1px solid rgba(123,93,255,0.28)', color:'var(--accent-purple-text)', fontWeight:700, fontSize:12, display:'flex', alignItems:'center', gap:6 }}>
           <Users size={14}/> Open {room.type==='station'?'Station':'Train'} Chat
         </button>
       </div>

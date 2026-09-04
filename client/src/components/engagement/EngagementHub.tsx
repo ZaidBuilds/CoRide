@@ -11,10 +11,10 @@ import { ReactionBar } from './ReactionBar';
 type GameCard = { type: 'word_chain' | 'twenty_q' | 'trivia' | 'prompt'; label: string; hindi: string; icon: any; desc: string; time: string; players: string; color: string };
 
 const CARDS: GameCard[] = [
-  { type: 'word_chain', label: 'Word Chain', hindi: 'शब्द श्रृंखला', icon: '🔤', desc: 'Last letter → new word', time: '2-4m', players: '2-8', color: '#10b981' },
-  { type: 'twenty_q', label: '20 Questions', hindi: '20 सवाल', icon: '❓', desc: 'Guess the secret', time: '3-5m', players: '2-6', color: '#f59e0b' },
-  { type: 'trivia', label: 'Fast Trivia', hindi: 'त्वरित प्रश्न', icon: '⚡', desc: '5 Qs • 15s each', time: '2m', players: '1-8', color: '#8b5cf6' },
-  { type: 'prompt', label: 'Prompt Wall', hindi: 'विचार दीवार', icon: '💬', desc: 'Share in 40 chars', time: '4m', players: '2+', color: '#ec4899' }
+  { type: 'word_chain', label: 'Word Chain', hindi: 'शब्द श्रृंखला', icon: '🔤', desc: 'Last letter → new word', time: '2-4m', players: '2-8', color: 'var(--accent-emerald)' },
+  { type: 'twenty_q', label: '20 Questions', hindi: '20 सवाल', icon: '❓', desc: 'Guess the secret', time: '3-5m', players: '2-6', color: 'var(--accent-amber)' },
+  { type: 'trivia', label: 'Fast Trivia', hindi: 'त्वरित प्रश्न', icon: '⚡', desc: '5 Qs • 15s each', time: '2m', players: '1-8', color: 'var(--accent-violet)' },
+  { type: 'prompt', label: 'Prompt Wall', hindi: 'विचार दीवार', icon: '💬', desc: 'Share in 40 chars', time: '4m', players: '2+', color: 'var(--accent-pink)' }
 ];
 
 interface Props {
@@ -68,7 +68,7 @@ export const EngagementHub: React.FC<Props> = ({ room, snapshot, currentUser, so
           onToggle={(emoji)=> onReaction(room.id, emoji, 'profile', room.id)}
         />
         {snapshot?.activityFeed.slice(0,3).map(a => (
-          <div key={a.id} style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 6 }}>• {a.text}</div>
+          <div key={a.id} style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>• {a.text}</div>
         ))}
       </div>
 
@@ -76,8 +76,8 @@ export const EngagementHub: React.FC<Props> = ({ room, snapshot, currentUser, so
         <>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <h3 style={{ fontSize: 14, fontWeight: 900, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Gamepad2 size={16} style={{ color: 'var(--accent-indigo)' }} /> Games
-              <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 'var(--radius-full)', background: 'rgba(99,102,241,0.12)', color: 'var(--accent-indigo)', border: '1px solid rgba(99,102,241,0.2)' }}>retention support</span>
+              <Gamepad2 size={16} style={{ color: 'var(--accent-purple-text)' }} /> Games
+              <span style={{ fontSize: 11, padding: '2px 6px', borderRadius: 'var(--radius-full)', background: 'rgba(99,102,241,0.12)', color: 'var(--accent-purple-text)', border: '1px solid rgba(99,102,241,0.2)' }}>retention support</span>
             </h3>
             <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{room.userCount} in room</span>
           </div>
@@ -107,7 +107,7 @@ export const EngagementHub: React.FC<Props> = ({ room, snapshot, currentUser, so
                 <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--text-primary)', lineHeight: 1 }}>{c.label}</div>
                 <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{c.hindi}</div>
                 <div style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.2 }}>{c.desc}</div>
-                <div style={{ display: 'flex', gap: 6, marginTop: 4, fontSize: 10, color: 'var(--text-muted)' }}>
+                <div style={{ display: 'flex', gap: 6, marginTop: 4, fontSize: 11, color: 'var(--text-muted)' }}>
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}><Users size={10}/> {c.players}</span>
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}><TimerMini/> {c.time}</span>
                 </div>

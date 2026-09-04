@@ -210,3 +210,21 @@ export type RealSignalInferenceResult = ContextResult;
 export type TrainRoom = ContextRoom;
 export type CoRideRoom = ContextRoom;
 export type ZeroInputInferenceResult = ContextResult;
+
+export interface RoomPresenceTraveler {
+  id: string;
+  username: string;
+  pseudonym?: string;
+  avatarId?: string;
+  avatarBg?: string;
+  interestTags?: string[];
+  bio: string;
+  trustTier?: string;
+  presenceState: 'active';
+}
+
+export interface RoomPresenceResponse {
+  roomId: string;
+  count: number;
+  travelers: RoomPresenceTraveler[];
+}

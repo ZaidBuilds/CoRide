@@ -57,24 +57,24 @@ export const ProfileEditor: React.FC<Props> = ({ user, onClose, onSaved }) => {
     <div className="drawer-overlay" onClick={onClose}>
       <div className="drawer-panel animate-slide-up" onClick={e=>e.stopPropagation()} style={{ maxWidth: 520, maxHeight: '88vh', overflowY: 'auto' }}>
         <div style={{ width: 40, height: 4, borderRadius: 2, background: 'var(--text-muted)', margin: '0 auto 14px' }} />
-        <button onClick={onClose} style={{ position:'absolute', top:16, right:16, background:'none', border:'none', color:'var(--text-muted)', cursor:'pointer' }}><X size={20}/></button>
+        <button onClick={onClose} aria-label="Close profile editor" className="tap-target" style={{ position:'absolute', top:16, right:16, background:'none', border:'none', color:'var(--text-muted)', cursor:'pointer' }}><X size={20}/></button>
 
-        <h3 style={{ fontSize: 16, fontWeight: 900, color: 'var(--text-primary)', display:'flex', alignItems:'center', gap:6 }}><Sparkles size={16} style={{color:'var(--accent-purple)'}}/> Edit profile</h3>
+        <h3 style={{ fontSize: 16, fontWeight: 900, color: 'var(--text-primary)', display:'flex', alignItems:'center', gap:6 }}><Sparkles size={16} style={{color:'var(--accent-purple-text)'}}/> Edit profile</h3>
         <p style={{ fontSize: 11, color:'var(--text-muted)', marginTop:4 }}>Enhance discovery — better tags → better vibe matches. Visible to travelers.</p>
 
         <div style={{ marginTop:16, display:'flex', flexDirection:'column', gap:12 }}>
           <label style={{ fontSize:12, fontWeight:700, color:'var(--text-secondary)' }}>Display name (2-20 chars)
-            <input value={pseudonym} onChange={e=>setPseudonym(e.target.value)} maxLength={20} style={{ marginTop:6, width:'100%', padding:'9px 12px', borderRadius:'var(--radius-md)', background:'var(--bg-surface)', border:'1px solid var(--border-subtle)', color:'var(--text-primary)', fontSize:13 }}/>
+            <input value={pseudonym} onChange={e=>setPseudonym(e.target.value)} maxLength={20} style={{ marginTop:6, width:'100%', padding:'9px 12px', borderRadius:'var(--radius-md)', background:'var(--bg-surface)', border:'1px solid var(--border-subtle)', color:'var(--text-primary)', fontSize:16 }}/>
           </label>
           <label style={{ fontSize:12, fontWeight:700, color:'var(--text-secondary)' }}>Vibe tagline (up to 30, optional)
-            <input value={vibe} onChange={e=>setVibe(e.target.value)} maxLength={30} placeholder="e.g. Chai + Code + Cricket" style={{ marginTop:6, width:'100%', padding:'9px 12px', borderRadius:'var(--radius-md)', background:'var(--bg-surface)', border:'1px solid var(--border-subtle)', color:'var(--text-primary)', fontSize:13 }}/>
+            <input value={vibe} onChange={e=>setVibe(e.target.value)} maxLength={30} placeholder="e.g. Chai + Code + Cricket" style={{ marginTop:6, width:'100%', padding:'9px 12px', borderRadius:'var(--radius-md)', background:'var(--bg-surface)', border:'1px solid var(--border-subtle)', color:'var(--text-primary)', fontSize:16 }}/>
           </label>
           <label style={{ fontSize:12, fontWeight:700, color:'var(--text-secondary)' }}>Bio (120 chars, optional)
-            <textarea value={bio} onChange={e=>setBio(e.target.value)} maxLength={120} rows={2} placeholder="BCA student, loves metro photowalks" style={{ marginTop:6, width:'100%', padding:'9px 12px', borderRadius:'var(--radius-md)', background:'var(--bg-surface)', border:'1px solid var(--border-subtle)', color:'var(--text-primary)', fontSize:12, resize:'none' }}/>
-            <span style={{ fontSize:10, color:'var(--text-muted)' }}>{bio.length}/120</span>
+            <textarea value={bio} onChange={e=>setBio(e.target.value)} maxLength={120} rows={2} placeholder="BCA student, loves metro photowalks" style={{ marginTop:6, width:'100%', padding:'9px 12px', borderRadius:'var(--radius-md)', background:'var(--bg-surface)', border:'1px solid var(--border-subtle)', color:'var(--text-primary)', fontSize:16, resize:'none' }}/>
+            <span style={{ fontSize:11, color:'var(--text-muted)' }}>{bio.length}/120</span>
           </label>
           <label style={{ fontSize:12, fontWeight:700, color:'var(--text-secondary)' }}>College / Tag
-            <input value={college} onChange={e=>setCollege(e.target.value)} maxLength={30} placeholder="e.g. DU North Campus, Hostel" style={{ marginTop:6, width:'100%', padding:'9px 12px', borderRadius:'var(--radius-md)', background:'var(--bg-surface)', border:'1px solid var(--border-subtle)', color:'var(--text-primary)', fontSize:13 }}/>
+            <input value={college} onChange={e=>setCollege(e.target.value)} maxLength={30} placeholder="e.g. DU North Campus, Hostel" style={{ marginTop:6, width:'100%', padding:'9px 12px', borderRadius:'var(--radius-md)', background:'var(--bg-surface)', border:'1px solid var(--border-subtle)', color:'var(--text-primary)', fontSize:16 }}/>
           </label>
 
           <div>
@@ -100,7 +100,7 @@ export const ProfileEditor: React.FC<Props> = ({ user, onClose, onSaved }) => {
           </div>
 
           <label style={{ fontSize:12, fontWeight:700, color:'var(--text-secondary)' }}>Languages (comma)
-            <input value={langs.join(',')} onChange={e=>setLangs(e.target.value.split(',').map(s=>s.trim()).filter(Boolean).slice(0,3))} placeholder="en,hi" style={{ marginTop:6, width:'100%', padding:'9px 12px', borderRadius:'var(--radius-md)', background:'var(--bg-surface)', border:'1px solid var(--border-subtle)', color:'var(--text-primary)', fontSize:13 }}/>
+            <input value={langs.join(',')} onChange={e=>setLangs(e.target.value.split(',').map(s=>s.trim()).filter(Boolean).slice(0,3))} placeholder="en,hi" style={{ marginTop:6, width:'100%', padding:'9px 12px', borderRadius:'var(--radius-md)', background:'var(--bg-surface)', border:'1px solid var(--border-subtle)', color:'var(--text-primary)', fontSize:16 }}/>
           </label>
 
           <div style={{ display:'flex', gap:8, marginTop:8 }}>
@@ -108,7 +108,7 @@ export const ProfileEditor: React.FC<Props> = ({ user, onClose, onSaved }) => {
             <button onClick={save} disabled={saving} className="btn-primary" style={{ flex:1, justifyContent:'center', opacity: saving?0.6:1 }}><Save size={14}/> {saving?'Saving…':'Save'}</button>
           </div>
           {msg && <div style={{ fontSize:12, color:'var(--accent-emerald)', textAlign:'center' }}>{msg}</div>}
-          <div style={{ fontSize:10, color:'var(--text-muted)', textAlign:'center', marginTop:4 }}>Karma {user.karmaScore} • {(user as any).trustBadge || 'Regular'} • Real-time presence</div>
+          <div style={{ fontSize:11, color:'var(--text-muted)', textAlign:'center', marginTop:4 }}>Karma {user.karmaScore} • {(user as any).trustBadge || 'Regular'} • Real-time presence</div>
         </div>
       </div>
     </div>

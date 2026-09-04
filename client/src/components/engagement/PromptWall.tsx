@@ -58,16 +58,16 @@ export const PromptWall: React.FC<Props> = ({ game, currentUser, socket, roomId,
         <div style={{ fontSize: 28 }}>{game.currentPrompt.emoji}</div>
         <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--text-primary)', marginTop: 6, lineHeight: 1.3 }}>{game.currentPrompt.text}</div>
         {game.currentPrompt.textHi && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>{game.currentPrompt.textHi}</div>}
-        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 6, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{game.currentPrompt.category.replace('_',' ')}</div>
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{game.currentPrompt.category.replace('_',' ')}</div>
       </div>
 
       {!isExpired && (
         <form onSubmit={submit} style={{ display: 'flex', gap: 6 }}>
-          <input value={input} onChange={e=>setInput(e.target.value)} maxLength={40} placeholder="Your take in 40 chars… / अपना जवाब" style={{ flex: 1, padding: '10px 14px', borderRadius: 'var(--radius-md)', background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)', fontSize: 12 }} />
-          <button type="submit" className="btn-primary" style={{ padding: '10px 14px' }}><Send size={14} /></button>
+          <input value={input} onChange={e=>setInput(e.target.value)} maxLength={40} aria-label="Your answer" placeholder="Your take in 40 chars… / अपना जवाब" style={{ flex: 1, padding: '10px 14px', borderRadius: 'var(--radius-md)', background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)', fontSize: 16 }} />
+          <button type="submit" aria-label="Post answer" className="btn-primary" style={{ padding: '10px 14px' }}><Send size={14} /></button>
         </form>
       )}
-      {err && <div style={{ fontSize: 11, color: '#fda4af' }}>{err}</div>}
+      {err && <div role="alert" style={{ fontSize: 11, color: 'var(--accent-rose-text)' }}>{err}</div>}
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 700 }}>{game.submissions.length} sharings • {game.players.length} joined</span>
@@ -83,7 +83,7 @@ export const PromptWall: React.FC<Props> = ({ game, currentUser, socket, roomId,
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{ width: 22, height: 22, borderRadius: 6, background: s.avatarBg, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: 10, fontWeight: 800 }}>{s.pseudonym[0]}</span>
                 <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>{s.pseudonym}</span>
-                <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{new Date(s.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{new Date(s.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
               </div>
               <div style={{ fontSize: 13, color: 'var(--text-primary)', lineHeight: 1.4, wordBreak: 'break-word' }}>{s.content}</div>
               <ReactionBar targetId={s.id} targetType="submission" roomId={roomId} counts={rs.counts} myReactions={my} onToggle={(e)=>onReaction(s.id, e)} compact />

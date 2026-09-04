@@ -1,6 +1,14 @@
-import { MessageCircle, Gamepad2, Sparkles, PenLine, Train, Shield, Bell } from 'lucide-react';
+import { MessageCircle, Gamepad2, Sparkles, PenLine, Train, Shield, Bell, Users } from 'lucide-react';
+import { ThemeToggle } from './ThemeToggle';
 import type { UserProfile, ContextRoom, RankedTraveler } from '../types';
 import type { EngagementSnapshot } from '../types/engagement';
+
+/** CoRide peaks on the evening commute as much as the morning — greeting follows the clock. */
+function greetingFor(hour: number): string {
+  if (hour < 12) return 'Good Morning';
+  if (hour < 17) return 'Good Afternoon';
+  return 'Good Evening';
+}
 
 interface Props {
   user: UserProfile | null;
@@ -13,10 +21,12 @@ interface Props {
   onViewAllPeople: () => void;
   onQuickAction: (action: 'chat' | 'quiz' | 'icebreaker' | 'post') => void;
   onJoinRoom: (roomId: string) => void;
+  onOpenRoom?: (roomId?: string) => void;
   onShowNotifications?: () => void;
 }
 
-export const HomeScreen: React.FC<Props> = ({ user, contextStationName, contextLineName, stationRoom, trainRoom, vibe, engagement, onViewAllPeople, onQuickAction, onJoinRoom }) => {
+export const HomeScreen: React.FC<Props> = ({ user, contextStationName, contextLineName, stationRoom, trainRoom, vibe, engagement, onViewAllPeople, onQuickAction, onJoinRoom, onOpenRoom }) => {
+  const greeting = greetingFor(new Date().getHours());
   const nearbyCount = stationRoom?.userCount || trainRoom?.userCount || 0;
   const line = contextLineName || trainRoom?.lineName || 'Blue Line';
   const station = contextStationName || trainRoom?.stationName || 'Rajiv Chowk';
@@ -51,27 +61,29 @@ export const HomeScreen: React.FC<Props> = ({ user, contextStationName, contextL
   }
   // fallback demo rooms if empty
   if (activeRooms.length===0) {
+    activeRooms.push({ id:'rajiv_chowk:blue:towards_noida', title:'Rajiv Chowk · Blue Line 🚇', desc:'Live presence · 15 active commuters', emoji:'🚇', count: 15 });
     activeRooms.push({ id:'demo1', title:'Friday Music Vibes 🎵', desc:"Let's share some good songs!", emoji:'🎵', count:32 });
     activeRooms.push({ id:'demo2', title:'DU Students Room 🎓', desc:'North Campus peeps', emoji:'🎓', count:18 });
   }
 
   return (
     <div className="animate-fade-in" style={{ paddingBottom: 86 }}>
-      {/* Header */}
-      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom: 18 }}>
-        <div>
-          <h1 style={{ fontFamily:'Space Grotesk', fontSize:28, fontWeight:700, letterSpacing:-0.5, margin:0 }}>CoRide</h1>
-          <p style={{ fontSize:13, color:'var(--text-secondary)', marginTop:2 }}>
-            Good Morning, {user ? user.pseudonym.split('_')[0] : 'Zaid'} <span>👋</span>
+      {/* Header — sticky frosted bar; content scrolls under it */}
+      <div className="app-header">
+        <div style={{ minWidth:0 }}>
+          <h1 className="display" style={{ fontSize:24, fontWeight:700, letterSpacing:-0.6, margin:0 }}>CoRide</h1>
+          <p style={{ fontSize:13, color:'var(--text-secondary)', marginTop:1 }}>
+            {greeting}, {user ? user.pseudonym.split('_')[0] : 'there'} <span>👋</span>
           </p>
         </div>
-        <div style={{ display:'flex', gap:10 }}>
-          <button style={{ width:38,height:38, borderRadius:'50%', background:'var(--bg-surface)', border:'1px solid var(--border-subtle)', display:'flex', alignItems:'center', justifyContent:'center', color:'var(--text-secondary)' }}>
+        <div style={{ display:'flex', gap:8, flexShrink:0 }}>
+          <ThemeToggle />
+          <button aria-label="Safety centre" className="icon-btn">
             <Shield size={18} />
           </button>
-          <button style={{ width:38,height:38, borderRadius:'50%', background:'var(--bg-surface)', border:'1px solid var(--border-subtle)', display:'flex', alignItems:'center', justifyContent:'center', color:'var(--text-secondary)', position:'relative' }}>
+          <button aria-label="Notifications, unread" className="icon-btn">
             <Bell size={18} />
-            <span style={{ position:'absolute', top:4,right:6, width:8,height:8, borderRadius:'50%', background:'#8B5CF6', border:'2px solid var(--bg-surface)' }} />
+            <span className="pip" />
           </button>
         </div>
       </div>
@@ -81,95 +93,129 @@ export const HomeScreen: React.FC<Props> = ({ user, contextStationName, contextL
       </p>
 
       {/* On Ride */}
-      <div style={{ background:'#1A1033', border:'1px solid rgba(123,93,255,0.28)', borderRadius:'var(--radius-xl)', padding:14, display:'flex', alignItems:'center', gap:12, marginBottom:16 }}>
-        <div style={{ width:42,height:42, borderRadius:'50%', background:'#7B5DFF', display:'flex', alignItems:'center', justifyContent:'center', color:'white' }}>
+      <div
+        style={{
+          background:'var(--bg-accent-wash)',
+          border:'1px solid var(--border-purple)',
+          borderRadius:'var(--radius-xl)',
+          padding:14,
+          display:'flex',
+          alignItems:'center',
+          gap:12,
+          marginBottom:16,
+          cursor: onOpenRoom ? 'pointer' : 'default'
+        }}
+        onClick={() => onOpenRoom && onOpenRoom()}
+      >
+        <div className="avatar" style={{ width:42, height:42, background:'linear-gradient(135deg, var(--accent-fill-from), var(--accent-fill-to))' }}>
           <Train size={20} />
         </div>
-        <div style={{ flex:1 }}>
-          <div style={{ fontSize:12, color:'#C4B5FF', fontWeight:700 }}>On Ride</div>
-          <div style={{ fontSize:13, color:'white', fontWeight:600 }}>{line} • {station} → {next}</div>
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+            <span style={{ fontSize:13, color:'var(--accent-purple-text)', fontWeight:700 }}>On Ride · Live Presence</span>
+            <span style={{ width:6, height:6, borderRadius:'50%', background:'var(--presence-active)' }} />
+          </div>
+          <div style={{ fontSize:14, color:'var(--text-primary)', fontWeight:600 }}>{line} • {station} → {next}</div>
         </div>
-        <button className="btn-secondary" style={{ background:'transparent', border:'1px solid rgba(123,93,255,0.35)', color:'#C4B5FF', padding:'6px 12px', fontSize:12 }}>Change</button>
+        <button
+          className="btn-secondary press"
+          style={{ background:'transparent', border:'1px solid var(--border-purple)', color:'var(--accent-purple-text)', padding:'6px 12px', fontSize:13 }}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (onOpenRoom) onOpenRoom();
+          }}
+        >
+          View Room
+        </button>
       </div>
 
       {/* Around You Now */}
       <div className="glass-panel" style={{ padding:16, marginBottom:16 }}>
-        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:6 }}>
-          <h3 style={{ fontSize:14, fontWeight:800 }}>Around You Now</h3>
-          <button onClick={onViewAllPeople} style={{ background:'none', border:'none', color:'var(--accent-violet)', fontSize:12, fontWeight:700, cursor:'pointer' }}>View all</button>
+        <div className="section-head" style={{ marginBottom:6 }}>
+          <h3>Around You Now</h3>
+          <button onClick={onViewAllPeople} className="link">View all</button>
         </div>
-        <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:12 }}>
-          <div style={{ width:7,height:7, borderRadius:'50%', background:'var(--presence-active)', boxShadow:'0 0 6px var(--presence-active)' }} />
-          <span style={{ fontSize:12, color:'var(--text-secondary)', fontWeight:600 }}>{nearbyCount || 74} people nearby</span>
-        </div>
-        <div style={{ display:'flex', gap:12, overflowX:'auto', paddingBottom:4, scrollbarWidth:'none' }}>
+        {/* Only claim a live count when there is one — the old `|| 74` fallback
+            contradicted the empty state directly below it. */}
+        {nearbyCount > 0 && (
+          <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:12 }}>
+            <div style={{ width:7,height:7, borderRadius:'50%', background:'var(--presence-active)', boxShadow:'0 0 6px var(--presence-active)' }} />
+            <span style={{ fontSize:13, color:'var(--text-secondary)', fontWeight:600 }}>
+              {nearbyCount} {nearbyCount === 1 ? 'person' : 'people'} nearby
+            </span>
+          </div>
+        )}
+        <div style={{ display: aroundItems.length ? 'flex' : 'block', gap:12, overflowX:'auto', paddingBottom:4, scrollbarWidth:'none' }}>
           {aroundItems.length ? aroundItems.map(it => (
             <div key={it.id} style={{ flex:'0 0 72px', textAlign:'center' }}>
-              <div style={{ position:'relative', width:64, height:64, margin:'0 auto 6px' }}>
-                <div style={{
-                  width:64,height:64,borderRadius:'50%',
-                  background: it.bg,
-                  border:'3px solid #1A1A26',
-                  display:'flex',alignItems:'center',justifyContent:'center',
-                  color:'white', fontWeight:800, fontSize:14,
-                  boxShadow:'0 4px 16px rgba(0,0,0,0.4)'
-                }}>
+              <div className="avatar-wrap" style={{ width:64, height:64, margin:'0 auto 6px' }}>
+                <div className="avatar" style={{ width:64, height:64, background: it.bg, fontSize:15 }}>
                   {it.name[0]}
                 </div>
-                <div style={{ position:'absolute', bottom:0, right:0, width:14,height:14, borderRadius:'50%', background:'var(--presence-active)', border:'2px solid var(--bg-card)' }} />
+                <div className={`avatar-dot ${it.tier === 'nearby' ? 'nearby' : it.tier === 'other' ? 'other' : 'active'}`} />
               </div>
-              <div style={{ fontSize:12, fontWeight:700, color:'var(--text-primary)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{it.name}</div>
-              <div style={{ marginTop:4, padding:'3px 6px', borderRadius:999, background:'rgba(123,93,255,0.16)', border:'1px solid rgba(123,93,255,0.22)', color:'#C4B5FF', fontSize:10, fontWeight:800, display:'inline-block' }}>{it.match}% Match</div>
+              <div style={{ fontSize:13, fontWeight:700, color:'var(--text-primary)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{it.name}</div>
+              <span className="tag-pill active" style={{ marginTop:4, padding:'3px 8px', fontSize:11, fontWeight:800 }}>{it.match}% Match</span>
             </div>
           )) : (
-            // empty skeleton
-            [1,2,3,4,5].map(i=>(
-              <div key={i} style={{ flex:'0 0 72px', textAlign:'center', opacity:0.4 }}>
-                <div style={{ width:64,height:64, borderRadius:'50%', background:'var(--bg-surface)', margin:'0 auto 6px' }} />
-                <div style={{ fontSize:12, color:'var(--text-muted)' }}>—</div>
+            // Empty state — context + one action, rather than a row of grey voids
+            <div style={{ textAlign:'center', padding:'20px 12px' }}>
+              <div style={{ width:48,height:48, borderRadius:'50%', background:'var(--bg-surface)', border:'1px solid var(--border-card)', display:'inline-flex', alignItems:'center', justifyContent:'center', color:'var(--text-muted)', marginBottom:10 }}>
+                <Users size={22} />
               </div>
-            ))
+              <div style={{ fontSize:14, fontWeight:700, color:'var(--text-primary)' }}>Nobody nearby yet</div>
+              <div style={{ fontSize:13, color:'var(--text-muted)', marginTop:4, lineHeight:1.5 }}>
+                Set your station and we'll show who's riding with you.
+              </div>
+              <button onClick={onViewAllPeople} className="btn-secondary" style={{ marginTop:12 }}>Set my station</button>
+            </div>
           )}
         </div>
       </div>
 
       {/* Quick Actions */}
-      <h3 style={{ fontSize:14, fontWeight:800, marginBottom:10 }}>Quick Actions</h3>
+      <div className="section-head"><h3>Quick Actions</h3></div>
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:16 }}>
         {[
-          { icon: <MessageCircle size={20} color="#7B5DFF"/>, label:'Chat Room', bg:'#EDE9FF', color:'#1A1A26', action:'chat' as const },
-          { icon: <Gamepad2 size={20} color="#10B981"/>, label:'Play Quiz', bg:'#E0F7F0', color:'#1A1A26', action:'quiz' as const },
-          { icon: <Sparkles size={20} color="#F59E0B"/>, label:'Ice Breaker', bg:'#FEF3C7', color:'#1A1A26', action:'icebreaker' as const },
-          { icon: <PenLine size={20} color="#3B82F6"/>, label:'Add Post', bg:'#DBEAFE', color:'#1A1A26', action:'post' as const },
+          { icon: <MessageCircle size={20} color="var(--accent-purple)"/>,  label:'Chat Room',   bg:'var(--bg-quick-purple)',  action:'chat' as const },
+          { icon: <Gamepad2 size={20} color="var(--accent-emerald)"/>,      label:'Play Quiz',   bg:'var(--bg-quick-emerald)', action:'quiz' as const },
+          { icon: <Sparkles size={20} color="var(--accent-amber)"/>,        label:'Ice Breaker', bg:'var(--bg-quick-amber)',   action:'icebreaker' as const },
+          { icon: <PenLine size={20} color="var(--accent-blue)"/>,          label:'Add Post',    bg:'var(--bg-quick-blue)',    action:'post' as const },
         ].map(card => (
-          <button key={card.label} onClick={()=>onQuickAction(card.action)} style={{
-            background: card.bg, border:'1px solid rgba(0,0,0,0.04)', borderRadius:'var(--radius-lg)',
-            padding:16, textAlign:'left', cursor:'pointer', display:'flex', flexDirection:'column', gap:10,
-            boxShadow:'0 4px 16px rgba(0,0,0,0.12)'
-          }}>
-            <div style={{ width:36,height:36, borderRadius:10, background:'white', display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'0 2px 8px rgba(0,0,0,0.08)' }}>
-              {card.icon}
-            </div>
-            <span style={{ fontSize:13, fontWeight:800, color:card.color }}>{card.label}</span>
+          <button key={card.label} onClick={()=>onQuickAction(card.action)} className="quick-tile" style={{ background: card.bg }}>
+            <div className="chip">{card.icon}</div>
+            <span className="label">{card.label}</span>
           </button>
         ))}
       </div>
 
       {/* Active Rooms */}
-      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10 }}>
-        <h3 style={{ fontSize:14, fontWeight:800 }}>Active Rooms</h3>
-        <button onClick={onViewAllPeople} style={{ background:'none', border:'none', color:'var(--accent-violet)', fontSize:12, fontWeight:700 }}>View all</button>
+      <div className="section-head">
+        <h3>Active Rooms</h3>
+        <button onClick={onViewAllPeople} className="link">View all</button>
       </div>
       <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
         {activeRooms.map(rm=>(
           <div key={rm.id} className="glass-panel" style={{ padding:14, display:'flex', alignItems:'center', gap:12 }}>
-            <div style={{ flex:1 }}>
-              <div style={{ fontSize:13, fontWeight:800, display:'flex', alignItems:'center', gap:6 }}>
-                {rm.title} <span style={{ fontSize:11, color:'var(--text-muted)', fontWeight:500 }}>👥 {rm.count}</span>
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{ fontSize:14, fontWeight:800, display:'flex', alignItems:'center', gap:6 }}>
+                {rm.title} <span style={{ fontSize:12, color:'var(--text-muted)', fontWeight:500 }}>👥 {rm.count}</span>
               </div>
-              <div style={{ fontSize:12, color:'var(--text-muted)', marginTop:2 }}>{rm.desc}</div>
+              <div style={{ fontSize:13, color:'var(--text-muted)', marginTop:2 }}>{rm.desc}</div>
             </div>
-            <button onClick={()=>onJoinRoom(rm.id)} className="btn-primary" style={{ padding:'8px 18px', fontSize:12 }}>Join</button>
+            <button
+              onClick={() => {
+                if (rm.id.includes(':') && onOpenRoom) {
+                  onOpenRoom(rm.id);
+                } else {
+                  onJoinRoom(rm.id);
+                }
+              }}
+              className="btn-primary press"
+              style={{ padding:'8px 18px', fontSize:13 }}
+            >
+              Join
+            </button>
           </div>
         ))}
       </div>

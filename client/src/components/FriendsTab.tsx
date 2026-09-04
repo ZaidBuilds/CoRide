@@ -64,13 +64,13 @@ export const FriendsTab: React.FC<Props> = ({
         }}>
           <button
             onClick={() => onSelectFriend(null)}
+            aria-label="Back to friends list"
+            className="tap-target"
             style={{
               background: 'none',
               border: 'none',
               color: 'var(--text-muted)',
-              cursor: 'pointer',
-              padding: 4,
-              display: 'flex'
+              cursor: 'pointer'
             }}
           >
             <ArrowLeft size={20} />
@@ -134,7 +134,7 @@ export const FriendsTab: React.FC<Props> = ({
               >
                 <div className={`chat-bubble ${isMe ? 'outgoing' : 'incoming'}`}>
                   {dm.content}
-                  <div style={{ fontSize: 10, color: isMe ? 'rgba(255,255,255,0.5)' : 'var(--text-muted)', marginTop: 4, textAlign: 'right' }}>
+                  <div style={{ fontSize: 11, color: isMe ? 'rgba(255,255,255,0.5)' : 'var(--text-muted)', marginTop: 4, textAlign: 'right' }}>
                     {new Date(dm.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                   </div>
                 </div>
@@ -154,6 +154,7 @@ export const FriendsTab: React.FC<Props> = ({
             type="text"
             value={inputText}
             onChange={e => setInputText(e.target.value)}
+            aria-label={`Message ${selectedFriend.friendProfile.pseudonym}`}
             placeholder={`Message ${selectedFriend.friendProfile.pseudonym}...`}
             style={{
               flex: 1,
@@ -162,11 +163,10 @@ export const FriendsTab: React.FC<Props> = ({
               background: 'var(--bg-surface)',
               border: '1px solid var(--border-subtle)',
               color: 'var(--text-primary)',
-              fontSize: 13,
-              outline: 'none'
+              fontSize: 16
             }}
           />
-          <button type="submit" className="btn-primary" style={{ padding: '10px 14px' }}>
+          <button type="submit" className="btn-primary" aria-label="Send message" style={{ padding: '10px 14px' }}>
             <Send size={16} />
           </button>
         </form>
@@ -247,15 +247,15 @@ export const FriendsTab: React.FC<Props> = ({
                 <div style={{ flex:1, minWidth:0 }}>
                   <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 6, flexWrap:'wrap' }}>
                     {friend.friendProfile.pseudonym}
-                    <span style={{ fontSize:10, padding:'2px 6px', borderRadius:999, background: (friend.friendProfile as any).trustTier==='verified' ? 'rgba(168,85,247,0.15)' : 'rgba(16,185,129,0.12)', border:'1px solid var(--border-subtle)', color: (friend.friendProfile as any).trustTier==='trusted' ? 'var(--accent-emerald)' : 'var(--text-muted)' }}>
+                    <span style={{ fontSize:11, padding:'2px 6px', borderRadius:999, background: (friend.friendProfile as any).trustTier==='verified' ? 'rgba(168,85,247,0.15)' : 'rgba(16,185,129,0.12)', border:'1px solid var(--border-subtle)', color: (friend.friendProfile as any).trustTier==='trusted' ? 'var(--accent-emerald)' : 'var(--text-muted)' }}>
                       {(friend.friendProfile as any).trustBadge || 'Regular'}
                     </span>
-                    <span style={{ fontSize:10, color:'var(--text-muted)' }}>K {(friend.friendProfile as any).karmaScore || 100}</span>
+                    <span style={{ fontSize:11, color:'var(--text-muted)' }}>K {(friend.friendProfile as any).karmaScore || 100}</span>
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', maxWidth:200 }}>
                     {friend.friendProfile.interestTags?.join(' · ') || 'Metro commuter'} {(friend.friendProfile as any).vibeTagline ? `• ${(friend.friendProfile as any).vibeTagline}` : ''}
                   </div>
-                  {friend.friendProfile.bio && <div style={{ fontSize:10, color:'var(--text-secondary)', fontStyle:'italic', maxWidth:220, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{friend.friendProfile.bio}</div>}
+                  {friend.friendProfile.bio && <div style={{ fontSize:11, color:'var(--text-secondary)', fontStyle:'italic', maxWidth:220, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{friend.friendProfile.bio}</div>}
                 </div>
               </div>
 
@@ -263,7 +263,7 @@ export const FriendsTab: React.FC<Props> = ({
                 padding: 8,
                 borderRadius: 'var(--radius-md)',
                 background: 'rgba(99,102,241,0.1)',
-                color: 'var(--accent-indigo)'
+                color: 'var(--accent-purple-text)'
               }}>
                 <MessageCircle size={18} />
               </div>

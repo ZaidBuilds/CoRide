@@ -90,9 +90,9 @@ export const WordChainPanel: React.FC<Props> = ({ game, currentUser, socket, roo
             fontWeight: 700,
             color: p.userId === game.currentTurnUserId ? 'var(--accent-indigo)' : 'var(--text-secondary)'
           }}>
-            <span style={{ width: 18, height: 18, borderRadius: 6, background: p.avatarBg, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: 9 }}>{p.pseudonym[0]}</span>
+            <span style={{ width: 18, height: 18, borderRadius: 6, background: p.avatarBg, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: 11 }}>{p.pseudonym[0]}</span>
             {p.pseudonym}
-            <span style={{ background: 'rgba(0,0,0,0.25)', padding: '1px 6px', borderRadius: 999, fontSize: 10 }}>{p.score}</span>
+            <span style={{ background: 'rgba(0,0,0,0.25)', padding: '1px 6px', borderRadius: 999, fontSize: 11 }}>{p.score}</span>
             <span style={{ opacity: 0.7 }}>♥{(game as any).lives[p.userId] ?? 3}</span>
           </div>
         ))}
@@ -111,6 +111,7 @@ export const WordChainPanel: React.FC<Props> = ({ game, currentUser, socket, roo
           onChange={e => setInput(e.target.value.toUpperCase())}
           placeholder={isMyTurn ? `Word starting with ${needLetter}…` : `Waiting for ${turnPlayer?.pseudonym}…`}
           disabled={!isMyTurn}
+          aria-label={`Word starting with ${needLetter}`}
           style={{
             flex: 1,
             padding: '10px 14px',
@@ -118,21 +119,21 @@ export const WordChainPanel: React.FC<Props> = ({ game, currentUser, socket, roo
             background: isMyTurn ? 'var(--bg-surface)' : 'var(--bg-elevated)',
             border: '1px solid var(--border-subtle)',
             color: 'var(--text-primary)',
-            fontSize: 14,
+            fontSize: 16,
             fontWeight: 700,
             letterSpacing: '0.06em',
             opacity: isMyTurn ? 1 : 0.6
           }}
         />
-        <button type="submit" disabled={!isMyTurn || !input.trim()} className="btn-primary" style={{ padding: '10px 16px', opacity: !isMyTurn ? 0.5 : 1 }}>
+        <button type="submit" disabled={!isMyTurn || !input.trim()} aria-label="Submit word" className="btn-primary" style={{ padding: '10px 16px' }}>
           <Send size={16} />
         </button>
       </form>
-      {error && <div style={{ fontSize: 11, color: '#fda4af', background: 'rgba(244,63,94,0.08)', padding: '6px 10px', borderRadius: 'var(--radius-md)', border: '1px solid rgba(244,63,94,0.2)' }}>{error}</div>}
-      <div style={{ fontSize: 10, color: 'var(--text-muted)', textAlign: 'center' }}>
+      {error && <div role="alert" style={{ fontSize: 11, color: 'var(--accent-rose-text)', background: 'rgba(244,63,94,0.08)', padding: '6px 10px', borderRadius: 'var(--radius-md)', border: '1px solid rgba(244,63,94,0.2)' }}>{error}</div>}
+      <div style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center' }}>
         {game.usedWords.slice(-6).join(' → ')}
       </div>
-      <div style={{ fontSize: 10, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'center' }}>
+      <div style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'center' }}>
         <Timer size={10} /> 15s per turn • 3 lives • {game.players.length} players
       </div>
     </div>

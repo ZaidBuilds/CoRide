@@ -108,7 +108,7 @@ export const TriviaPanel: React.FC<Props> = ({ game, currentUser, socket, roomId
           </div>
         ))}
       </div>
-      <div style={{ fontSize: 10, color: 'var(--text-muted)', textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
+      <div style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
         <Trophy size={10}/> 15s per Q • 5 Qs • {game.players.length} playing
       </div>
     </div>

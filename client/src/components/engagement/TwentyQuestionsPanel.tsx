@@ -54,7 +54,7 @@ export const TwentyQuestionsPanel: React.FC<Props> = ({ game, currentUser, socke
           <Lightbulb size={12} /> {game.secretCategory} • Hint
         </div>
         <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--text-primary)', marginTop: 6 }}>{game.secretHint}</div>
-        {!isFinished && <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>Ask yes/no questions • Guess anytime</div>}
+        {!isFinished && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>Ask yes/no questions • Guess anytime</div>}
       </div>
 
       <div style={{ maxHeight: 180, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6, paddingRight: 2 }}>
@@ -90,15 +90,15 @@ export const TwentyQuestionsPanel: React.FC<Props> = ({ game, currentUser, socke
       ) : (
         <>
           <form onSubmit={ask} style={{ display: 'flex', gap: 6 }}>
-            <input value={q} onChange={e=>setQ(e.target.value)} maxLength={80} placeholder="Ask yes/no? e.g. Is it food?" style={{ flex: 1, padding: '9px 12px', borderRadius: 'var(--radius-md)', background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)', fontSize: 12 }} />
+            <input value={q} onChange={e=>setQ(e.target.value)} maxLength={80} aria-label="Ask a yes or no question" placeholder="Ask yes/no? e.g. Is it food?" style={{ flex: 1, padding: '9px 12px', borderRadius: 'var(--radius-md)', background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)', fontSize: 16 }} />
             <button type="submit" className="btn-primary" style={{ padding: '9px 12px', fontSize: 12 }}><HelpCircle size={14} /> Ask</button>
           </form>
           <form onSubmit={doGuess} style={{ display: 'flex', gap: 6 }}>
-            <input value={guess} onChange={e=>setGuess(e.target.value)} maxLength={30} placeholder={`Guess the ${game.secretCategory}…`} style={{ flex: 1, padding: '9px 12px', borderRadius: 'var(--radius-md)', background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)', fontSize: 12 }} />
+            <input value={guess} onChange={e=>setGuess(e.target.value)} maxLength={30} aria-label={`Guess the ${game.secretCategory}`} placeholder={`Guess the ${game.secretCategory}…`} style={{ flex: 1, padding: '9px 12px', borderRadius: 'var(--radius-md)', background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)', fontSize: 16 }} />
             <button type="submit" className="btn-secondary" style={{ padding: '9px 12px', fontSize: 12 }}>Guess</button>
           </form>
-          {err && <div style={{ fontSize: 11, color: '#fda4af' }}>{err}</div>}
-          <div style={{ fontSize: 10, color: 'var(--text-muted)', textAlign: 'center' }}>
+          {err && <div role="alert" style={{ fontSize: 11, color: 'var(--accent-rose-text)' }}>{err}</div>}
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center' }}>
             {game.guessAttempts.slice(-2).map((g,i)=> <span key={i} style={{ margin: '0 6px' }}>{g.guess} {g.correct?'✅':'❌'}</span>)}
           </div>
         </>

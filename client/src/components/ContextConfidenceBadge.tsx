@@ -29,7 +29,7 @@ export const ContextConfidenceBadge: React.FC<Props> = ({ context }) => {
         borderRadius:999,
         background:'rgba(0,0,0,0.24)',
         fontWeight:800,
-        fontSize:10,
+        fontSize:11,
         border:'1px solid rgba(255,255,255,0.06)'
       }}>
         {pct}%

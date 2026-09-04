@@ -18,8 +18,12 @@ export const ConnectScreen: React.FC<Props> = ({ currentUser, socket }) => {
   const [received, setReceived] = useState<any[]>([]);
   const [sent, setSent] = useState<any[]>([]);
   const [friends, setFriends] = useState<any[]>([]);
+  // Without this, a pending or failed fetch renders the empty state — "no requests"
+  // is indistinguishable from "server is down".
+  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
 
   const load = async () => {
+    setStatus('loading');
     try {
       const [rRecv, rSent, rFriends] = await Promise.all([
         fetch(`${API}/api/connections/pending/${currentUser.id}`).then(r=>r.json()),
@@ -29,7 +33,10 @@ export const ConnectScreen: React.FC<Props> = ({ currentUser, socket }) => {
       setReceived(rRecv.pending || []);
       setSent(rSent.sent || []);
       setFriends(rFriends.friends || []);
-    } catch {}
+      setStatus('ready');
+    } catch {
+      setStatus('error');
+    }
   };
 
   useEffect(()=>{ load(); }, [currentUser.id]);
@@ -58,7 +65,7 @@ export const ConnectScreen: React.FC<Props> = ({ currentUser, socket }) => {
         <h2 style={{ fontSize:20, fontWeight:900, display:'flex', alignItems:'center', gap:10 }}>
           Connect
         </h2>
-        <button style={{ background:'none', border:'none', color:'var(--accent-violet)', fontSize:12, fontWeight:700 }}>History</button>
+        <button style={{ background:'none', border:'none', color:'var(--accent-purple-text)', fontSize:12, fontWeight:700 }}>History</button>
       </div>
 
       {/* Tabs Received / Sent / Friends — Figma pill */}
@@ -73,7 +80,7 @@ export const ConnectScreen: React.FC<Props> = ({ currentUser, socket }) => {
             onClick={()=> setTab(t.id as Tab)}
             style={{
               flex:1, padding:'9px 0', borderRadius:'var(--radius-full)', border:'none',
-              background: tab===t.id ? '#7B5DFF' : 'transparent',
+              background: tab===t.id ? 'var(--accent-purple)' : 'transparent',
               color: tab===t.id ? 'white' : 'var(--text-muted)',
               fontSize:12, fontWeight:800, display:'flex', alignItems:'center', justifyContent:'center', gap:6, cursor:'pointer'
             }}
@@ -90,7 +97,23 @@ export const ConnectScreen: React.FC<Props> = ({ currentUser, socket }) => {
         ))}
       </div>
 
-      {tab==='received' && (
+      {status==='loading' && (
+        <div aria-busy="true" aria-label="Loading connections" style={{ display:'flex', flexDirection:'column', gap:10 }}>
+          {[0,1,2].map(i=> <div key={i} className="skeleton" style={{ height:76, borderRadius:'var(--radius-xl)' }} />)}
+        </div>
+      )}
+
+      {status==='error' && (
+        <div role="alert" style={{ textAlign:'center', padding:24, borderRadius:'var(--radius-xl)', background:'var(--bg-card)', border:'1px solid rgba(244,63,94,0.22)' }}>
+          <div style={{ fontSize:14, fontWeight:800, color:'var(--accent-rose-text)' }}>Couldn't load your connections</div>
+          <div style={{ fontSize:13, color:'var(--text-secondary)', marginTop:6, lineHeight:1.5 }}>
+            The CoRide server didn't respond. Check your internet and try again.
+          </div>
+          <button onClick={load} className="btn-primary" style={{ marginTop:14 }}>Try again</button>
+        </div>
+      )}
+
+      {status==='ready' && tab==='received' && (
         <>
           <h3 style={{ fontSize:13, fontWeight:800, marginBottom:10 }}>New Requests</h3>
           <div style={{ display:'flex', flexDirection:'column', gap:10, marginBottom:16 }}>
@@ -103,15 +126,15 @@ export const ConnectScreen: React.FC<Props> = ({ currentUser, socket }) => {
               return (
                 <div key={req.id} style={{ display:'flex', alignItems:'center', gap:12, padding:'14px', borderRadius:'var(--radius-xl)', background:'var(--bg-card)', border:'1px solid var(--border-card)' }}>
                   <div style={{ position:'relative' }}>
-                    <div style={{ width:48,height:48, borderRadius:'50%', background: p?.avatarBg || '#7B5DFF', display:'flex', alignItems:'center', justifyContent:'center', color:'white', fontWeight:800 }}>
+                    <div style={{ width:48,height:48, borderRadius:'50%', background: p?.avatarBg || 'var(--accent-purple)', display:'flex', alignItems:'center', justifyContent:'center', color:'white', fontWeight:800 }}>
                       {name[0]}
                     </div>
                     <div style={{ position:'absolute', bottom:0, right:0, width:12,height:12, borderRadius:'50%', background:'var(--presence-active)', border:'2px solid var(--bg-card)' }} />
                   </div>
                   <div style={{ flex:1, minWidth:0 }}>
                     <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-                      <span style={{ fontSize:13, fontWeight:800, color:'white' }}>{name}</span>
-                      <span style={{ fontSize:10, padding:'2px 6px', borderRadius:999, background:'rgba(234,179,8,0.14)', color:'#FDE68A', border:'1px solid rgba(234,179,8,0.22)' }}>Nearby</span>
+                      <span style={{ fontSize:13, fontWeight:800, color:'var(--text-primary)' }}>{name}</span>
+                      <span style={{ fontSize:11, padding:'2px 6px', borderRadius:999, background:'rgba(234,179,8,0.14)', color:'var(--accent-amber)', border:'1px solid rgba(234,179,8,0.22)' }}>Nearby</span>
                     </div>
                     <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:2 }}>{tags}</div>
                     <div style={{ fontSize:11, color:'var(--text-muted)', display:'flex', alignItems:'center', gap:4, marginTop:2 }}>
@@ -119,10 +142,10 @@ export const ConnectScreen: React.FC<Props> = ({ currentUser, socket }) => {
                     </div>
                   </div>
                   <div style={{ display:'flex', gap:8 }}>
-                    <button onClick={()=> decline(req.id)} style={{ width:36,height:36, borderRadius:'50%', background:'rgba(255,255,255,0.06)', border:'1px solid var(--border-subtle)', color:'var(--text-muted)', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                    <button onClick={()=> decline(req.id)} aria-label={`Decline request from ${name}`} style={{ width:44,height:44, borderRadius:'50%', background:'var(--bg-overlay)', border:'1px solid var(--border-subtle)', color:'var(--text-muted)', display:'flex', alignItems:'center', justifyContent:'center' }}>
                       <X size={16}/>
                     </button>
-                    <button onClick={()=> accept(req.id)} style={{ width:36,height:36, borderRadius:'50%', background:'#7B5DFF', border:'none', color:'white', display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'0 4px 12px rgba(123,93,255,0.35)' }}>
+                    <button onClick={()=> accept(req.id)} aria-label={`Accept request from ${name}`} style={{ width:44,height:44, borderRadius:'50%', background:'var(--accent-purple)', border:'none', color:'white', display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'0 4px 12px rgba(123,93,255,0.35)' }}>
                       <Check size={16}/>
                     </button>
                   </div>
@@ -140,13 +163,13 @@ export const ConnectScreen: React.FC<Props> = ({ currentUser, socket }) => {
                 <div key={req.id} style={{ display:'flex', alignItems:'center', gap:12, padding:'14px', borderRadius:'var(--radius-xl)', background:'var(--bg-card)', border:'1px solid var(--border-card)' }}>
                   <div style={{ width:48,height:48, borderRadius:'50%', background: p?.avatarBg || '#6366F1', display:'flex', alignItems:'center', justifyContent:'center', color:'white', fontWeight:800 }}>{name[0]}</div>
                   <div style={{ flex:1 }}>
-                    <div style={{ fontSize:13, fontWeight:800, color:'white' }}>{name}</div>
+                    <div style={{ fontSize:13, fontWeight:800, color:'var(--text-primary)' }}>{name}</div>
                     <div style={{ fontSize:11, color:'var(--text-muted)' }}>{p?.interestTags?.join(' • ') || 'Music • Coding • Meme'}</div>
                     <div style={{ fontSize:11, color:'var(--text-muted)', display:'flex', alignItems:'center', gap:4 }}><TrainMini/> Blue Line • Rajiv Chowk → Noida</div>
                   </div>
                   <div style={{ textAlign:'right' }}>
-                    <div style={{ fontSize:11, padding:'4px 8px', borderRadius:999, background:'rgba(245,158,11,0.14)', color:'#FDE68A', border:'1px solid rgba(245,158,11,0.22)', fontWeight:700 }}>Pending</div>
-                    <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:4 }}>{new Date(req.createdAt).toLocaleTimeString([],{hour:'2-digit', minute:'2-digit'})}</div>
+                    <div style={{ fontSize:11, padding:'4px 8px', borderRadius:999, background:'rgba(245,158,11,0.14)', color:'var(--accent-amber)', border:'1px solid rgba(245,158,11,0.22)', fontWeight:700 }}>Pending</div>
+                    <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:4 }}>{new Date(req.createdAt).toLocaleTimeString([],{hour:'2-digit', minute:'2-digit'})}</div>
                   </div>
                 </div>
               );
@@ -155,7 +178,7 @@ export const ConnectScreen: React.FC<Props> = ({ currentUser, socket }) => {
         </>
       )}
 
-      {tab==='sent' && (
+      {status==='ready' && tab==='sent' && (
         <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
           {sent.length===0 ? <div style={{ textAlign:'center', padding:24, color:'var(--text-muted)', fontSize:12 }}>No sent requests yet — tap a traveler to send one</div> : sent.map((req:any)=>{
             const p = req.toProfile as UserProfile | undefined;
@@ -164,26 +187,26 @@ export const ConnectScreen: React.FC<Props> = ({ currentUser, socket }) => {
               <div key={req.id} style={{ display:'flex', alignItems:'center', gap:12, padding:'14px', borderRadius:'var(--radius-xl)', background:'var(--bg-card)', border:'1px solid var(--border-card)' }}>
                 <div style={{ width:48,height:48, borderRadius:'50%', background: p?.avatarBg || '#6366F1', display:'flex', alignItems:'center', justifyContent:'center', color:'white', fontWeight:800 }}>{name[0]}</div>
                 <div style={{ flex:1 }}>
-                  <div style={{ fontSize:13, fontWeight:800, color:'white' }}>{name}</div>
+                  <div style={{ fontSize:13, fontWeight:800, color:'var(--text-primary)' }}>{name}</div>
                   <div style={{ fontSize:11, color:'var(--text-muted)' }}>{p?.interestTags?.join(' • ') || 'Music • Coding'}</div>
                 </div>
-                <span style={{ fontSize:11, padding:'4px 8px', borderRadius:999, background:'rgba(245,158,11,0.14)', color:'#FDE68A', border:'1px solid rgba(245,158,11,0.22)', fontWeight:700 }}>Pending</span>
+                <span style={{ fontSize:11, padding:'4px 8px', borderRadius:999, background:'rgba(245,158,11,0.14)', color:'var(--accent-amber)', border:'1px solid rgba(245,158,11,0.22)', fontWeight:700 }}>Pending</span>
               </div>
             );
           })}
         </div>
       )}
 
-      {tab==='friends' && (
+      {status==='ready' && tab==='friends' && (
         <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
           {friends.length===0 ? <div style={{ textAlign:'center', padding:24, color:'var(--text-muted)', fontSize:12 }}>No Metro Friends yet — accept a request to start chatting</div> : friends.map((f:any)=>(
             <div key={f.id} style={{ display:'flex', alignItems:'center', gap:12, padding:'14px', borderRadius:'var(--radius-xl)', background:'var(--bg-card)', border:'1px solid var(--border-card)' }}>
               <div style={{ width:48,height:48, borderRadius:'50%', background: f.profile.avatarBg, display:'flex', alignItems:'center', justifyContent:'center', color:'white', fontWeight:800 }}>{f.profile.pseudonym[0]}</div>
               <div style={{ flex:1 }}>
-                <div style={{ fontSize:13, fontWeight:800, color:'white', display:'flex', alignItems:'center', gap:6 }}>{f.profile.pseudonym} <ShieldCheck size={12} style={{ color:'var(--accent-emerald)' }} /></div>
+                <div style={{ fontSize:13, fontWeight:800, color:'var(--text-primary)', display:'flex', alignItems:'center', gap:6 }}>{f.profile.pseudonym} <ShieldCheck size={12} style={{ color:'var(--accent-emerald)' }} /></div>
                 <div style={{ fontSize:11, color:'var(--text-muted)' }}>{f.profile.interestTags?.join(' • ')}</div>
               </div>
-              <div style={{ width:36,height:36, borderRadius:'50%', background:'rgba(123,93,255,0.14)', border:'1px solid rgba(123,93,255,0.22)', display:'flex', alignItems:'center', justifyContent:'center', color:'#7B5DFF' }}>
+              <div style={{ width:36,height:36, borderRadius:'50%', background:'rgba(123,93,255,0.14)', border:'1px solid rgba(123,93,255,0.22)', display:'flex', alignItems:'center', justifyContent:'center', color:'var(--accent-purple-text)' }}>
                 <Heart size={16}/>
               </div>
             </div>
@@ -192,12 +215,12 @@ export const ConnectScreen: React.FC<Props> = ({ currentUser, socket }) => {
       )}
 
       {/* Safe Connections */}
-      <div style={{ marginTop:16, background:'linear-gradient(135deg, #1A1033, #1E1A3A)', border:'1px solid rgba(123,93,255,0.22)', borderRadius:'var(--radius-lg)', padding:14, display:'flex', gap:10, alignItems:'center' }}>
-        <div style={{ width:36,height:36, borderRadius:'50%', background:'#1A1033', border:'1px solid rgba(123,93,255,0.28)', display:'flex', alignItems:'center', justifyContent:'center', color:'#7B5DFF' }}>
+      <div style={{ marginTop:16, background:'linear-gradient(135deg, var(--bg-accent-wash), var(--bg-accent-wash-2))', border:'1px solid rgba(123,93,255,0.22)', borderRadius:'var(--radius-lg)', padding:14, display:'flex', gap:10, alignItems:'center' }}>
+        <div style={{ width:36,height:36, borderRadius:'50%', background:'var(--bg-accent-wash)', border:'1px solid rgba(123,93,255,0.28)', display:'flex', alignItems:'center', justifyContent:'center', color:'var(--accent-purple-text)' }}>
           <ShieldCheck size={18}/>
         </div>
         <div style={{ flex:1 }}>
-          <div style={{ fontSize:12, fontWeight:800, color:'white' }}>Safe Connections</div>
+          <div style={{ fontSize:12, fontWeight:800, color:'var(--text-primary)' }}>Safe Connections</div>
           <div style={{ fontSize:11, color:'var(--text-muted)' }}>We keep CoRide safe for everyone. Report or block if something feels off.</div>
         </div>
         <span style={{ color:'var(--text-muted)' }}>›</span>
@@ -213,9 +236,9 @@ export const ConnectScreen: React.FC<Props> = ({ currentUser, socket }) => {
             { title:'3. You’re Connected', desc:'Start chatting and become Metro Friends!', icon:'👥' },
           ].map(s=>(
             <div key={s.title} style={{ flex:1, background:'var(--bg-card)', border:'1px solid var(--border-card)', borderRadius:'var(--radius-lg)', padding:12, textAlign:'center' }}>
-              <div style={{ width:36,height:36, borderRadius:'50%', background:'rgba(123,93,255,0.14)', border:'1px solid rgba(123,93,255,0.22)', display:'flex', alignItems:'center', justifyContent:'center', margin:'0 auto 8px', color:'#7B5DFF' }}>{s.icon}</div>
-              <div style={{ fontSize:11, fontWeight:800, color:'white' }}>{s.title}</div>
-              <div style={{ fontSize:10, color:'var(--text-muted)', marginTop:4, lineHeight:1.3 }}>{s.desc}</div>
+              <div style={{ width:36,height:36, borderRadius:'50%', background:'rgba(123,93,255,0.14)', border:'1px solid rgba(123,93,255,0.22)', display:'flex', alignItems:'center', justifyContent:'center', margin:'0 auto 8px', color:'var(--accent-purple-text)' }}>{s.icon}</div>
+              <div style={{ fontSize:11, fontWeight:800, color:'var(--text-primary)' }}>{s.title}</div>
+              <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:4, lineHeight:1.3 }}>{s.desc}</div>
             </div>
           ))}
         </div>

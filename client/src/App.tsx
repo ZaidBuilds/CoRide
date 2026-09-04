@@ -18,8 +18,10 @@ import { ProfileDrawer } from './components/ProfileDrawer';
 import { OnboardingScreen } from './components/OnboardingScreen';
 import { DiscoverAroundYou } from './components/DiscoverAroundYou';
 import { ChatsScreen } from './components/ChatsScreen';
+import { DirectChatScreen } from './components/DirectChatScreen';
 import { LiveTrackingScreen } from './components/LiveTrackingScreen';
 import { ProfileStatsScreen } from './components/ProfileStatsScreen';
+import { RoomScreen } from './components/RoomScreen';
 import { useCommuteNotifications } from './hooks/useCommuteNotifications';
 import { track } from './utils/analytics';
 import type { EngagementSnapshot } from './types/engagement';
@@ -33,7 +35,7 @@ import type {
 
 const API = 'http://localhost:4000';
 
-type View = 'home' | 'people' | 'discover' | 'liveTracking' | 'chat' | 'chats' | 'connect' | 'profile' | 'friends';
+type View = 'home' | 'people' | 'discover' | 'liveTracking' | 'chat' | 'chats' | 'connect' | 'profile' | 'friends' | 'room';
 
 export function App() {
   const [socket, setSocket] = useState<Socket | null>(null);
@@ -59,6 +61,7 @@ export function App() {
   // used to silence noUnusedLocals for demo state
   const _keep1 = beachhead; const _keep2 = setSelectedFriend; void _keep1; void _keep2;
   const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null);
+  const [selectedPresenceRoomId, setSelectedPresenceRoomId] = useState<string>('rajiv_chowk:blue:towards_noida');
   const routeHistoryRef = useRef<{ lat: number; lng: number; t: number }[]>([]);
   const lastPosRef = useRef<{ lat: number; lng: number } | null>(null);
   const { permission: pushPermission, isLive: commuteLive, requestPermission: requestPush } = useCommuteNotifications(!!user);
@@ -468,7 +471,7 @@ export function App() {
   const activeRoom = view === 'chat' ? (chatTarget === 'station' ? stationRoom : trainRoom) : null;
   const friendIds = friends.map(f => f.friendId);
   const activePeopleRoom = trainRoom || stationRoom;
-  const navActive: NavView = view === 'home' ? 'home' : view === 'people' || view === 'discover' || view === 'liveTracking' || view === 'connect' ? 'people' : view === 'chats' || view === 'chat' || view === 'friends' ? 'chats' : view === 'profile' ? 'profile' : 'home';
+  const navActive: NavView = view === 'home' ? 'home' : view === 'people' || view === 'discover' || view === 'liveTracking' || view === 'connect' || view === 'room' ? 'people' : view === 'chats' || view === 'chat' || view === 'friends' ? 'chats' : view === 'profile' ? 'profile' : 'home';
 
   const handleBottomNav = (v: NavView) => {
     if (v === 'home') setView('home');
@@ -508,7 +511,6 @@ export function App() {
       {/* Home */}
       {view === 'home' && (
         <>
-          <div style={{ height: 8 }} />
           <HomeScreen
             user={user}
             contextStationName={context?.stationName}
@@ -519,6 +521,10 @@ export function App() {
             engagement={engagement}
             onViewAllPeople={()=> setView('people')}
             onQuickAction={handleHomeQuick}
+            onOpenRoom={(roomId)=> {
+              if (roomId) setSelectedPresenceRoomId(roomId);
+              setView('room');
+            }}
             onJoinRoom={(roomId)=> {
               const room = stationRoom?.id===roomId ? stationRoom : trainRoom?.id===roomId ? trainRoom : null;
               if (room) { setChatTarget(room.type==='train'?'train':'station'); setView('chat'); }
@@ -562,7 +568,7 @@ export function App() {
             <div style={{ marginTop:12, display:'flex', flexDirection:'column', gap:8, padding:'10px 12px', borderRadius:'var(--radius-md)', background:'var(--bg-surface)', border:'1px solid var(--border-subtle)' }}>
               <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
                 <span style={{ display:'flex', alignItems:'center', gap:6, fontSize:11, color:'var(--text-muted)' }}><Radio size={12} style={{ color: hasManualOverride?'var(--accent-emerald)':'var(--accent-blue)' }}/> {hasManualOverride?'Confirmed':'Auto'}: <strong style={{ color:'var(--text-primary)' }}>{context.stationName}</strong></span>
-                <button onClick={()=> setShowStationPicker(true)} style={{ background:'none', border:'none', color:'var(--accent-violet)', fontSize:11, fontWeight:700 }}>Change</button>
+                <button onClick={()=> setShowStationPicker(true)} style={{ background:'none', border:'none', color:'var(--accent-purple-text)', fontSize:11, fontWeight:700 }}>Change</button>
               </div>
               <ContextConfidenceBadge context={context} />
             </div>
@@ -606,33 +612,19 @@ export function App() {
       {view === 'chats' && user && (
         <>
           {selectedFriend ? (
-            <div style={{ paddingBottom: 12 }}>
-              <button onClick={()=> setSelectedFriend(null)} style={{ marginBottom:12, background:'var(--bg-surface)', border:'1px solid var(--border-subtle)', color:'var(--text-secondary)', padding:'8px 12px', borderRadius:999, fontSize:12, display:'flex', alignItems:'center', gap:6 }}>
-                ← Back to Chats
-              </button>
-              <div className="glass-panel" style={{ padding:16 }}>
-                <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:12 }}>
-                  <div style={{ width:36,height:36, borderRadius:'50%', background: selectedFriend.friendProfile.avatarBg, display:'flex', alignItems:'center', justifyContent:'center', color:'white', fontWeight:800 }}>{selectedFriend.friendProfile.pseudonym[0]}</div>
-                  <div>
-                    <div style={{ fontWeight:800, color:'white' }}>{selectedFriend.friendProfile.pseudonym}</div>
-                    <div style={{ fontSize:11, color:'var(--text-muted)' }}>Metro Friend • Real-time</div>
-                  </div>
-                </div>
-                <div style={{ maxHeight: 320, overflowY:'auto', display:'flex', flexDirection:'column', gap:8, marginBottom:12 }}>
-                  {friendDMs.filter(dm=> (dm.senderId===user.id && dm.receiverId===selectedFriend.friendId) || (dm.senderId===selectedFriend.friendId && dm.receiverId===user.id)).map(dm=>{
-                    const isMe = dm.senderId===user.id;
-                    return (
-                      <div key={dm.id} style={{ alignSelf: isMe?'flex-end':'flex-start', maxWidth:'78%', padding:'10px 14px', borderRadius: isMe?'18px 18px 6px 18px':'18px 18px 18px 6px', background: isMe?'#7B5DFF':'var(--bg-surface)', border: isMe?'none':'1px solid var(--border-subtle)', color: isMe?'white':'var(--text-primary)', fontSize:13 }}>
-                        {dm.content}
-                      </div>
-                    );
-                  })}
-                </div>
-                <form onSubmit={(e)=>{ e.preventDefault(); const inp=(e.target as any).elements.msg.value; if(!inp.trim())return; handleSendDM(selectedFriend.friendId, inp.trim()); (e.target as any).elements.msg.value=''; }} style={{ display:'flex', gap:8 }}>
-                  <input name="msg" placeholder={`Message ${selectedFriend.friendProfile.pseudonym}...`} style={{ flex:1, padding:'10px 14px', borderRadius:999, background:'var(--bg-surface)', border:'1px solid var(--border-subtle)', color:'white', fontSize:13 }} />
-                  <button type="submit" style={{ width:36,height:36, borderRadius:'50%', background:'#7B5DFF', border:'none', color:'white', display:'flex', alignItems:'center', justifyContent:'center' }}>➤</button>
-                </form>
-              </div>
+            // Full-screen overlay so the 100dvh chat escapes the padded app shell
+            // and sits above the bottom nav.
+            <div className="animate-push" style={{ position:'fixed', inset:0, left:0, right:0, maxWidth:520, margin:'0 auto', zIndex:60, background:'var(--bg-base)' }}>
+              <DirectChatScreen
+                currentUser={user}
+                peer={{
+                  id: selectedFriend.friendId,
+                  pseudonym: selectedFriend.friendProfile.pseudonym,
+                  username: selectedFriend.friendProfile.username,
+                  avatarBg: selectedFriend.friendProfile.avatarBg
+                }}
+                onBack={()=> setSelectedFriend(null)}
+              />
             </div>
           ) : (
             <ChatsScreen
@@ -668,6 +660,17 @@ export function App() {
         <ProfileStatsScreen user={user} />
       )}
 
+      {/* Live Room Presence Screen */}
+      {view === 'room' && (
+        <RoomScreen
+          currentUser={user}
+          initialRoomId={selectedPresenceRoomId}
+          onBack={()=> setView('home')}
+          onProfileOpen={(u)=> setSelectedUser(u)}
+          onConnect={(targetId)=> handleConnect(targetId)}
+        />
+      )}
+
 
 
       {/* Profile editor overlay */}
@@ -694,18 +697,18 @@ export function App() {
         <StationPicker onConfirm={(st,_line)=> handleStationPicked(st)} onDismiss={()=> setShowStationPicker(false)} />
       )}
 
-      {/* Toast */}
+      {/* Toast — announced to screen readers */}
       {toast && (
-        <div style={{ position:'fixed', bottom:86, left:'50%', transform:'translateX(-50%)', padding:'10px 18px', borderRadius:999, background:'var(--bg-elevated)', border:'1px solid var(--border-card)', color:'white', fontSize:12, fontWeight:700, boxShadow:'0 8px 32px rgba(0,0,0,0.5)', zIndex:100 }}>
+        <div role="status" aria-live="polite" className="glass animate-fade-in" style={{ position:'fixed', bottom:'calc(86px + env(safe-area-inset-bottom))', left:'50%', transform:'translateX(-50%)', padding:'10px 18px', borderRadius:999, color:'var(--text-primary)', fontSize:13, fontWeight:700, zIndex:100 }}>
           {toast}
         </div>
       )}
 
       {/* Commute window push banner (subtle) */}
       {commuteLive && pushPermission!=='granted' && pushPermission!=='denied' && view==='home' && (
-        <div style={{ position:'fixed', bottom:86, left:12, right:12, maxWidth:520, margin:'0 auto', background:'linear-gradient(135deg, #1A1033, #1E1A3A)', border:'1px solid rgba(123,93,255,0.28)', borderRadius:'var(--radius-lg)', padding:'10px 12px', display:'flex', alignItems:'center', gap:8, zIndex:39 }}>
-          <span style={{ fontSize:12, color:'white', fontWeight:700, flex:1 }}>Commute window live — 38+ online</span>
-          <button onClick={requestPush} style={{ padding:'6px 12px', borderRadius:999, background:'#7B5DFF', color:'white', border:'none', fontWeight:800, fontSize:11 }}>Enable</button>
+        <div style={{ position:'fixed', bottom:'calc(86px + env(safe-area-inset-bottom))', left:12, right:12, maxWidth:520, margin:'0 auto', background:'linear-gradient(135deg, var(--bg-accent-wash), var(--bg-accent-wash-2))', border:'1px solid var(--border-purple)', borderRadius:'var(--radius-lg)', padding:'10px 12px', display:'flex', alignItems:'center', gap:8, zIndex:39, boxShadow:'var(--shadow-md)' }}>
+          <span style={{ fontSize:13, color:'var(--text-primary)', fontWeight:700, flex:1 }}>Commute window live — 38+ online</span>
+          <button onClick={requestPush} className="btn-primary press" style={{ padding:'8px 14px', fontSize:13 }}>Enable</button>
         </div>
       )}
 

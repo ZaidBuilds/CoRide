@@ -45,14 +45,14 @@ export const ChatView: React.FC<Props> = ({ room, currentUser, onSendMessage, on
   const nearby = room.presence?.nearby ?? 3;
 
   return (
-    <div className="glass-panel animate-fade-in" style={{ position:'relative', display:'flex', flexDirection:'column', height:'calc(100vh - 72px)', maxHeight: 800, overflow:'hidden', background:'#12121A', border:'1px solid var(--border-card)', borderRadius:'var(--radius-xl)' }}>
+    <div className="glass-panel animate-fade-in" style={{ position:'relative', display:'flex', flexDirection:'column', height:'calc(100vh - 72px)', maxHeight: 800, overflow:'hidden', background:'var(--bg-elevated)', border:'1px solid var(--border-card)', borderRadius:'var(--radius-xl)' }}>
       {/* Header — Figma 04 */}
-      <div style={{ padding:'12px 14px', borderBottom:'1px solid var(--border-subtle)', display:'flex', alignItems:'center', gap:12, background:'rgba(19,19,30,0.9)' }}>
-        <button onClick={onBack} style={{ width:32,height:32, borderRadius:'50%', background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.06)', color:'white', display:'flex', alignItems:'center', justifyContent:'center' }}>
+      <div style={{ padding:'12px 14px', borderBottom:'1px solid var(--border-subtle)', display:'flex', alignItems:'center', gap:12, background:'var(--glass-bg)' }}>
+        <button onClick={onBack} aria-label="Back" className="icon-btn">
           <ArrowLeft size={18}/>
         </button>
         <div style={{ flex:1, textAlign:'center' }}>
-          <div style={{ fontSize:14, fontWeight:800, color:'white', display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}>
+          <div style={{ fontSize:14, fontWeight:800, color:'var(--text-primary)', display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}>
             {room.lineName} <span style={{ opacity:0.6 }}>•</span> {(room.direction?.replace('Towards ','') || 'Noida Bound').split(' ')[0]} Bound
           </div>
           <div style={{ fontSize:11, color:'var(--text-secondary)', marginTop:1 }}>{room.stationName} → Mandi House</div>
@@ -61,26 +61,26 @@ export const ChatView: React.FC<Props> = ({ room, currentUser, onSendMessage, on
           <span style={{ display:'flex', alignItems:'center', gap:4, fontSize:12, color:'var(--text-secondary)', fontWeight:700 }}>
             <Users size={14}/> {online}
           </span>
-          <button style={{ width:32,height:32, borderRadius:'50%', background:'transparent', border:'none', color:'var(--text-muted)' }}><MoreVertical size={18}/></button>
+          <button aria-label="Room options" style={{ width:44,height:44, borderRadius:'50%', background:'transparent', border:'none', color:'var(--text-muted)' }}><MoreVertical size={18}/></button>
         </div>
       </div>
 
       {/* Status bar */}
       <div style={{ margin: '10px 12px 0', padding:'10px 12px', borderRadius:'var(--radius-lg)', background:'var(--bg-surface)', border:'1px solid var(--border-subtle)', display:'flex', alignItems:'center', justifyContent:'space-between', gap:8 }}>
         <div style={{ display:'flex', alignItems:'center', gap:8, fontSize:12, color:'var(--text-secondary)' }}>
-          <Train size={16} style={{ color:'var(--accent-violet)' }} />
+          <Train size={16} style={{ color:'var(--accent-purple-text)' }} />
           <div>
-            <div style={{ fontWeight:700, color:'white', fontSize:12 }}>{stopsLeft} stops left</div>
-            <div style={{ fontSize:10, color:'var(--text-muted)' }}>to Noida Sec 18</div>
+            <div style={{ fontWeight:700, color:'var(--text-primary)', fontSize:12 }}>{stopsLeft} stops left</div>
+            <div style={{ fontSize:11, color:'var(--text-muted)' }}>to Noida Sec 18</div>
           </div>
         </div>
         <div style={{ textAlign:'center', fontSize:12 }}>
-          <div style={{ display:'flex', alignItems:'center', gap:6, justifyContent:'center', color:'white', fontWeight:700 }}>
+          <div style={{ display:'flex', alignItems:'center', gap:6, justifyContent:'center', color:'var(--text-primary)', fontWeight:700 }}>
             <span style={{ width:7,height:7, borderRadius:'50%', background:'var(--presence-active)', display:'inline-block' }} /> {online} online
           </div>
-          <div style={{ fontSize:10, color:'var(--text-muted)' }}>{nearby} nearby</div>
+          <div style={{ fontSize:11, color:'var(--text-muted)' }}>{nearby} nearby</div>
         </div>
-        <button style={{ padding:'6px 10px', borderRadius:999, background:'rgba(123,93,255,0.14)', border:'1px solid rgba(123,93,255,0.28)', color:'#C4B5FF', fontSize:11, fontWeight:700, display:'flex', alignItems:'center', gap:4 }}>
+        <button style={{ padding:'6px 10px', borderRadius:999, background:'rgba(123,93,255,0.14)', border:'1px solid rgba(123,93,255,0.28)', color:'var(--accent-purple-text)', fontSize:11, fontWeight:700, display:'flex', alignItems:'center', gap:4 }}>
           <Users size={12}/> Room Info
         </button>
       </div>
@@ -88,12 +88,12 @@ export const ChatView: React.FC<Props> = ({ room, currentUser, onSendMessage, on
       {/* Pinned */}
       {showPinned && (
         <div style={{ margin:'10px 12px 0', padding:'10px 12px', borderRadius:'var(--radius-lg)', background:'rgba(123,93,255,0.10)', border:'1px solid rgba(123,93,255,0.18)', display:'flex', gap:8, alignItems:'flex-start' }}>
-          <span style={{ color:'#8B5CF6', marginTop:2 }}>📌</span>
+          <span style={{ color:'var(--accent-purple-text)', marginTop:2 }}>📌</span>
           <div style={{ flex:1 }}>
-            <div style={{ fontSize:12, fontWeight:800, color:'#C4B5FF' }}>Room pinned</div>
+            <div style={{ fontSize:12, fontWeight:800, color:'var(--accent-purple-text)' }}>Room pinned</div>
             <div style={{ fontSize:11, color:'var(--text-secondary)', marginTop:2 }}>Be respectful and keep the vibe fun! No abuse, no spam, no personal info.</div>
           </div>
-          <button onClick={()=>setShowPinned(false)} style={{ background:'none', border:'none', color:'var(--text-muted)' }}><X size={14}/></button>
+          <button onClick={()=>setShowPinned(false)} aria-label="Dismiss pinned message" className="tap-target" style={{ background:'none', border:'none', color:'var(--text-muted)' }}><X size={14}/></button>
         </div>
       )}
 
@@ -104,12 +104,13 @@ export const ChatView: React.FC<Props> = ({ room, currentUser, onSendMessage, on
           if (msg.isSystem) {
             const isGame = (msg as any).type==='game_alert';
             return (
-              <div key={msg.id} style={{
-                alignSelf:'center',
-                background: isGame ? 'rgba(123,93,255,0.12)' : 'transparent',
-                border: isGame ? '1px solid rgba(123,93,255,0.18)' : 'none',
-                color: isGame ? '#C4B5FF' : 'var(--text-muted)',
-                fontSize:11, padding: isGame ? '6px 12px' : '4px 12px', borderRadius:999, textAlign:'center'
+              <div key={msg.id} className="chat-bubble system" style={{
+                alignSelf:'center', borderRadius:999,
+                ...(isGame ? {
+                  background:'rgba(123,93,255,0.12)',
+                  border:'1px solid rgba(123,93,255,0.18)',
+                  color:'var(--accent-purple-text)'
+                } : {})
               }}>
                 {msg.content}
               </div>
@@ -120,7 +121,7 @@ export const ChatView: React.FC<Props> = ({ room, currentUser, onSendMessage, on
             <div key={msg.id} style={{ display:'flex', gap:10, flexDirection: isMe ? 'row-reverse' : 'row', alignItems:'flex-start' }}>
               <div style={{
                 width:36,height:36, borderRadius:'50%',
-                background: isMe ? 'linear-gradient(135deg, #7B5DFF, #EC4899)' : msg.senderAvatarBg,
+                background: isMe ? 'linear-gradient(135deg, var(--accent-fill-from), var(--accent-fill-to))' : msg.senderAvatarBg,
                 display:'flex', alignItems:'center', justifyContent:'center', color:'white', fontWeight:800, fontSize:12, flexShrink:0,
                 border:'2px solid rgba(255,255,255,0.06)'
               }}>
@@ -129,17 +130,16 @@ export const ChatView: React.FC<Props> = ({ room, currentUser, onSendMessage, on
               <div style={{ maxWidth:'72%', display:'flex', flexDirection:'column', gap:6, alignItems: isMe ? 'flex-end' : 'flex-start' }}>
                 <div style={{ display:'flex', alignItems:'center', gap:6, fontSize:11, color:'var(--text-muted)' }}>
                   <span style={{ fontWeight:700, color:'var(--text-primary)', fontSize:12 }}>{isMe ? 'You' : msg.senderPseudonym}</span>
-                  {isAdmin && <span style={{ fontSize:10, padding:'2px 6px', borderRadius:999, background:'rgba(123,93,255,0.18)', color:'#C4B5FF', border:'1px solid rgba(123,93,255,0.28)' }}>Admin</span>}
-                  <span style={{ fontSize:10 }}>{new Date(msg.timestamp).toLocaleTimeString([],{hour:'2-digit', minute:'2-digit'})}</span>
-                  {isMe && <span style={{ color:'#7B5DFF' }}>✓✓</span>}
+                  {isAdmin && <span style={{ fontSize:11, padding:'2px 6px', borderRadius:999, background:'rgba(123,93,255,0.18)', color:'var(--accent-purple-text)', border:'1px solid rgba(123,93,255,0.28)' }}>Admin</span>}
+                  <span style={{ fontSize:11 }}>{new Date(msg.timestamp).toLocaleTimeString([],{hour:'2-digit', minute:'2-digit'})}</span>
+                  {isMe && <span style={{ color:'var(--accent-purple-text)' }}>✓✓</span>}
                 </div>
-                <div style={{
-                  padding:'10px 14px', borderRadius: isMe ? '18px 18px 6px 18px' : '18px 18px 18px 6px',
-                  background: isMe ? '#7B5DFF' : 'var(--bg-surface)',
-                  border: isMe ? 'none' : '1px solid var(--border-subtle)',
-                  color: isMe ? 'white' : 'var(--text-primary)',
-                  fontSize:13, lineHeight:1.4
-                }}>
+                <div
+                  className={`chat-bubble ${isMe ? 'outgoing' : 'incoming'}`}
+                  /* the column above already caps width at 72%; the class's own
+                     78% would narrow the bubble inside it */
+                  style={{ maxWidth:'100%' }}
+                >
                   {msg.content}
                 </div>
                 {onReaction && (
@@ -173,7 +173,7 @@ export const ChatView: React.FC<Props> = ({ room, currentUser, onSendMessage, on
       <button style={{
         position:'absolute', right:16, bottom:78,
         width:56,height:56, borderRadius:'50%',
-        background:'linear-gradient(135deg, #1A1033, #2A1A5E)', border:'2px solid #7B5DFF',
+        background:'linear-gradient(135deg, var(--bg-accent-wash), var(--bg-accent-wash-2))', border:'2px solid var(--accent-purple)',
         color:'white', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:2,
         boxShadow:'0 8px 24px rgba(0,0,0,0.45)', fontSize:10, fontWeight:700
       }}>
@@ -182,22 +182,23 @@ export const ChatView: React.FC<Props> = ({ room, currentUser, onSendMessage, on
 
       {/* Input */}
       <form onSubmit={handleSend} style={{ padding:'12px', borderTop:'1px solid var(--border-subtle)', display:'flex', gap:8, background:'var(--bg-elevated)', alignItems:'center' }}>
-        <button type="button" style={{ width:36,height:36, borderRadius:'50%', background:'var(--bg-surface)', border:'1px solid var(--border-subtle)', display:'flex', alignItems:'center', justifyContent:'center', color:'var(--text-muted)' }}>
-          <span style={{ fontSize:18, lineHeight:1 }}>+</span>
+        <button type="button" aria-label="Add attachment" style={{ width:44,height:44, borderRadius:'50%', background:'var(--bg-surface)', border:'1px solid var(--border-subtle)', display:'flex', alignItems:'center', justifyContent:'center', color:'var(--text-muted)' }}>
+          <span aria-hidden="true" style={{ fontSize:18, lineHeight:1 }}>+</span>
         </button>
         <input
           value={input}
           onChange={e=>{ setInput(e.target.value); handleTyping(e.target.value); }}
+          aria-label="Type a message"
           placeholder="Type a message..."
-          style={{ flex:1, padding:'10px 14px', borderRadius:'var(--radius-full)', background:'var(--bg-surface)', border:'1px solid var(--border-subtle)', color:'white', fontSize:13, outline:'none' }}
+          style={{ flex:1, padding:'10px 14px', borderRadius:'var(--radius-full)', background:'var(--bg-surface)', border:'1px solid var(--border-subtle)', color:'var(--text-primary)', fontSize:16 }}
         />
-        <button type="button" style={{ width:36,height:36, borderRadius:'50%', background:'transparent', border:'none', color:'var(--text-muted)', fontSize:18 }}>☺</button>
-        <button type="submit" style={{ width:36,height:36, borderRadius:'50%', background:'#7B5DFF', border:'none', color:'white', display:'flex', alignItems:'center', justifyContent:'center' }}>
+        <button type="button" aria-label="Insert emoji" style={{ width:44,height:44, borderRadius:'50%', background:'transparent', border:'none', color:'var(--text-muted)', fontSize:18 }}>☺</button>
+        <button type="submit" aria-label="Send message" className="press" style={{ width:44,height:44, borderRadius:'50%', background:'linear-gradient(135deg, var(--accent-fill-from), var(--accent-fill-to))', border:'none', color:'#fff', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
           <Send size={16}/>
         </button>
       </form>
 
-      <div style={{ padding:'6px 0 2px', textAlign:'center', fontSize:10, color:'var(--text-muted)', display:'flex', alignItems:'center', justifyContent:'center', gap:4 }}>
+      <div style={{ padding:'6px 0 2px', textAlign:'center', fontSize:11, color:'var(--text-muted)', display:'flex', alignItems:'center', justifyContent:'center', gap:4 }}>
         <Shield size={10}/> Ephemeral • Clears after commute • {room.messages.length}
       </div>
     </div>

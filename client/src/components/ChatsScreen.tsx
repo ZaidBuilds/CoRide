@@ -22,28 +22,28 @@ interface Props {
 
 export const ChatsScreen: React.FC<Props> = ({ user, friends, onSelect }) => {
   const stories = [
-    { name: user ? user.pseudonym.split('_')[0] : 'Your Story', bg: user?.avatarBg || 'var(--bg-surface)', isAdd: !user, isUser: !!user, ring: '#7B5DFF' },
+    { name: user ? user.pseudonym.split('_')[0] : 'Your Story', bg: user?.avatarBg || 'var(--bg-surface)', isAdd: !user, isUser: !!user, ring: 'var(--accent-purple)' },
     { name:'Ishita', bg:'linear-gradient(135deg,#3B82F6,#06B6D4)', ring:'#3B82F6' },
     { name:'Kabir', bg:'linear-gradient(135deg,#10b981,#059669)', ring:'#10b981' },
     { name:'Mehak', bg:'linear-gradient(135deg,#F59E0B,#EF4444)', ring:'#F59E0B' },
-    { name:'Rohan', bg:'linear-gradient(135deg,#EC4899,#8B5CF6)', ring:'#EC4899' },
+    { name:'Rohan', bg:'linear-gradient(135deg,var(--accent-pink),var(--accent-violet))', ring:'var(--accent-pink)' },
   ];
 
   const chats: ChatItem[] = [
-    { id:'aryana', name:'Aryan', avatarBg:'linear-gradient(135deg,#7B5DFF,#EC4899)', lastMsg:'Hey! Are we still on for the movie tonight? 🎬', time:'9:30 AM', unread:2 },
+    { id:'aryana', name:'Aryan', avatarBg:'linear-gradient(135deg,var(--accent-purple),var(--accent-pink))', lastMsg:'Hey! Are we still on for the movie tonight? 🎬', time:'9:30 AM', unread:2 },
     { id:'ishita', name:'Ishita', avatarBg:'linear-gradient(135deg,#06B6D4,#3B82F6)', lastMsg:'Check out this playlist 🎧 (12 songs)', time:'9:25 AM', unread:1 },
-    { id:'travel', name:'Travel Buddies', avatarBg:'#1A1A26', lastMsg:'Kabir: Let’s plan our next trip 🚇', time:'Yesterday', unread:5, isGroup:true },
+    { id:'travel', name:'Travel Buddies', avatarBg:'linear-gradient(135deg,#64748B,#475569)', lastMsg:'Kabir: Let’s plan our next trip 🚇', time:'Yesterday', unread:5, isGroup:true },
     { id:'mehak', name:'Mehak', avatarBg:'linear-gradient(135deg,#F59E0B,#EF4444)', lastMsg:'Thanks for the notes! 🙌', time:'Yesterday' },
     { id:'tech', name:'Tech Hub', avatarBg:'#4F46E5', lastMsg:'Rohan: Here’s the code snippet you asked for.', time:'Mon', isGroup:true },
-    { id:'rohan', name:'Rohan', avatarBg:'linear-gradient(135deg,#EC4899,#8B5CF6)', lastMsg:'Voice Note', time:'Mon', isVoice:true, unread:0 },
+    { id:'rohan', name:'Rohan', avatarBg:'linear-gradient(135deg,var(--accent-pink),var(--accent-violet))', lastMsg:'Voice Note', time:'Mon', isVoice:true, unread:0 },
     { id:'kabir', name:'Kabir', avatarBg:'linear-gradient(135deg,#10b981,#059669)', lastMsg:'See you at the station 🚇', time:'Sun' },
-    { id:'family', name:'Family Group', avatarBg:'#1A1A26', lastMsg:'Mom: Everyone, dinner at 8! 🍽️', time:'Sat', isGroup:true, muted:true },
+    { id:'family', name:'Family Group', avatarBg:'linear-gradient(135deg,#64748B,#475569)', lastMsg:'Mom: Everyone, dinner at 8! 🍽️', time:'Sat', isGroup:true, muted:true },
   ];
 
   const realChats: ChatItem[] = friends.slice(0,3).map((f:any)=> ({
     id: f.friendId || f.id,
     name: f.profile?.pseudonym || f.friendProfile?.pseudonym || 'Friend',
-    avatarBg: f.profile?.avatarBg || f.friendProfile?.avatarBg || '#7B5DFF',
+    avatarBg: f.profile?.avatarBg || f.friendProfile?.avatarBg || 'var(--accent-purple)',
     lastMsg: 'You are now connected! Say hi 👋',
     time: 'Now',
     unread: 1,
@@ -58,8 +58,8 @@ export const ChatsScreen: React.FC<Props> = ({ user, friends, onSelect }) => {
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:14 }}>
         <h2 style={{ fontSize:20, fontWeight:900 }}>Chats</h2>
         <div style={{ display:'flex', gap:8 }}>
-          <button style={{ width:36,height:36, borderRadius:'50%', background:'var(--bg-surface)', border:'1px solid var(--border-subtle)', display:'flex', alignItems:'center', justifyContent:'center', color:'var(--text-muted)' }}><Search size={16}/></button>
-          <button style={{ width:36,height:36, borderRadius:'50%', background:'var(--bg-surface)', border:'1px solid var(--border-subtle)', display:'flex', alignItems:'center', justifyContent:'center', color:'#7B5DFF' }}><PenSquare size={16}/></button>
+          <button aria-label="Search chats" style={{ width:44,height:44, borderRadius:'50%', background:'var(--bg-surface)', border:'1px solid var(--border-subtle)', display:'flex', alignItems:'center', justifyContent:'center', color:'var(--text-muted)' }}><Search size={16}/></button>
+          <button aria-label="New chat" style={{ width:44,height:44, borderRadius:'50%', background:'var(--bg-surface)', border:'1px solid var(--border-subtle)', display:'flex', alignItems:'center', justifyContent:'center', color:'var(--accent-purple-text)' }}><PenSquare size={16}/></button>
         </div>
       </div>
 
@@ -98,25 +98,25 @@ export const ChatsScreen: React.FC<Props> = ({ user, friends, onSelect }) => {
             </div>
             <div style={{ flex:1, minWidth:0 }}>
               <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-                <span style={{ fontSize:13, fontWeight:800, color:'white' }}>{c.name}</span>
+                <span style={{ fontSize:13, fontWeight:800, color:'var(--text-primary)' }}>{c.name}</span>
                 <span style={{ fontSize:11, color:'var(--text-muted)' }}>{c.time}</span>
               </div>
               <div style={{ fontSize:12, color:'var(--text-muted)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', display:'flex', alignItems:'center', gap:4 }}>
-                {c.isVoice && <Mic size={12} style={{ color:'var(--accent-violet)' }} />} {c.lastMsg}
+                {c.isVoice && <Mic size={12} style={{ color:'var(--accent-purple-text)' }} />} {c.lastMsg}
                 {c.muted && <BellOff size={12} style={{ marginLeft:4 }} />}
               </div>
             </div>
             {c.unread ? (
-              <span style={{ minWidth:20,height:20, padding:'0 6px', borderRadius:999, background:'#7B5DFF', color:'white', fontSize:11, fontWeight:800, display:'flex', alignItems:'center', justifyContent:'center' }}>{c.unread}</span>
-            ) : c.id==='rohan' ? <span style={{ fontSize:11, color:'var(--text-muted)' }}>0:18</span> : c.id==='kabir' ? <CheckCheck size={14} style={{ color:'var(--accent-violet)' }}/> : null}
+              <span style={{ minWidth:20,height:20, padding:'0 6px', borderRadius:999, background:'var(--accent-purple)', color:'white', fontSize:11, fontWeight:800, display:'flex', alignItems:'center', justifyContent:'center' }}>{c.unread}</span>
+            ) : c.id==='rohan' ? <span style={{ fontSize:11, color:'var(--text-muted)' }}>0:18</span> : c.id==='kabir' ? <CheckCheck size={14} style={{ color:'var(--accent-purple-text)' }}/> : null}
           </div>
         ))}
       </div>
 
       <div style={{ marginTop:14, background:'var(--bg-card)', border:'1px solid var(--border-card)', borderRadius:'var(--radius-lg)', padding:12, display:'flex', gap:8, alignItems:'center' }}>
-        <div style={{ width:32,height:32, borderRadius:'50%', background:'rgba(123,93,255,0.14)', display:'flex', alignItems:'center', justifyContent:'center', color:'#7B5DFF' }}>🔒</div>
+        <div style={{ width:32,height:32, borderRadius:'50%', background:'rgba(123,93,255,0.14)', display:'flex', alignItems:'center', justifyContent:'center', color:'var(--accent-purple-text)' }}>🔒</div>
         <div>
-          <div style={{ fontSize:12, fontWeight:800, color:'#C4B5FF' }}>Your privacy matters</div>
+          <div style={{ fontSize:12, fontWeight:800, color:'var(--accent-purple-text)' }}>Your privacy matters</div>
           <div style={{ fontSize:11, color:'var(--text-muted)' }}>CoRide keeps your chats secure and spam-free.</div>
         </div>
       </div>

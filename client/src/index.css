@@ -1,40 +1,121 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Space+Grotesk:wght@500;700&display=swap');
+/* CoRide design system — light + dark, restrained Apple-style glass.
+   Every colour token is declared ONCE via light-dark(); the theme is switched
+   by flipping `color-scheme` on <html>, not by redeclaring the palette. */
+
+:root{
+  /* System default follows the OS; [data-theme] overrides it. */
+  color-scheme: light dark;
+}
+:root[data-theme="light"]{ color-scheme: light }
+:root[data-theme="dark"] { color-scheme: dark }
 
 :root {
-  /* ── Reference Palette (Figma 01-05) ── */
-  --bg-base: #08080F;
-  --bg-elevated: #13131E;
-  --bg-surface: #1A1A26;
-  --bg-card: #1E1E2E;
-  --bg-card-hover: #232334;
-  --bg-input: #15151E;
+  /* ── Surfaces — light is iOS grouped-background, dark is the Figma palette ── */
+  --bg-base:       light-dark(#F2F2F7, #08080F);
+  --bg-elevated:   light-dark(#FFFFFF, #13131E);
+  --bg-surface:    light-dark(#FFFFFF, #1A1A26);
+  --bg-card:       light-dark(#FFFFFF, #1E1E2E);
+  --bg-card-hover: light-dark(#F7F7FA, #232334);
+  --bg-input:      light-dark(#FFFFFF, #15151E);
+  /* purple-washed hero cards ("On Ride", line banners) */
+  --bg-accent-wash: light-dark(#EFEBFF, #1A1033);
+  --bg-accent-wash-2: light-dark(#E7E1FF, #1E1A3A);
+  /* neutral overlay chips that sat on rgba(255,255,255,.06) — invisible on white */
+  --bg-overlay: light-dark(rgba(0,0,0,0.05), rgba(255,255,255,0.06));
 
-  /* ── Presence ── */
-  --presence-active: #22c55e;
-  --presence-nearby: #EAB308;
-  --presence-other: #475569;
-  --presence-sameTrain: #38bdf8;
+  /* Quick-action tiles — light keeps the pastel, dark drops to a deep tint of the
+     same hue so the card still reads as "the purple one" without glowing. */
+  --bg-quick-purple:  light-dark(#EDE9FF, #1E1A33);
+  --bg-quick-emerald: light-dark(#E0F7F0, #0F2620);
+  --bg-quick-amber:   light-dark(#FEF3C7, #2A2113);
+  --bg-quick-blue:    light-dark(#DBEAFE, #12203A);
+  /* the small icon chip that sits on a quick tile — was hardcoded `white` */
+  --bg-quick-chip:    light-dark(#FFFFFF, rgba(255,255,255,0.10));
+  --border-quick:     light-dark(rgba(0,0,0,0.04), rgba(255,255,255,0.07));
 
-  /* ── Accent — Figma purple #7B5DFF + violet #8B5CF6 ── */
+  /* ── Glass — only for layers that FLOAT over content (nav, sheets, headers).
+     Content cards stay near-opaque; stacked backdrop-filter kills Android framerate. ── */
+  --glass-bg:        light-dark(rgba(255,255,255,0.72), rgba(20,20,30,0.72));
+  --glass-bg-strong: light-dark(rgba(255,255,255,0.86), rgba(16,16,24,0.86));
+  /* mid tier: frosts, but at a blur cheap enough to sit inside a scrolling list */
+  --glass-bg-soft:   light-dark(rgba(255,255,255,0.80), rgba(26,26,38,0.80));
+  --glass-blur-soft: 12px;
+
+  /* ── Material tiers (thin → thick). Blur radius AND fill opacity both rise;
+     changing only one reads as "blurrier", not as a different material. ── */
+  --glass-blur-thin:  8px;
+  --glass-blur-thick: 40px;
+  --glass-bg-thin:  light-dark(rgba(255,255,255,0.55), rgba(20,20,30,0.55));
+  --glass-bg-thick: light-dark(rgba(255,255,255,0.92), rgba(14,14,22,0.92));
+  --glass-border:    light-dark(rgba(0,0,0,0.08), rgba(255,255,255,0.10));
+  --glass-highlight: light-dark(rgba(255,255,255,0.90), rgba(255,255,255,0.14));
+  --glass-blur: 24px;
+  --glass-saturate: 180%;
+  --scrim: light-dark(rgba(0,0,0,0.28), rgba(5,5,12,0.62));
+
+  /* ── Elevation — light uses soft ambient shadow, dark uses depth + rim light ──
+     light-dark() is a <color> function ONLY. Wrapping a whole shadow value in it
+     (`light-dark(0 4px 16px …, …)`) is invalid, so the declaration is dropped and
+     the element renders with NO shadow. Keep the geometry outside and let
+     light-dark() resolve just the colour. */
+  --shadow-color-sm: light-dark(rgba(0,0,0,0.06), rgba(0,0,0,0.40));
+  --shadow-color-md: light-dark(rgba(0,0,0,0.08), rgba(0,0,0,0.45));
+  --shadow-color-lg: light-dark(rgba(0,0,0,0.12), rgba(0,0,0,0.55));
+  --shadow-sm: 0 1px 2px var(--shadow-color-sm);
+  --shadow-md: 0 4px 16px var(--shadow-color-md);
+  --shadow-lg: 0 12px 40px var(--shadow-color-lg);
+
+  /* ── Motion — Apple-ish spring for enter, quick ease for exit ── */
+  /* iOS sheet/spring curve — decelerates harder than a plain ease-out, which is
+     what reads as "Apple" rather than merely smooth. */
+  --ease-enter: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+  --dur-micro: 150ms;
+  --dur-std: 250ms;
+  --dur-slow: 350ms;   /* sheets */
+
+  /* ── Presence — light variants darkened to stay ≥4.5:1 on white ── */
+  --presence-active:    light-dark(#15803D, #22c55e);
+  --presence-nearby:    light-dark(#A16207, #EAB308);
+  --presence-other:     light-dark(#64748B, #475569);
+  --presence-sameTrain: light-dark(#0369A1, #38bdf8);
+
+  /* ── Accent — Figma purple #7B5DFF + violet #8B5CF6 ──
+     FILL variants: use behind white text only via --accent-fill-* (≥4.5:1).
+     TEXT variants: use when the accent IS the text/icon on a dark surface.
+     Raw --accent-purple/--accent-violet are 3.8–4.3:1 as text on cards — borders/fills only. */
   --accent-purple: #7B5DFF;
   --accent-violet: #8B5CF6;
   --accent-indigo: #6D5BF0;
-  --accent-blue: #38bdf8;
-  --accent-emerald: #10b981;
-  --accent-rose: #f43f5e;
-  --accent-amber: #f59e0b;
+  /* gradient partner for the purple — decorative fills only, never text */
+  --accent-pink: #EC4899;
+  /* text-on-surface: dark 6.03:1 on bg-card · light 6.32:1 on white */
+  --accent-purple-text: light-dark(#5B3FE8, #A78BFA);
+  /* dark 6.09:1 · light 5.67:1 (raw --accent-rose was 4.47:1) */
+  --accent-rose-text:   light-dark(#C81E3C, #FB7185);
+  /* white on #6D5BF0 = 4.77:1 · on #7C4DEE = 5.06:1 (was 4.33/4.23 — failed) */
+  --accent-fill-from: #6D5BF0;
+  --accent-fill-to: #7C4DEE;
+  --accent-blue:    light-dark(#0369A1, #38bdf8);
+  --accent-emerald: light-dark(#047857, #10b981);
+  --accent-rose:    light-dark(#C81E3C, #f43f5e);
+  --accent-amber:   light-dark(#B45309, #f59e0b);
 
-  /* ── Text ── */
-  --text-primary: #F2F2FF;
-  --text-secondary: #9AA0B5;
-  --text-muted: #6B7194;
-  --text-label: #8B8DB0;
+  /* ── Text — light values measured on #FFFFFF / #F2F2F7 ── */
+  --text-primary:   light-dark(#1C1C1E, #F2F2FF);  /* 17.0 / 15.5 */
+  --text-secondary: light-dark(#4A4A55, #9AA0B5);  /*  8.7 /  6.6 */
+  --text-muted:     light-dark(#65656F, #8B90AC);  /*  5.8 /  5.5 */
+  --text-label:     light-dark(#65656F, #8B8DB0);
+
+  /* ── Focus & tap ── */
+  --focus-ring: light-dark(#5B3FE8, #A78BFA);
+  --tap: 44px;
 
   /* ── Border ── */
-  --border-subtle: rgba(255,255,255,0.07);
-  --border-card: rgba(255,255,255,0.09);
-  --border-hover: rgba(123,93,255,0.25);
-  --border-purple: rgba(123,93,255,0.35);
+  --border-subtle: light-dark(rgba(0,0,0,0.07), rgba(255,255,255,0.07));
+  --border-card:   light-dark(rgba(0,0,0,0.10), rgba(255,255,255,0.09));
+  --border-hover:  light-dark(rgba(91,63,232,0.30), rgba(123,93,255,0.25));
+  --border-purple: light-dark(rgba(91,63,232,0.40), rgba(123,93,255,0.35));
 
   /* ── Radii ── */
   --radius-sm: 10px;
@@ -46,20 +127,95 @@
 }
 
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-html{font-family:'Inter',-apple-system,BlinkMacSystemFont,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
-body{background:var(--bg-base);color:var(--text-primary);min-height:100vh;overflow-x:hidden}
+html{
+  /* SF Pro on Apple, Segoe on Windows, Roboto on Android — no webfont round-trip */
+  font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',Roboto,system-ui,sans-serif;
+  -webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;
+  text-size-adjust:100%;
+}
+body{
+  background:var(--bg-base);color:var(--text-primary);min-height:100vh;overflow-x:hidden;
+  transition:background-color var(--dur-std) var(--ease-enter);
+}
 #root{min-height:100vh;background:var(--bg-base)}
 ::-webkit-scrollbar{width:0;height:0}
-::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.08);border-radius:4px}
+::-webkit-scrollbar-thumb{background:var(--border-card);border-radius:4px}
 
-/* ── Glass card — Figma #1E1E2E with subtle border ── */
+/* Display type — SF Pro Display kicks in above ~20px on Apple, and the tighter
+   tracking is what reads as "Apple headline" rather than just big body text. */
+.display{
+  font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display','Segoe UI',Roboto,system-ui,sans-serif;
+  letter-spacing:-0.02em;
+  font-weight:700;
+}
+
+/* ══ Glass primitives ══
+   .glass    — floating layers: nav bars, headers, sheets, popovers. Blurs what's behind.
+   .glass-panel — content cards. Near-opaque by design; a blurred card over a blurred
+   nav over a blurred backdrop is what tanks scroll performance on budget Android.
+   The `inset 0 1px 0` is the specular rim light that sells the material. */
+
+.glass{
+  background:var(--glass-bg);
+  -webkit-backdrop-filter:blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter:blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  border:1px solid var(--glass-border);
+  box-shadow:var(--shadow-lg), inset 0 1px 0 var(--glass-highlight);
+}
+.glass-strong{ background:var(--glass-bg-strong) }
+
+/* ══ Material tiers ══
+   Same construction as .glass, three weights. Thin lets colour through for
+   transient overlays; thick is for surfaces that must stay legible over
+   arbitrary content (sheets, nav bars). */
+.glass-thin,.glass-regular,.glass-thick{
+  border:1px solid var(--glass-border);
+  box-shadow:var(--shadow-lg), inset 0 1px 0 var(--glass-highlight);
+}
+.glass-thin{
+  background:var(--glass-bg-thin);
+  -webkit-backdrop-filter:blur(var(--glass-blur-thin)) saturate(var(--glass-saturate));
+  backdrop-filter:blur(var(--glass-blur-thin)) saturate(var(--glass-saturate));
+}
+.glass-regular{
+  background:var(--glass-bg);
+  -webkit-backdrop-filter:blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter:blur(var(--glass-blur)) saturate(var(--glass-saturate));
+}
+.glass-thick{
+  background:var(--glass-bg-thick);
+  -webkit-backdrop-filter:blur(var(--glass-blur-thick)) saturate(var(--glass-saturate));
+  backdrop-filter:blur(var(--glass-blur-thick)) saturate(var(--glass-saturate));
+}
+
+/* Mid tier — frosted content cards. Lighter blur than .glass so a list of these
+   still scrolls at 60fps on budget Android. */
+.glass-soft{
+  background:var(--glass-bg-soft);
+  -webkit-backdrop-filter:blur(var(--glass-blur-soft)) saturate(var(--glass-saturate));
+  backdrop-filter:blur(var(--glass-blur-soft)) saturate(var(--glass-saturate));
+  border:1px solid var(--glass-border);
+  border-radius:var(--radius-xl);
+  box-shadow:var(--shadow-md), inset 0 1px 0 var(--glass-highlight);
+}
+
+/* Browsers without backdrop-filter get an opaque fallback rather than unreadable text */
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+  .glass{ background:var(--bg-elevated) }
+  .glass-soft{ background:var(--bg-card) }
+  .glass-thin,.glass-regular{ background:var(--bg-elevated) }
+  .glass-thick,.sheet,.nav-bar{ background:var(--bg-elevated) }
+}
+
 .glass-panel{
   background:var(--bg-card);
   border:1px solid var(--border-card);
   border-radius:var(--radius-xl);
-  box-shadow:0 8px 32px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.04);
+  box-shadow:var(--shadow-md), inset 0 1px 0 var(--glass-highlight);
+  transition:border-color var(--dur-micro) var(--ease-enter),
+             box-shadow var(--dur-micro) var(--ease-enter);
 }
-.glass-panel:hover{border-color:rgba(255,255,255,0.12)}
+.glass-panel:hover{border-color:var(--border-hover);box-shadow:var(--shadow-lg), inset 0 1px 0 var(--glass-highlight)}
 
 /* ── Traveler card — Figma 02 list ── */
 .traveler-card{
@@ -70,7 +226,11 @@ body{background:var(--bg-base);color:var(--text-primary);min-height:100vh;overfl
   display:flex;
   align-items:center;
   justify-content:space-between;
-  transition:all 0.2s ease;
+  /* explicit properties, not `all` — `all` also animates background-color, so a
+     light/dark flip smears every card through an intermediate colour. */
+  transition:background-color var(--dur-micro) var(--ease-enter),
+             border-color var(--dur-micro) var(--ease-enter),
+             transform var(--dur-micro) var(--ease-enter);
   cursor:pointer;
 }
 .traveler-card:hover{background:var(--bg-card-hover);border-color:var(--border-hover);transform:translateY(-1px)}
@@ -87,24 +247,299 @@ body{background:var(--bg-base);color:var(--text-primary);min-height:100vh;overfl
 .btn-primary{
   display:inline-flex;align-items:center;gap:6px;
   padding:10px 18px;border:none;border-radius:var(--radius-full);
-  background:linear-gradient(135deg, #7B5DFF 0%, #8B5CF6 100%);
-  color:white;font-weight:800;font-size:13px;cursor:pointer;
+  background:linear-gradient(135deg, var(--accent-fill-from) 0%, var(--accent-fill-to) 100%);
+  color:white;font-weight:800;font-size:14px;cursor:pointer;
   box-shadow:0 4px 16px rgba(123,93,255,0.35);
-  transition:all 0.2s ease;
+  transition:transform var(--dur-micro) var(--ease-enter),
+             box-shadow var(--dur-micro) var(--ease-enter),
+             opacity var(--dur-micro) var(--ease-enter);
 }
 .btn-primary:hover{transform:translateY(-1px);box-shadow:0 6px 20px rgba(123,93,255,0.45);opacity:0.95}
-.btn-primary:active{transform:translateY(0)}
+/* Haptic-style press on the primary action — scale+dim, transform/opacity only */
+.btn-primary:active{transform:scale(0.96);opacity:0.85}
 .btn-secondary{
   display:inline-flex;align-items:center;gap:6px;
   padding:8px 16px;border:1px solid var(--border-card);border-radius:var(--radius-full);
-  background:var(--bg-surface);color:var(--text-secondary);font-weight:700;font-size:12px;cursor:pointer;
+  background:var(--bg-surface);color:var(--text-secondary);font-weight:700;font-size:13px;cursor:pointer;
 }
 .btn-secondary:hover{background:var(--bg-card-hover);color:var(--text-primary)}
 .btn-danger{
   display:inline-flex;align-items:center;gap:6px;
   padding:8px 16px;border:1px solid rgba(244,63,94,0.22);border-radius:var(--radius-full);
-  background:rgba(244,63,94,0.10);color:#fda4af;font-weight:700;font-size:12px;cursor:pointer;
+  background:rgba(244,63,94,0.10);color:var(--accent-rose-text);font-weight:700;font-size:13px;cursor:pointer;
 }
+
+/* ══ Nav bar with large-title collapse ══
+   Two titles occupy the bar: the large one below, the compact one centred in
+   the bar itself. Add .collapsed (on scroll) to cross-fade between them. The
+   hairline only appears once collapsed, matching iOS.
+   Both titles animate transform/opacity only — no layout thrash on scroll. */
+.nav-bar{
+  position:sticky;top:0;z-index:30;
+  margin:-16px -12px 12px;               /* cancel the app shell's padding */
+  padding:calc(8px + env(safe-area-inset-top)) 16px 8px;
+  background:var(--glass-bg-thick);
+  -webkit-backdrop-filter:blur(var(--glass-blur-thick)) saturate(var(--glass-saturate));
+  backdrop-filter:blur(var(--glass-blur-thick)) saturate(var(--glass-saturate));
+  border-bottom:1px solid transparent;
+  transition:border-color var(--dur-std) var(--ease-enter);
+}
+.nav-bar.collapsed{ border-bottom-color:var(--glass-border) }
+
+.nav-bar-top{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  min-height:var(--tap);
+}
+/* Compact title — hidden until collapse, then fades in. */
+.nav-bar-compact{
+  flex:1;min-width:0;
+  text-align:center;
+  font-size:16px;font-weight:600;color:var(--text-primary);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  opacity:0;transform:translateY(6px);
+  transition:opacity var(--dur-std) var(--ease-enter),
+             transform var(--dur-std) var(--ease-enter);
+}
+.nav-bar.collapsed .nav-bar-compact{ opacity:1;transform:translateY(0) }
+
+/* Large title — the default state, collapses away on scroll. */
+.nav-bar-large{
+  font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display','Segoe UI',Roboto,system-ui,sans-serif;
+  font-size:28px;font-weight:700;letter-spacing:-0.02em;
+  color:var(--text-primary);
+  padding:4px 0 8px;
+  transform-origin:left center;
+  transition:opacity var(--dur-std) var(--ease-enter),
+             transform var(--dur-std) var(--ease-enter),
+             max-height var(--dur-std) var(--ease-enter);
+  max-height:52px;overflow:hidden;
+}
+.nav-bar.collapsed .nav-bar-large{
+  opacity:0;
+  transform:scale(0.85) translateY(-8px);
+  max-height:0;
+  padding-bottom:0;
+}
+
+/* ══ Segmented control ══
+   Track holds the options; the selected thumb is an opaque pill that slides.
+   Sized so the whole control clears 44px without the thumb touching the edge. */
+.segmented{
+  display:flex;align-items:center;gap:2px;
+  padding:3px;
+  background:var(--bg-overlay);
+  border-radius:var(--radius-full);
+  min-height:var(--tap);
+}
+.segmented-option{
+  flex:1 1 0;min-width:0;
+  display:inline-flex;align-items:center;justify-content:center;gap:6px;
+  padding:8px 12px;
+  border:none;background:transparent;cursor:pointer;
+  border-radius:var(--radius-full);
+  font-size:13px;font-weight:700;color:var(--text-secondary);
+  white-space:nowrap;
+  transition:color var(--dur-micro) var(--ease-enter),
+             background-color var(--dur-micro) var(--ease-enter);
+}
+.segmented-option:hover{ color:var(--text-primary) }
+.segmented-option:active{ transform:scale(0.96) }
+.segmented-option[aria-selected="true"],
+.segmented-option.selected{
+  background:var(--bg-elevated);
+  color:var(--text-primary);
+  box-shadow:var(--shadow-sm);
+}
+
+/* ══ Pill buttons ══
+   .pill-button is the shape; the variant supplies the weight. Kept separate
+   from .btn-* so existing buttons are untouched. */
+.pill-button{
+  display:inline-flex;align-items:center;justify-content:center;gap:6px;
+  min-height:var(--tap);
+  padding:12px 20px;
+  border-radius:var(--radius-full);
+  border:1px solid transparent;
+  font-size:14px;font-weight:700;
+  cursor:pointer;
+  transition:transform var(--dur-micro) var(--ease-enter),
+             opacity var(--dur-micro) var(--ease-enter),
+             background-color var(--dur-micro) var(--ease-enter),
+             border-color var(--dur-micro) var(--ease-enter);
+}
+.pill-button:active{ transform:scale(0.96);opacity:0.8 }
+.pill-button.primary{
+  background:linear-gradient(135deg, var(--accent-fill-from), var(--accent-fill-to));
+  color:#fff;
+  box-shadow:0 4px 16px rgba(123,93,255,0.35);
+}
+.pill-button.secondary{
+  background:var(--bg-surface);
+  border-color:var(--border-card);
+  color:var(--text-primary);
+}
+.pill-button.secondary:hover{ background:var(--bg-card-hover) }
+/* Plain = text-only affordance; still 44px tall so the target survives. */
+.pill-button.plain{
+  background:transparent;
+  color:var(--accent-purple-text);
+  padding:12px 8px;
+}
+.pill-button.plain:hover{ background:var(--bg-overlay) }
+
+/* ══ Inset grouped list ══
+   Separators are inset from the left to clear the row's leading content, which
+   is what distinguishes an iOS grouped list from a plain bordered stack. */
+.list-group{
+  background:var(--bg-card);
+  border:1px solid var(--border-card);
+  border-radius:var(--radius-lg);
+  overflow:hidden;              /* clips row hover to the rounded corners */
+  margin-bottom:20px;
+}
+.list-row{
+  display:flex;align-items:center;gap:12px;
+  width:100%;
+  min-height:var(--tap);
+  padding:12px 16px;
+  background:transparent;border:none;
+  color:var(--text-primary);font-size:14px;text-align:left;
+  transition:background-color var(--dur-micro) var(--ease-enter);
+}
+.list-row + .list-row{ border-top:1px solid var(--border-subtle) }
+.list-row:hover{ background:var(--bg-card-hover) }
+.list-row:active{ background:var(--bg-overlay) }
+/* Navigable rows opt in — a chevron on a non-navigable row is a lie. */
+.list-row.navigable{ cursor:pointer }
+.list-row.navigable::after{
+  content:'';flex-shrink:0;margin-left:auto;
+  width:8px;height:8px;
+  border-right:2px solid var(--text-muted);
+  border-bottom:2px solid var(--text-muted);
+  transform:rotate(-45deg);
+  opacity:0.7;
+}
+/* Stack, don't inline — as bare spans the title and subtitle run together. */
+.list-row .row-text{ flex:1;min-width:0;display:flex;flex-direction:column;gap:1px }
+.list-row .row-title{ display:block;font-size:14px;font-weight:600;color:var(--text-primary) }
+.list-row .row-sub{ display:block;font-size:12px;color:var(--text-muted) }
+.list-row .row-title,.list-row .row-sub{
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+/* Standalone separator for rows that aren't siblings (rendered via fragments). */
+.list-separator{
+  height:1px;margin-left:16px;
+  background:var(--border-subtle);
+}
+
+/* ══ Sheet — bottom modal ══ */
+.sheet-backdrop{
+  position:fixed;inset:0;z-index:50;
+  background:var(--scrim);
+  -webkit-backdrop-filter:blur(var(--glass-blur-thin));
+  backdrop-filter:blur(var(--glass-blur-thin));
+  display:flex;align-items:flex-end;justify-content:center;
+  animation:fadeIn var(--dur-std) var(--ease-enter);
+}
+.sheet{
+  position:relative;
+  width:100%;max-width:520px;max-height:88vh;
+  background:var(--glass-bg-thick);
+  -webkit-backdrop-filter:blur(var(--glass-blur-thick)) saturate(var(--glass-saturate));
+  backdrop-filter:blur(var(--glass-blur-thick)) saturate(var(--glass-saturate));
+  border:1px solid var(--glass-border);border-bottom:none;
+  border-radius:var(--radius-2xl) var(--radius-2xl) 0 0;
+  box-shadow:var(--shadow-lg), inset 0 1px 0 var(--glass-highlight);
+  /* the inset keeps content clear of the home indicator on iOS */
+  padding:8px 20px calc(20px + env(safe-area-inset-bottom));
+  overflow-y:auto;
+  animation:slideUp var(--dur-slow) var(--ease-enter);
+}
+/* Grab affordance. Presentational only — the real drag target is the sheet. */
+.sheet-handle{
+  width:36px;height:5px;flex-shrink:0;
+  margin:0 auto 12px;
+  border-radius:var(--radius-full);
+  background:var(--text-muted);
+  opacity:0.4;
+}
+.sheet-title{
+  font-size:20px;font-weight:700;letter-spacing:-0.02em;
+  color:var(--text-primary);margin-bottom:4px;
+}
+
+/* ── Quick-action tile — Home grid. Colour comes from --bg-quick-* so the tile
+   re-tints in dark mode instead of staying a bright pastel. ── */
+.quick-tile{
+  border:1px solid var(--border-quick);border-radius:var(--radius-lg);
+  padding:16px;text-align:left;cursor:pointer;
+  display:flex;flex-direction:column;gap:10px;
+  min-height:var(--tap);
+  box-shadow:var(--shadow-sm);
+  transition:transform var(--dur-micro) var(--ease-enter),
+             box-shadow var(--dur-micro) var(--ease-enter);
+}
+.quick-tile:hover{box-shadow:var(--shadow-md)}
+.quick-tile .chip{
+  width:36px;height:36px;border-radius:var(--radius-sm);
+  background:var(--bg-quick-chip);
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:var(--shadow-sm);
+}
+.quick-tile .label{font-size:14px;font-weight:800;color:var(--text-primary)}
+
+/* ── Icon button — 44px circular surface button (header actions, back, close).
+   Was re-declared inline on nearly every screen. ── */
+.icon-btn{
+  width:var(--tap);height:var(--tap);border-radius:50%;
+  background:var(--bg-surface);border:1px solid var(--border-subtle);
+  color:var(--text-secondary);
+  display:inline-flex;align-items:center;justify-content:center;
+  position:relative;cursor:pointer;flex-shrink:0;
+  transition:background-color var(--dur-micro) var(--ease-enter),
+             color var(--dur-micro) var(--ease-enter),
+             border-color var(--dur-micro) var(--ease-enter);
+}
+.icon-btn:hover{background:var(--bg-card-hover);color:var(--text-primary);border-color:var(--border-hover)}
+/* unread pip */
+.icon-btn .pip{
+  position:absolute;top:6px;right:8px;width:8px;height:8px;border-radius:50%;
+  background:var(--accent-violet);border:2px solid var(--bg-surface);
+}
+
+/* ── Avatar + presence dot — the most duplicated construct in the app ── */
+.avatar{
+  border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  color:#fff;font-weight:800;
+  border:2px solid var(--bg-surface);
+  box-shadow:var(--shadow-md);
+  overflow:hidden;flex-shrink:0;
+}
+.avatar-wrap{position:relative;flex-shrink:0}
+.avatar-dot{
+  position:absolute;bottom:0;right:0;
+  width:14px;height:14px;border-radius:50%;
+  border:2px solid var(--bg-surface);
+}
+.avatar-dot.active{background:var(--presence-active)}
+.avatar-dot.nearby{background:var(--presence-nearby)}
+.avatar-dot.other{background:var(--presence-other)}
+.avatar-dot.sameTrain{background:var(--presence-sameTrain)}
+
+/* ── Section heading + trailing "View all" ── */
+.section-head{
+  display:flex;align-items:center;justify-content:space-between;
+  margin-bottom:10px;
+}
+.section-head h3{font-size:15px;font-weight:800;color:var(--text-primary)}
+.section-head .link{
+  background:none;border:none;cursor:pointer;
+  color:var(--accent-purple-text);font-size:13px;font-weight:700;
+  padding:6px 4px;
+}
+.section-head .link:hover{text-decoration:underline}
+.section-head .link:active{opacity:0.6}
 
 /* ── Top bar subtle ── */
 .context-header{
@@ -123,56 +558,87 @@ body{background:var(--bg-base);color:var(--text-primary);min-height:100vh;overfl
 .presence-bar .tier{display:flex;align-items:center;gap:6px}
 
 /* ── Chat ── */
-.chat-bubble{max-width:78%;padding:10px 14px;border-radius:18px;font-size:13px;line-height:1.5}
-.chat-bubble.outgoing{background:#7B5DFF;color:white;border-bottom-right-radius:6px}
+.chat-bubble{max-width:78%;padding:10px 14px;border-radius:18px;font-size:14px;line-height:1.5}
+.chat-bubble.outgoing{background:var(--accent-fill-from);color:white;border-bottom-right-radius:6px}
 .chat-bubble.incoming{background:var(--bg-surface);color:var(--text-primary);border:1px solid var(--border-subtle);border-bottom-left-radius:6px}
 .chat-bubble.system{background:transparent;color:var(--text-muted);font-size:11px;text-align:center;max-width:100%;padding:6px 12px}
 
 /* ── Drawer — 03 profile full ── */
 .drawer-overlay{
-  position:fixed;inset:0;background:rgba(5,5,12,0.72);backdrop-filter:blur(16px);
+  position:fixed;inset:0;background:var(--scrim);
+  -webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);
   z-index:50;display:flex;align-items:flex-end;justify-content:center;
 }
 .drawer-panel{
-  background:linear-gradient(180deg, #1A1A2A 0%, #13131E 100%);
-  border:1px solid var(--border-card);
+  background:var(--glass-bg-strong);
+  -webkit-backdrop-filter:blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter:blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  border:1px solid var(--glass-border);
   border-radius:var(--radius-2xl) var(--radius-2xl) 0 0;
-  width:100%;max-width:480px;max-height:88vh;padding:24px;overflow-y:auto;
-  box-shadow:0 -12px 48px rgba(0,0,0,0.6);
+  width:100%;max-width:480px;max-height:88vh;overflow-y:auto;
+  padding:24px 24px calc(24px + env(safe-area-inset-bottom));
+  box-shadow:var(--shadow-lg), inset 0 1px 0 var(--glass-highlight);
+}
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+  .drawer-panel{ background:var(--bg-elevated) }
+}
+
+/* ── App header — sticky frosted bar the content scrolls under ── */
+.app-header{
+  position:sticky;top:0;z-index:30;
+  margin:-16px -12px 12px;              /* cancel the shell's padding */
+  padding:calc(10px + env(safe-area-inset-top)) 16px 10px;
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  background:var(--glass-bg-strong);
+  -webkit-backdrop-filter:blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter:blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  border-bottom:1px solid var(--glass-border);
+}
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+  .app-header{ background:var(--bg-elevated) }
 }
 
 /* ── Nav pill (internal filters) ── */
 .nav-pill{
   padding:8px 16px;border-radius:var(--radius-full);font-size:13px;font-weight:700;
-  border:none;cursor:pointer;transition:all 0.2s ease;display:inline-flex;align-items:center;gap:6px;
+  border:none;cursor:pointer;display:inline-flex;align-items:center;gap:6px;
   color:var(--text-muted);background:transparent;
+  transition:background-color var(--dur-micro) var(--ease-enter),
+             color var(--dur-micro) var(--ease-enter);
 }
 .nav-pill:hover{color:var(--text-primary)}
+.nav-pill:active{transform:scale(0.96)}
 .nav-pill.active-station{background:rgba(16,185,129,0.14);color:var(--accent-emerald);border:1px solid rgba(16,185,129,0.22)}
-.nav-pill.active-train{background:rgba(123,93,255,0.16);color:var(--accent-violet);border:1px solid rgba(123,93,255,0.28)}
-.nav-pill.active-friends{background:rgba(168,85,247,0.14);color:var(--accent-purple);border:1px solid rgba(168,85,247,0.22)}
+.nav-pill.active-train{background:rgba(123,93,255,0.16);color:var(--accent-purple-text);border:1px solid rgba(123,93,255,0.28)}
+.nav-pill.active-friends{background:rgba(168,85,247,0.14);color:var(--accent-purple-text);border:1px solid rgba(168,85,247,0.22)}
 
 /* ── Bottom Nav — Figma 5-tab with center scan ── */
 .bottom-nav{
   position:fixed;bottom:0;left:50%;transform:translateX(-50%);
   width:100%;max-width:520px;
-  background:rgba(14,14,22,0.92);backdrop-filter:blur(20px);
-  border-top:1px solid var(--border-subtle);
+  background:var(--glass-bg-strong);
+  -webkit-backdrop-filter:blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter:blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  border-top:1px solid var(--glass-border);
+  box-shadow:inset 0 1px 0 var(--glass-highlight);
   display:flex;align-items:center;justify-content:space-around;
   padding:8px 12px calc(8px + env(safe-area-inset-bottom));
   z-index:40;
 }
 .bottom-nav-item{
   flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;
-  padding:6px 0;color:var(--text-muted);font-size:10px;font-weight:700;
+  padding:6px 0;color:var(--text-muted);font-size:11px;font-weight:700;
   background:none;border:none;cursor:pointer;transition:color 0.2s;
+  min-height:var(--tap);justify-content:center;
 }
-.bottom-nav-item.active{color:var(--accent-violet)}
+.bottom-nav-item.active{color:var(--accent-purple-text)}
+.bottom-nav-item{transition:color var(--dur-micro) var(--ease-enter),transform var(--dur-micro) var(--ease-enter)}
+.bottom-nav-item:active{transform:scale(0.92)}
 .bottom-nav-item svg{width:22px;height:22px}
 .bottom-nav-scan{
   width:56px;height:56px;border-radius:50%;
-  background:linear-gradient(135deg, #7B5DFF, #8B5CF6);
-  display:flex;align-items:center;justifyContent:center;
+  background:linear-gradient(135deg, var(--accent-fill-from), var(--accent-fill-to));
+  display:flex;align-items:center;justify-content:center;
   color:white;box-shadow:0 8px 24px rgba(123,93,255,0.45);
   border:3px solid var(--bg-base);margin-top:-18px;
 }
@@ -184,12 +650,84 @@ body{background:var(--bg-base);color:var(--text-primary);min-height:100vh;overfl
   background:rgba(123,93,255,0.10);border:1px solid rgba(123,93,255,0.14);
   font-size:11px;font-weight:600;color:var(--text-secondary);
 }
-.tag-pill.active{background:rgba(123,93,255,0.18);color:#C4B5FF;border-color:rgba(123,93,255,0.28)}
+.tag-pill.active{background:rgba(123,93,255,0.18);color:var(--accent-purple-text);border-color:rgba(123,93,255,0.28)}
 
 /* ── Animations ── */
 @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
 @keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
 @keyframes pulseGlow{0%,100%{box-shadow:0 0 0 0 rgba(34,197,94,0.35)}50%{box-shadow:0 0 0 6px rgba(34,197,94,0)}}
 .animate-fade-in{animation:fadeIn 0.3s ease}
-.animate-slide-up{animation:slideUp 0.32s cubic-bezier(0.16,1,0.3,1)}
+.animate-slide-up{animation:slideUp var(--dur-slow) var(--ease-enter)}
+/* Full-screen pushes (chat overlay, onboarding) — same spring as sheets. */
+.animate-push{animation:slideUp var(--dur-slow) var(--ease-enter)}
 .animate-pulse-glow{animation:pulseGlow 2s infinite}
+
+/* ══ Accessibility base ══ */
+
+/* Keyboard focus — one rule covers every control */
+:where(a,button,input,select,textarea,summary,[tabindex]):focus-visible{
+  outline:2px solid var(--focus-ring);
+  outline-offset:2px;
+  border-radius:var(--radius-sm);
+}
+/* Mouse users don't get the ring, keyboard users always do */
+:where(a,button,input,select,textarea):focus:not(:focus-visible){outline:none}
+
+/* Inputs: visible focus + iOS zoom guard (<16px triggers auto-zoom on focus) */
+input,textarea,select{font-family:inherit;font-size:16px}
+input:focus-visible,textarea:focus-visible{
+  border-color:var(--border-purple);
+  box-shadow:0 0 0 3px rgba(123,93,255,0.18);
+}
+
+/* Disabled */
+:where(button,input,select,textarea):disabled{opacity:0.5;cursor:not-allowed}
+
+/* Tap targets — WCAG 2.5.8 / platform guidance is 44px */
+.btn-primary,.btn-secondary,.btn-danger,.nav-pill{min-height:var(--tap)}
+.tap-target{min-width:var(--tap);min-height:var(--tap);display:inline-flex;align-items:center;justify-content:center}
+
+/* Missing interaction states on secondary/danger */
+.btn-secondary,.btn-danger{
+  transition:background-color var(--dur-micro) var(--ease-enter),
+             border-color var(--dur-micro) var(--ease-enter),
+             color var(--dur-micro) var(--ease-enter),
+             transform var(--dur-micro) var(--ease-enter);
+}
+.btn-secondary:active,.btn-danger:active{transform:translateY(1px)}
+.btn-danger:hover{background:rgba(244,63,94,0.16);border-color:rgba(244,63,94,0.35)}
+
+/* Press feedback — the iOS "the surface acknowledges you" scale. transform only,
+   so it never triggers layout. */
+.press,.icon-btn,.quick-tile{
+  transition:transform var(--dur-micro) var(--ease-enter),
+             opacity var(--dur-micro) var(--ease-enter);
+}
+.press:active,.icon-btn:active,.traveler-card:active,.quick-tile:active{
+  transform:scale(0.96);
+  opacity:0.8;
+}
+
+/* Screen-reader-only */
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+
+/* Skeleton loading — preferred over spinners for list/card surfaces */
+@keyframes skeletonPulse{0%,100%{opacity:0.5}50%{opacity:0.9}}
+/* tinted, not --bg-surface — that is #FFF in light mode and would be invisible */
+.skeleton{background:light-dark(rgba(0,0,0,0.07), rgba(255,255,255,0.06));border-radius:var(--radius-md);animation:skeletonPulse 1.4s ease-in-out infinite}
+
+/* Motion safety — WCAG 2.3.3 */
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{
+    animation-duration:0.01ms !important;
+    animation-iteration-count:1 !important;
+    transition-duration:0.01ms !important;
+    scroll-behavior:auto !important;
+  }
+  .traveler-card:hover,.btn-primary:hover{transform:none}
+  .press:active,.icon-btn:active,.traveler-card:active,.quick-tile:active{transform:none;opacity:1}
+  .pill-button:active,.btn-primary:active,.nav-pill:active,.segmented-option:active,.bottom-nav-item:active{transform:none;opacity:1}
+  /* Collapse still has to change state, just without the travel. */
+  .nav-bar-large,.nav-bar-compact{transform:none}
+  .nav-bar.collapsed .nav-bar-large{transform:none}
+}

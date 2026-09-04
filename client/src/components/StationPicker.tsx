@@ -36,8 +36,8 @@ export const StationPicker: React.FC<Props> = ({ onConfirm, onDismiss, showInlin
   const content = (
     <div style={{ display: 'flex', flexDirection: 'column', maxHeight: showInline ? 420 : '70vh' }}>
       <div style={{ padding: '20px 20px 14px', borderBottom: '1px solid var(--border-subtle)', background:'var(--bg-elevated)' }}>
-        <h3 style={{ fontSize: 17, fontWeight: 900, color: 'white', margin: 0, display: 'flex', alignItems: 'center', gap: 10, letterSpacing:-0.2 }}>
-          <span style={{ width:32,height:32, borderRadius:'50%', background:'rgba(123,93,255,0.14)', border:'1px solid rgba(123,93,255,0.22)', display:'flex', alignItems:'center', justifyContent:'center', color:'#7B5DFF' }}>
+        <h3 style={{ fontSize: 17, fontWeight: 900, color: 'var(--text-primary)', margin: 0, display: 'flex', alignItems: 'center', gap: 10, letterSpacing:-0.2 }}>
+          <span style={{ width:32,height:32, borderRadius:'50%', background:'rgba(123,93,255,0.14)', border:'1px solid rgba(123,93,255,0.22)', display:'flex', alignItems:'center', justifyContent:'center', color:'var(--accent-purple-text)' }}>
             <Navigation size={16} />
           </span>
           Where are you now?
@@ -46,8 +46,8 @@ export const StationPicker: React.FC<Props> = ({ onConfirm, onDismiss, showInlin
           {showInline ? 'Tap your station to get the right room. You can change anytime.' : 'Low confidence — pick your station to join the right room. +50 boost, coach never shared.'}
         </p>
         {!showInline && (
-          <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color:'#FDE68A', background:'rgba(234,179,8,0.08)', padding:'8px 10px', borderRadius:'var(--radius-md)', border:'1px solid rgba(234,179,8,0.14)' }}>
-            <Shield size={14} style={{ color:'#FDE68A' }} />
+          <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color:'var(--accent-amber)', background:'rgba(234,179,8,0.08)', padding:'8px 10px', borderRadius:'var(--radius-md)', border:'1px solid rgba(234,179,8,0.14)' }}>
+            <Shield size={14} style={{ color:'var(--accent-amber)' }} />
             Your exact coach is never shared — only station & line.
           </div>
         )}
@@ -57,16 +57,18 @@ export const StationPicker: React.FC<Props> = ({ onConfirm, onDismiss, showInlin
         <div style={{ flex: 1, position: 'relative', display: 'flex', alignItems: 'center' }}>
           <Search size={14} style={{ position: 'absolute', left: 12, color:'var(--text-muted)' }} />
           <input
+            aria-label="Search stations"
             placeholder="Search Rajiv Chowk"
             value={search}
             onChange={e => setSearch(e.target.value)}
-            style={{ width: '100%', padding:'10px 12px 10px 34px', borderRadius:'var(--radius-full)', background:'var(--bg-input)', border:'1px solid var(--border-subtle)', color:'white', fontSize:13, outline:'none' }}
+            style={{ width: '100%', padding:'10px 12px 10px 34px', borderRadius:'var(--radius-full)', background:'var(--bg-input)', border:'1px solid var(--border-subtle)', color:'var(--text-primary)', fontSize:16 }}
           />
         </div>
         <select
           value={selectedLine}
           onChange={e => setSelectedLine(e.target.value)}
-          style={{ padding:'10px 12px', borderRadius:'var(--radius-full)', background:'var(--bg-input)', border:'1px solid var(--border-subtle)', color:'var(--text-secondary)', fontSize:12, fontWeight:700 }}
+          aria-label="Filter by metro line"
+          style={{ padding:'10px 12px', borderRadius:'var(--radius-full)', background:'var(--bg-input)', border:'1px solid var(--border-subtle)', color:'var(--text-secondary)', fontSize:16, fontWeight:700 }}
         >
           <option value="all">All lines</option>
           {lines.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
@@ -96,13 +98,13 @@ export const StationPicker: React.FC<Props> = ({ onConfirm, onDismiss, showInlin
                 <MapPin size={16} />
               </div>
               <div>
-                <div style={{ fontSize: 13, fontWeight: 800, color:'white' }}>{station.name}</div>
+                <div style={{ fontSize: 13, fontWeight: 800, color:'var(--text-primary)' }}>{station.name}</div>
                 <div style={{ fontSize: 11, color:'var(--text-muted)', marginTop:2, display:'flex', alignItems:'center', gap:6 }}>
                   <span style={{ width:7,height:7, borderRadius:'50%', background: line.color, display:'inline-block' }} /> {line.name} • {station.isInterchange ? 'Interchange' : station.isUnderground ? 'Underground' : 'Elevated'}
                 </div>
               </div>
             </div>
-            <div style={{ width: 32, height: 32, borderRadius:'50%', background:'rgba(123,93,255,0.14)', border:'1px solid rgba(123,93,255,0.22)', display:'flex', alignItems:'center', justifyContent:'center', color:'#7B5DFF' }}>
+            <div style={{ width: 32, height: 32, borderRadius:'50%', background:'rgba(123,93,255,0.14)', border:'1px solid rgba(123,93,255,0.22)', display:'flex', alignItems:'center', justifyContent:'center', color:'var(--accent-purple-text)' }}>
               <Check size={16} />
             </div>
           </button>
@@ -128,8 +130,8 @@ export const StationPicker: React.FC<Props> = ({ onConfirm, onDismiss, showInlin
   }
 
   return (
-    <div className="drawer-overlay" onClick={onDismiss} style={{ zIndex: 60, background:'rgba(5,5,12,0.72)', backdropFilter:'blur(16px)' }}>
-      <div className="drawer-panel animate-slide-up" onClick={e => e.stopPropagation()} style={{ maxWidth: 520, maxHeight:'86vh', padding:0, overflow:'hidden', background:'#12121A', border:'1px solid var(--border-card)', borderRadius:'var(--radius-2xl) var(--radius-2xl) 0 0' }}>
+    <div className="drawer-overlay" onClick={onDismiss} style={{ zIndex: 60, background:'var(--scrim)', backdropFilter:'blur(16px)' }}>
+      <div className="drawer-panel animate-slide-up" onClick={e => e.stopPropagation()} style={{ maxWidth: 520, maxHeight:'86vh', padding:0, overflow:'hidden', background:'var(--bg-elevated)', border:'1px solid var(--border-card)', borderRadius:'var(--radius-2xl) var(--radius-2xl) 0 0' }}>
         <div style={{ width:40,height:4, borderRadius:999, background:'rgba(255,255,255,0.18)', margin:'12px auto 0' }} />
         {content}
       </div>
