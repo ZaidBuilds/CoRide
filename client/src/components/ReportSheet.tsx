@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Check } from 'lucide-react';
 import { ProfileSheet } from './ProfileSheet';
 import type { RoomPresenceTraveler } from '../types';
+import { authHeaders } from '../utils/auth';
 
 const API = 'http://localhost:4000';
 
@@ -42,7 +43,7 @@ export function ReportSheet({ open, traveler, currentUserId, onClose, onReported
     try {
       const res = await fetch(`${API}/api/reports`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-user-id': currentUserId },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ targetId: traveler.id, category, note: note.trim() || undefined })
       });
       if (!res.ok) {

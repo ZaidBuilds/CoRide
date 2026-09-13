@@ -1,8 +1,12 @@
 import { useState, useMemo } from 'react';
 import { TravelerCard } from './TravelerCard';
-import { ProfileDrawer } from './ProfileDrawer';
+import { ProfileSheet } from './ProfileSheet';
+import { ProfileSheetContent } from './ProfileSheetContent';
+import { ProfileSheetActions } from './ProfileSheetActions';
+import { EmptyState } from './ui/EmptyState';
+import { CarriageFeedSkeleton } from './transit/CarriageFeedSkeleton';
 import type { ContextRoom, ContextResult, UserProfile, RankedTraveler } from '../types';
-import { Train, Users, Shield, Info, SlidersHorizontal, Search } from 'lucide-react';
+import { Train, Shield } from 'lucide-react';
 
 interface Props {
   room: ContextRoom;
@@ -11,10 +15,10 @@ interface Props {
   friendIds: string[];
   ranked?: RankedTraveler[];
   vibe?: RankedTraveler[];
+  isLoading?: boolean;
   onConnect: (targetUserId: string) => void;
   onBlock: (targetUserId: string) => void;
   onReport: (targetUserId: string, reason: string) => void;
-  onOpenChat: () => void;
   onProfileOpen?: (targetUserId: string) => void;
 }
 
@@ -25,10 +29,10 @@ export const DiscoveryScreen: React.FC<Props> = ({
   friendIds,
   ranked,
   vibe,
+  isLoading = false,
   onConnect,
   onBlock,
   onReport,
-  onOpenChat,
   onProfileOpen
 }) => {
   const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null);
@@ -62,7 +66,6 @@ export const DiscoveryScreen: React.FC<Props> = ({
   }, [baseList, filter, friendIds]);
 
   const nextStation = room.scheduleLabel ? 'Mandi House' : (room.stationName === 'Rajiv Chowk (Connaught Place)' ? 'Mandi House' : 'Noida Sec 18');
-  const nextTime = '9:15 AM';
 
   return (
     <div className="animate-fade-in" style={{ paddingBottom: 8 }}>
@@ -92,13 +95,8 @@ export const DiscoveryScreen: React.FC<Props> = ({
           <div style={{ fontSize:14, fontWeight:800, color:'var(--text-primary)', display:'flex', alignItems:'center', gap:6 }}>
             {room.userCount || baseList.length} travelers online <span style={{ width:7,height:7, borderRadius:'50%', background:'var(--presence-active)', boxShadow:'0 0 6px var(--presence-active)', display:'inline-block' }} />
           </div>
-          <div style={{ fontSize:12, color:'var(--accent-purple-text)', marginTop:2 }}>Next: {nextStation} ({nextTime})</div>
+          <div style={{ fontSize:12, color:'var(--accent-purple-text)', marginTop:2 }}>Next: {nextStation}</div>
         </div>
-        <button style={{
-          padding:'7px 12px', borderRadius:'var(--radius-full)', background:'rgba(123,93,255,0.18)', border:'1px solid rgba(123,93,255,0.32)', color:'var(--accent-purple-text)', fontSize:11, fontWeight:700, display:'flex', alignItems:'center', gap:6
-        }}>
-          <Info size={12}/> Train Info
-        </button>
       </div>
 
       {/* Filter tabs — All / Nearby / Friends as in Figma */}
@@ -154,64 +152,73 @@ export const DiscoveryScreen: React.FC<Props> = ({
         </div>
       )}
 
-      {/* Traveler list — Figma cards */}
-      <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
-        {filtered.map(u => {
-          const r = rankedMap.get(u.id);
-          return (
-            <TravelerCard
-              key={u.id}
-              user={u}
-              isMe={u.id===currentUser.id}
-              mutualTags={r?.mutualTags}
-              mutualCount={r?.mutualCount}
-              trustBadge={r?.trustBadge}
-              trustTier={r?.trustTier}
-              rankedScore={r ? Math.round(r.score) : undefined}
-              vibeTagline={(u as any).vibeTagline}
-              onTap={()=> handleTap(u)}
-              onConnect={()=> onConnect(u.id)}
-              onBlock={()=> onBlock(u.id)}
-              onReport={()=> onReport(u.id, 'General concern')}
+      {/* Traveler list — Figma cards or CarriageFeedSkeleton */}
+      {isLoading ? (
+        <CarriageFeedSkeleton />
+      ) : (
+        <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+          {filtered.map(u => {
+            const r = rankedMap.get(u.id);
+            return (
+              <TravelerCard
+                key={u.id}
+                user={u}
+                isMe={u.id===currentUser.id}
+                mutualTags={r?.mutualTags}
+                mutualCount={r?.mutualCount}
+                trustBadge={r?.trustBadge}
+                trustTier={r?.trustTier}
+                rankedScore={r ? Math.round(r.score) : undefined}
+                vibeTagline={(u as any).vibeTagline}
+                isFriend={friendIds.includes(u.id)}
+                activeRoomId={room?.id}
+                onTap={()=> handleTap(u)}
+                onConnect={()=> onConnect(u.id)}
+                onBlock={()=> onBlock(u.id)}
+                onReport={()=> onReport(u.id, 'General concern')}
+              />
+            );
+          })}
+          {filtered.length === 0 && (
+            <EmptyState
+              lineName={room.lineName || context?.lineName || 'Blue Line'}
+              stationName={room.stationName || context?.stationName || 'Rajiv Chowk'}
+              direction={room.direction || 'Towards Noida'}
             />
-          );
-        })}
-        {filtered.length===0 && (
-          <div style={{ textAlign:'center', padding:24, color:'var(--text-muted)', fontSize:12, border:'1px dashed var(--border-subtle)', borderRadius:'var(--radius-lg)' }}>
-            No travelers in this filter — try All
-          </div>
-        )}
-      </div>
-
-      {/* Bottom actions as in Figma 02 — Filters + Search floating */}
-      <div style={{ display:'flex', justifyContent:'center', marginTop:14, gap:10 }}>
-        <button style={{ display:'flex', alignItems:'center', gap:8, padding:'10px 18px', borderRadius:'var(--radius-full)', background:'var(--bg-surface)', border:'1px solid var(--border-card)', color:'var(--text-secondary)', fontWeight:700, fontSize:12 }}>
-          <SlidersHorizontal size={14}/> Filters
-        </button>
-        <button aria-label="Search travellers" style={{ width:44, height:44, borderRadius:'50%', background:'var(--bg-surface)', border:'1px solid var(--border-card)', display:'flex', alignItems:'center', justifyContent:'center', color:'var(--text-secondary)' }}>
-          <Search size={18}/>
-        </button>
-      </div>
-
-      {/* Chat CTA hidden -> moved to Home Quick Actions, but keep for station/train chat */}
-      <div style={{ display:'flex', justifyContent:'center', marginTop:14 }}>
-        <button onClick={onOpenChat} style={{ padding:'10px 18px', borderRadius:'var(--radius-full)', background:'rgba(123,93,255,0.14)', border:'1px solid rgba(123,93,255,0.28)', color:'var(--accent-purple-text)', fontWeight:700, fontSize:12, display:'flex', alignItems:'center', gap:6 }}>
-          <Users size={14}/> Open {room.type==='station'?'Station':'Train'} Chat
-        </button>
-      </div>
-
-      {selectedUser && (
-        <ProfileDrawer
-          user={selectedUser}
-          isMe={selectedUser.id===currentUser.id}
-          isFriend={friendIds.includes(selectedUser.id)}
-          onClose={()=> setSelectedUser(null)}
-          onConnect={()=> { onConnect(selectedUser.id); setSelectedUser(null); }}
-          onBlock={()=> { onBlock(selectedUser.id); setSelectedUser(null); }}
-          onReport={(reason)=> { onReport(selectedUser.id, reason); setSelectedUser(null); }}
-          onMessage={()=> setSelectedUser(null)}
-        />
+          )}
+        </div>
       )}
+
+      {/* Traveler Profile Sheet */}
+      <ProfileSheet
+        open={selectedUser !== null}
+        onClose={() => setSelectedUser(null)}
+        labelledBy="discovery-profile-title"
+      >
+        {selectedUser && (
+          <>
+            <ProfileSheetContent
+              traveler={selectedUser}
+              titleId="discovery-profile-title"
+              isFriend={friendIds.includes(selectedUser.id)}
+              currentContext={context}
+              activeRoomId={room?.id}
+            />
+            <ProfileSheetActions
+              initialState={
+                selectedUser.id === currentUser.id
+                  ? 'already-friends'
+                  : friendIds.includes(selectedUser.id)
+                    ? 'already-friends'
+                    : 'idle'
+              }
+              onSendRequest={() => onConnect(selectedUser.id)}
+              onReport={() => { onReport(selectedUser.id, 'Inappropriate behavior'); setSelectedUser(null); }}
+              onBlock={() => { onBlock(selectedUser.id); setSelectedUser(null); }}
+            />
+          </>
+        )}
+      </ProfileSheet>
     </div>
   );
 };

@@ -11,6 +11,7 @@ try { dotenv.config({ path: path.join(__dirname, '..', '.env') }); } catch {}
 try { dotenv.config({ path: path.join(process.cwd(), 'server', '.env') }); } catch {}
 try { dotenv.config({ path: path.join(process.cwd(), '.env') }); } catch {}
 import { TransitContextEngine } from './services/transitContextEngine';
+import { PathTrackerEngine } from './services/pathTrackerEngine';
 import { RoomManager } from './services/roomManager';
 import { ConnectionManager } from './services/connectionManager';
 import { ModerationEngine } from './services/moderationEngine';
@@ -19,6 +20,8 @@ import { Persistence } from './services/persistence';
 import { EngagementManager } from './services/engagement/engagementManager';
 import { RankingService } from './services/personalization/rankingService';
 import { CommutePatternService } from './services/personalization/commutePatternService';
+import { RedisPresence } from './services/redisPresence';
+import { signToken, verifyToken } from './services/authToken';
 import { INTEREST_TAXONOMY, sanitizeTags } from './types';
 import type { UserProfile } from './types';
 
@@ -41,6 +44,7 @@ const persistence = Persistence.getInstance();
 const engagement = EngagementManager.getInstance();
 const rankingService = RankingService.getInstance();
 const commuteService = CommutePatternService.getInstance();
+const redisPresence = RedisPresence.getInstance();
 
 // ── MVP2 helper: IST commute window (07:30-10:30, 17:00-20:30) ──
 function isCommuteWindowNow(d = new Date()): boolean {
@@ -70,6 +74,11 @@ function unregisterSocket(socketId: string): void {
   }
 }
 
+// Presence rooms (socket membership) just for Redis-presence rooms, kept
+// separately from roomManager (in-memory context rooms). Enables disconnect
+// cleanup + leave broadcasts without touching the legacy room store.
+const socketPresenceRooms: Map<string, Set<string>> = new Map();
+
 function emitToUsers(userIds: string[], event: string, payload: any): void {
   const sent = new Set<string>();
   for (const uid of userIds) {
@@ -94,6 +103,105 @@ app.get('/api/metro/lines', (_req, res) => {
 
 app.get('/api/metro/beachhead', (_req, res) => {
   res.json(getBeachheadInfo());
+});
+
+/**
+ * A room id must be exactly `station:line:direction`, each a bounded
+ * `[a-z0-9_]` slug. This caps Redis key length/charset and prevents arbitrary
+ * strings from creating junk rooms (key-space abuse) or ambiguous presence keys.
+ */
+const ROOM_ID_RE = /^[a-z0-9_]{1,40}:[a-z0-9_]{1,30}:[a-z0-9_]{1,40}$/;
+function isValidRoomId(id: string): boolean {
+  return ROOM_ID_RE.test(id);
+}
+
+/**
+ * A Redis-presence room (manual pick, e.g. rajiv_chowk:blue:towards_noida) as
+ * opposed to a legacy context room (station:... / train:...), which lives in
+ * roomManager. Presence rooms have members + TTL keys in Redis and ephemeral
+ * socket messages; context rooms keep their in-memory row.
+ */
+function isPresenceRoomId(id: string): boolean {
+  return isValidRoomId(id) && !id.startsWith('station:') && !id.startsWith('train:');
+}
+
+/**
+ * Live presence for a manually-picked room — {station}:{line}:{direction}.
+ * Polled by the client every 15s; no GPS, no inference, no socket.
+ *
+ * `count` is derived from the travelers actually returned, not from the raw
+ * Redis membership, so the header count can never disagree with the list.
+ */
+app.get('/api/room/:roomId', async (req, res) => {
+  const roomId = req.params.roomId;
+  if (!isValidRoomId(roomId)) return res.status(400).json({ error: 'Invalid room id.' });
+  // Viewer is optional here; when present we hide anyone in a block relationship
+  // with them (either direction). isBlocked is symmetric, so a block hides the
+  // pair for both people.
+  const viewer = actorId(req);
+  try {
+    const userIds = await redisPresence.getRoom(roomId);
+
+    const visibleIds = viewer
+      ? userIds.filter(id => id === viewer || !connectionManager.isBlocked(viewer, id))
+      : userIds;
+
+    const travelers = visibleIds
+      .map(id => persistence.getProfile(id) || roomManager.getUserProfile(id))
+      .filter((p): p is UserProfile => !!p);
+
+    // Per-user presence state from the key's remaining TTL, not a blanket
+    // 'active' — a user whose heartbeat lapsed into the away window shows it.
+    const states = await redisPresence.getStates(roomId, travelers.map(p => p.id));
+
+    const body = travelers.map(p => ({
+      id: p.id,
+      username: p.username,
+      pseudonym: p.pseudonym || p.username.replace(/^@/, ''),
+      avatarId: p.avatarId,
+      avatarBg: p.avatarBg,
+      interestTags: p.interestTags || [],
+      bio: p.bio ?? '',
+      trustTier: p.trustTier || 'regular',
+      presenceState: states.get(p.id) || (p.id === viewer ? 'active' : 'away')
+    }));
+
+    res.json({ roomId, count: body.length, travelers: body });
+  } catch (err) {
+    // Redis being down must not take the process with it.
+    console.error(`[room] ${roomId} lookup failed`, err);
+    res.status(503).json({ error: 'Presence unavailable', roomId });
+  }
+});
+
+app.post('/api/room/:roomId/heartbeat', async (req, res) => {
+  const roomId = req.params.roomId;
+  if (!isValidRoomId(roomId)) return res.status(400).json({ error: 'Invalid room id.' });
+  // Identity comes from x-user-id only — a body userId let anyone heartbeat as
+  // (or, via leave, evict) another user.
+  const userId = actorId(req);
+  if (!userId) return res.status(401).json({ error: 'Invalid or missing auth token.' });
+  try {
+    await redisPresence.heartbeat(userId, roomId);
+    res.json({ ok: true, roomId, userId });
+  } catch (err) {
+    console.error(`[room] ${roomId} heartbeat failed`, err);
+    res.status(503).json({ error: 'Presence unavailable' });
+  }
+});
+
+app.post('/api/room/:roomId/leave', async (req, res) => {
+  const roomId = req.params.roomId;
+  if (!isValidRoomId(roomId)) return res.status(400).json({ error: 'Invalid room id.' });
+  const userId = actorId(req);
+  if (!userId) return res.status(401).json({ error: 'Invalid or missing auth token.' });
+  try {
+    await redisPresence.leaveRoom(userId, roomId);
+    res.json({ ok: true, roomId, userId });
+  } catch (err) {
+    console.error(`[room] ${roomId} leave failed`, err);
+    res.status(503).json({ error: 'Presence unavailable' });
+  }
 });
 
 // ── MVP2: Commute windows schedule (for client push scheduling) ──
@@ -193,6 +301,43 @@ app.patch('/api/profile/:userId', (req, res) => {
   res.json({ profile: enrichProfile(updated), trust: moderation.getTrustInfo(updated.id) });
 });
 
+// DELETE /api/profile/:userId — Google Play Mandatory Account Deletion Policy
+app.delete('/api/profile/:userId', (req, res) => {
+  const userId = req.params.userId;
+  const caller = actorId(req);
+  if (caller && caller !== userId) {
+    return res.status(403).json({ error: 'Not authorized to delete this account.' });
+  }
+
+  try {
+    const store = persistence.load();
+    if (store.profiles) {
+      delete store.profiles[userId];
+    }
+    if (store.friendships) {
+      delete store.friendships[userId];
+      for (const fid of Object.keys(store.friendships)) {
+        store.friendships[fid] = (store.friendships[fid] || []).filter(id => id !== userId);
+      }
+    }
+    if (store.blocks) {
+      delete store.blocks[userId];
+      for (const bid of Object.keys(store.blocks)) {
+        store.blocks[bid] = (store.blocks[bid] || []).filter(id => id !== userId);
+      }
+    }
+    persistence.save(store);
+
+    const rmProfiles: any = (roomManager as any).userProfiles;
+    if (rmProfiles && rmProfiles.delete) rmProfiles.delete(userId);
+
+    return res.json({ ok: true, message: 'Account and associated data permanently deleted.' });
+  } catch (err) {
+    console.error('[delete profile] failed', err);
+    return res.status(500).json({ error: 'Could not complete account deletion.' });
+  }
+});
+
 app.get('/api/reputation/:userId', (req, res) => {
   const trust = moderation.getTrustInfo(req.params.userId);
   res.json({ ...trust, reputation: moderation.getReputation(req.params.userId) });
@@ -285,17 +430,28 @@ app.get('/api/auth/random-profile', (_req, res) => {
   };
   // persist for retention
   persistence.appendProfile(profile);
-  res.json({ profile, avatarPalette: AVATAR_PALETTE });
+  res.json({ profile, token: signToken(profile.id), avatarPalette: AVATAR_PALETTE });
 });
 
 // Restore existing profile (for retention after reload)
 app.get('/api/auth/restore/:userId', (req, res) => {
   const profile = persistence.getProfile(req.params.userId) || roomManager.getUserProfile(req.params.userId);
   if (profile) {
-    res.json({ profile, restored: true });
+    res.json({ profile, token: signToken(profile.id), restored: true });
   } else {
     res.status(404).json({ error: 'Profile not found' });
   }
+});
+
+// Update user interest tags (sanitized & validated against the interest taxonomy).
+app.patch('/api/user/:userId/tags', (req, res) => {
+  const userId = req.params.userId;
+  const rawTags: string[] = req.body?.tags || [];
+  const valid = sanitizeTags(rawTags);
+  const profile: any = persistence.getProfile(userId) || roomManager.getUserProfile(userId);
+  if (!profile) return res.status(404).json({ error: 'User not found' });
+  persistence.appendProfile(profile);
+  res.json({ profile, tags: valid });
 });
 
 // Lightweight analytics ingest (north-star signals)
@@ -374,7 +530,7 @@ app.post('/api/admin/resolve/:reportId', (req, res) => {
 
 // ── Transit Context Engine: auto-detect ──
 app.post('/api/context/detect', (req, res) => {
-  const { userId, lat, lng, cellTowerId, movementState, speedKmh, userConfirmed, routeHistory } = req.body;
+  const { userId, lat, lng, cellTowerId, movementState, speedKmh, userConfirmed, routeHistory, headingDegrees, userConfirmedDirection } = req.body;
 
   const ctx = contextEngine.evaluate({
     userId: userId || 'anonymous',
@@ -385,7 +541,9 @@ app.post('/api/context/detect', (req, res) => {
     movementState: movementState || 'IN_VEHICLE',
     speedKmh: speedKmh ? Number(speedKmh) : undefined,
     routeHistory: Array.isArray(routeHistory) ? routeHistory : undefined,
-    userConfirmed: !!userConfirmed
+    userConfirmed: !!userConfirmed,
+    headingDegrees: headingDegrees !== undefined ? Number(headingDegrees) : undefined,
+    userConfirmedDirection: userConfirmedDirection || undefined
   });
 
   // Create/find the room for this context
@@ -394,6 +552,36 @@ app.post('/api/context/detect', (req, res) => {
   res.json({
     context: ctx,
     room: roomManager.serializeRoom(room.id)
+  });
+});
+
+// ── Path & Trajectory Engine: 1-Tap Direction Override ──
+app.post('/api/context/direction-override', (req, res) => {
+  const { userId, lineId, direction, stationId } = req.body;
+  const effectiveUserId = actorId(req) || userId;
+  if (!effectiveUserId || !lineId || !direction) {
+    return res.status(400).json({ error: 'userId (or auth token), lineId, and direction are required' });
+  }
+
+  const tracker = PathTrackerEngine.getInstance();
+  tracker.setDirectionOverride(effectiveUserId, lineId, direction);
+
+  // Evaluate updated context with confirmed direction
+  const ctx = contextEngine.evaluate({
+    userId: effectiveUserId,
+    timestamp: Date.now(),
+    movementState: 'IN_VEHICLE',
+    userConfirmed: true,
+    userConfirmedDirection: direction
+  });
+
+  const room = roomManager.getOrCreateFromContext(ctx);
+
+  res.json({
+    ok: true,
+    context: ctx,
+    room: roomManager.serializeRoom(room.id),
+    trip: tracker.getTrip(effectiveUserId)
   });
 });
 
@@ -435,11 +623,106 @@ app.get('/api/connections/history/:userId', (req, res) => {
   res.json({ history: all });
 });
 
+// ── REST connection API (used by the room profile sheet) ──────────────
+// Authenticated actor identity. Derived ONLY from a verified signed token
+// (Authorization: Bearer <token>, issued at /api/auth/*). A client can no
+// longer claim an identity via a plain header — the signature is checked.
+function actorId(req: express.Request): string | null {
+  const auth = req.header('authorization') || '';
+  const bearer = auth.startsWith('Bearer ') ? auth.slice(7) : undefined;
+  // Also accept the raw token in x-user-token (sockets/tests), never a bare id.
+  return verifyToken(bearer || req.header('x-user-token'));
+}
+
+// Self-contained 20/hour limiter. Deliberately NOT the shared
+// moderation.checkRateLimit('connection_request') — that is 10/hour and is
+// wired to the socket path; changing it there would need a second file and
+// would silently alter socket behaviour.
+const REST_CONN_MAX = 20;
+const REST_CONN_WINDOW_MS = 60 * 60 * 1000;
+const restConnBuckets = new Map<string, number[]>();
+function restConnRateOk(userId: string): { ok: boolean; remaining: number } {
+  const now = Date.now();
+  const hits = (restConnBuckets.get(userId) || []).filter(t => now - t < REST_CONN_WINDOW_MS);
+  if (hits.length >= REST_CONN_MAX) {
+    restConnBuckets.set(userId, hits);
+    return { ok: false, remaining: 0 };
+  }
+  hits.push(now);
+  restConnBuckets.set(userId, hits);
+  return { ok: true, remaining: REST_CONN_MAX - hits.length };
+}
+
+// POST /api/connections { targetId } → create a pending request
+app.post('/api/connections', (req, res) => {
+  const from = actorId(req);
+  const targetId = req.body?.targetId;
+  if (!from) return res.status(401).json({ error: 'Missing x-user-id.' });
+  if (!targetId) return res.status(400).json({ error: 'targetId is required.' });
+  if (from === targetId) return res.status(400).json({ error: 'Cannot connect to yourself.' });
+
+  const rate = restConnRateOk(from);
+  if (!rate.ok) return res.status(429).json({ error: 'Rate limit: 20 connection requests per hour.' });
+
+  // sendRequest already guards blocked / already-friends / duplicate, and
+  // auto-accepts a reciprocal pending request.
+  const result = connectionManager.sendRequest(from, targetId);
+  if (!result.success) return res.status(409).json({ error: result.message });
+  return res.status(201).json({ request: result.request, remaining: rate.remaining });
+});
+
+// POST /api/connections/:id/accept
+app.post('/api/connections/:id/accept', (req, res) => {
+  const me = actorId(req);
+  if (!me) return res.status(401).json({ error: 'Missing x-user-id.' });
+  const result = connectionManager.acceptRequest(req.params.id, me);
+  if (!result.success) {
+    return res.status(result.message === 'Request not found.' ? 404 : 403).json({ error: result.message });
+  }
+  return res.json({ request: result.request });
+});
+
+// POST /api/connections/:id/decline
+app.post('/api/connections/:id/decline', (req, res) => {
+  const me = actorId(req);
+  if (!me) return res.status(401).json({ error: 'Missing x-user-id.' });
+  const result = connectionManager.declineRequest(req.params.id, me);
+  if (!result.success) {
+    return res.status(result.message === 'Request not found.' ? 404 : 403).json({ error: result.message });
+  }
+  return res.json({ ok: true });
+});
+
+// GET /api/connections → my friends + pending in/out (actor from x-user-id)
+app.get('/api/connections', (req, res) => {
+  const me = actorId(req);
+  if (!me) return res.status(401).json({ error: 'Missing x-user-id.' });
+  const friends = connectionManager.getFriendIds(me).map(fid => ({
+    id: fid,
+    profile: roomManager.getUserProfile(fid) || null
+  }));
+  const incoming = connectionManager.getPendingRequestsFor(me).map(r => ({
+    ...r, fromProfile: roomManager.getUserProfile(r.fromUserId) || null
+  }));
+  const outgoing = connectionManager.getSentRequestsFor(me).map(r => ({
+    ...r, toProfile: roomManager.getUserProfile(r.toUserId) || null
+  }));
+  return res.json({ friends, pending: { incoming, outgoing } });
+});
+
 // DM history (REST fallback for initial load)
 app.get('/api/dm/:userId/:friendId', (req, res) => {
+  // Auth: the caller must BE one of the two participants. Previously this route
+  // had no check, so anyone could read any pair's thread by guessing ids.
+  const me = actorId(req);
+  const { userId, friendId } = req.params;
+  if (!me) return res.status(401).json({ error: 'Missing x-user-id.' });
+  if (me !== userId && me !== friendId) {
+    return res.status(403).json({ error: 'Not your conversation.' });
+  }
   try {
     const store = persistence.load();
-    const key = [req.params.userId, req.params.friendId].sort().join('::');
+    const key = [userId, friendId].sort().join('::');
     const history = store.directMessages[key] || [];
     res.json({ messages: history.slice(-50) });
   } catch {
@@ -447,79 +730,363 @@ app.get('/api/dm/:userId/:friendId', (req, res) => {
   }
 });
 
+// ── REST report & block (used by the profile/report sheet) ────────────
+const REPORT_CATEGORIES = ['spam', 'harassment', 'inappropriate', 'impersonation', 'other'];
+
+// POST /api/reports { targetId, category, note }
+app.post('/api/reports', (req, res) => {
+  const me = actorId(req);
+  const { targetId, category, note } = req.body || {};
+  if (!me) return res.status(401).json({ error: 'Missing x-user-id.' });
+  if (!targetId) return res.status(400).json({ error: 'targetId is required.' });
+  if (me === targetId) return res.status(400).json({ error: 'You cannot report yourself.' });
+  if (!REPORT_CATEGORIES.includes(category)) {
+    return res.status(400).json({ error: `category must be one of: ${REPORT_CATEGORIES.join(', ')}` });
+  }
+  // reportUser stores a single reason string; fold the optional note into it.
+  const reason = note && String(note).trim() ? `${category}: ${String(note).trim()}` : category;
+  const result = connectionManager.reportUser(me, targetId, reason);
+  return res.status(201).json({ message: result.message });
+});
+
+// POST /api/blocks { targetId }
+app.post('/api/blocks', (req, res) => {
+  const me = actorId(req);
+  const targetId = req.body?.targetId;
+  if (!me) return res.status(401).json({ error: 'Missing x-user-id.' });
+  if (!targetId) return res.status(400).json({ error: 'targetId is required.' });
+  if (me === targetId) return res.status(400).json({ error: 'You cannot block yourself.' });
+  const result = connectionManager.blockUser(me, targetId);
+  return res.status(201).json({ message: result.message });
+});
+
+// DELETE /api/blocks/:id — :id is the blocked user's id
+app.delete('/api/blocks/:id', (req, res) => {
+  const me = actorId(req);
+  if (!me) return res.status(401).json({ error: 'Missing x-user-id.' });
+  const result = connectionManager.unblock(me, req.params.id);
+  if (!result.success) return res.status(404).json({ error: result.message });
+  return res.json({ ok: true });
+});
+
+// GET /api/blocks → returns blocked users for the actor
+app.get('/api/blocks', (req, res) => {
+  const me = actorId(req);
+  if (!me) return res.status(401).json({ error: 'Missing auth.' });
+  const blockedIds = connectionManager.getBlockedIds(me);
+  const blockedUsers = blockedIds.map(id => {
+    const p = persistence.getProfile(id) || roomManager.getUserProfile(id);
+    return {
+      id,
+      pseudonym: p?.pseudonym || p?.username?.replace('@', '') || 'Commuter',
+      username: p?.username || `@user_${id.slice(0, 6)}`,
+      avatarBg: p?.avatarBg || '#2A2F39'
+    };
+  });
+  return res.json({ blockedUsers });
+});
+
+// GET /api/moderation/reports → queue of reports for compliance audit
+app.get('/api/moderation/reports', (_req, res) => {
+  const store = persistence.load();
+  res.json({ reports: store.reports || [] });
+});
+
+// ── REST 1:1 chat (accepted connections only) ────────────────────────
+// A 1:1 chat is identified by the peer's id, so :id IS the other user's id —
+// no separate chat-id scheme. Actor from x-user-id, as with connections.
+const dmKey = (a: string, b: string) => [a, b].sort().join('::');
+
+// GET /api/chats → one entry per accepted connection, newest activity first.
+app.get('/api/chats', (req, res) => {
+  const me = actorId(req);
+  if (!me) return res.status(401).json({ error: 'Missing x-user-id.' });
+  const store = persistence.load();
+  const chats = connectionManager.getFriendIds(me).map(peerId => {
+    const thread = store.directMessages[dmKey(me, peerId)] || [];
+    const last = thread[thread.length - 1];
+    return {
+      id: peerId,
+      peer: roomManager.getUserProfile(peerId) || null,
+      lastMessage: last ? { content: last.content, timestamp: last.timestamp, senderId: last.senderId } : null,
+      // Unread = messages from the peer newer than my lastReadAt for this chat.
+      unread: (() => {
+        const lastReadAt = store.reads[`${me}::${peerId}`] || 0;
+        return thread.filter((m: any) => m.senderId === peerId && m.timestamp > lastReadAt).length;
+      })()
+    };
+  });
+  chats.sort((a, b) => (b.lastMessage?.timestamp || 0) - (a.lastMessage?.timestamp || 0));
+  return res.json({ chats });
+});
+
+// GET /api/chats/:id/messages → thread history (last 50)
+app.get('/api/chats/:id/messages', (req, res) => {
+  const me = actorId(req);
+  const peerId = req.params.id;
+  if (!me) return res.status(401).json({ error: 'Missing x-user-id.' });
+  if (!connectionManager.areFriends(me, peerId)) {
+    return res.status(403).json({ error: 'You can only chat with accepted connections.' });
+  }
+  const store = persistence.load();
+  const history = (store.directMessages[dmKey(me, peerId)] || []).slice(-50);
+  return res.json({ messages: history });
+});
+
+// POST /api/chats/:id/messages { content }
+app.post('/api/chats/:id/messages', (req, res) => {
+  const me = actorId(req);
+  const peerId = req.params.id;
+  const content = (req.body?.content || '').trim();
+  if (!me) return res.status(401).json({ error: 'Missing x-user-id.' });
+  if (!content) return res.status(400).json({ error: 'content is required.' });
+  if (!connectionManager.areFriends(me, peerId)) {
+    return res.status(403).json({ error: 'You can only chat with accepted connections.' });
+  }
+  const check = moderation.preCheck(me, 'message', content);
+  if (!check.allowed) return res.status(429).json({ error: check.message });
+
+  const dm = { id: `dm_${Date.now()}`, senderId: me, receiverId: peerId, content, timestamp: Date.now(), read: false };
+  try {
+    const store = persistence.load();
+    const key = dmKey(me, peerId);
+    if (!store.directMessages[key]) store.directMessages[key] = [];
+    store.directMessages[key].push(dm);
+    if (store.directMessages[key].length > 200) store.directMessages[key] = store.directMessages[key].slice(-200);
+    persistence.save(store);
+  } catch (err) {
+    console.error('[chats] persist failed', err);
+    return res.status(500).json({ error: 'Could not send message.' });
+  }
+  // Mirror to any live socket so the peer's open chat/DM view still updates.
+  emitToUsers([me, peerId], 'new_dm', dm);
+  return res.status(201).json({ message: dm });
+});
+
+// POST /api/chats/:id/read — mark this chat read up to now for the caller.
+app.post('/api/chats/:id/read', (req, res) => {
+  const me = actorId(req);
+  const peerId = req.params.id;
+  if (!me) return res.status(401).json({ error: 'Missing x-user-id.' });
+  if (!connectionManager.areFriends(me, peerId)) {
+    return res.status(403).json({ error: 'You can only chat with accepted connections.' });
+  }
+  const now = Date.now();
+  try {
+    const store = persistence.load();
+    store.reads[`${me}::${peerId}`] = now;
+    persistence.save(store);
+  } catch (err) {
+    console.error('[chats] read persist failed', err);
+    return res.status(500).json({ error: 'Could not mark read.' });
+  }
+  return res.json({ ok: true, lastReadAt: now });
+});
+
 // ────────────────────────────────────────
 //  SOCKET.IO REALTIME
 // ────────────────────────────────────────
 
+// Socket identity, with the same trust model as REST: the server resolves who
+// the client is from the handshake auth payload (`auth: { userId }`), never
+// from a client-sent user object. An auth userId that doesn't resolve to a
+// known profile is a spoof and rejects the connection outright. Clients that
+// connect without auth are tolerated for now, but their identity is
+// unverified — see the `user` fallbacks below (removed once every screen
+// sends auth).
+function resolveSocketIdentity(socket: {
+  handshake: { auth: Record<string, unknown> };
+}): { userId: string | null; profile: UserProfile | null } {
+  // Identity comes from the SIGNED token, never a bare auth.userId — a client
+  // cannot claim to be someone else without the signing secret.
+  const token = socket.handshake.auth?.token;
+  const uid = verifyToken(typeof token === 'string' ? token : null);
+  if (!uid) return { userId: null, profile: null };
+  const profile = persistence.getProfile(uid) || roomManager.getUserProfile(uid) || null;
+  return { userId: uid, profile };
+}
+
+io.use((socket, next) => {
+  const hasToken = typeof socket.handshake?.auth?.token === 'string';
+  if (hasToken) {
+    const ident = resolveSocketIdentity(socket);
+    // A token that fails verification is a spoof attempt — reject outright.
+    if (!ident.userId) return next(new Error('unknown traveler'));
+    socket.data.userId = ident.userId;
+    socket.data.profile = ident.profile;
+    return next();
+  }
+  // No token — unverified connection; sensitive handlers reject on null profile.
+  socket.data.userId = null;
+  socket.data.profile = null;
+  next();
+});
+
+// Live presence diff for a room: emit the authoritative PTTL-derived state so
+// connected clients can update without polling. state === null means "left".
+function broadcastPresence(roomId: string, userId: string | null): void {
+  void (async () => {
+    try {
+      const state = userId ? await redisPresence.getState(userId, roomId) : null;
+      io.to(roomId).emit('presence_updated', {
+        roomId,
+        userId,
+        state,
+        timestamp: Date.now()
+      });
+    } catch (err) {
+      console.error('[presence] broadcast failed', err);
+    }
+  })();
+}
+
 io.on('connection', (socket) => {
-  console.log(`[Connected] ${socket.id}`);
+  console.log(`[Connected] ${socket.id}${socket.data.userId ? ` (${socket.data.userId})` : ''}`);
 
   // ── Join Room ──
-  socket.on('join_room', ({ roomId, user }: { roomId: string; user: UserProfile }) => {
+  socket.on('join_room', ({ roomId, user }: { roomId: string; user?: UserProfile }) => {
     try {
+      const profile: UserProfile | null = socket.data.profile || user || null;
+      if (!profile) {
+        socket.emit('error_message', { error: 'Authentication required to join a room.' });
+        return;
+      }
       socket.join(roomId);
-      registerUserSocket(user.id, socket.id);
-      const room = roomManager.joinRoom(roomId, user, socket.id);
+      socket.data.userId = profile.id;
+      socket.data.profile = profile;
+      registerUserSocket(profile.id, socket.id);
+
+      if (isPresenceRoomId(roomId)) {
+        if (!socketPresenceRooms.has(socket.id)) socketPresenceRooms.set(socket.id, new Set());
+        socketPresenceRooms.get(socket.id)!.add(roomId);
+        void redisPresence.joinRoom(profile.id, roomId);
+        broadcastPresence(roomId, profile.id);
+        return;
+      }
+
+      const room = roomManager.joinRoom(roomId, profile, socket.id);
       const serialized = roomManager.serializeRoom(roomId);
 
       io.to(roomId).emit('room_updated', serialized);
+      broadcastPresence(roomId, profile.id);
     } catch (err: any) {
       socket.emit('error_message', { error: err.message });
     }
   });
 
   // ── Presence Heartbeat — MVP2: keep live, touch TTL ──
-  socket.on('heartbeat', ({ userId, roomId }: { userId: string; roomId: string }) => {
-    presence.heartbeat(userId, roomId, socket.id);
-    roomManager.touchRoom(roomId);
+  socket.on('heartbeat', ({ roomId }: { roomId: string }) => {
+    const userId: string | null = socket.data.userId;
+    if (!userId || !roomId) return;
+    if (isPresenceRoomId(roomId)) {
+      void redisPresence.heartbeat(userId, roomId);
+    } else {
+      presence.heartbeat(userId, roomId, socket.id);
+      roomManager.touchRoom(roomId);
+    }
+    broadcastPresence(roomId, userId);
   });
 
   // ── Leave Room (explicit switch) ──
-  socket.on('leave_room', ({ roomId, userId }: { roomId: string; userId: string }) => {
-    const leaveMsg = roomManager.leaveRoom(roomId, userId, 'switch');
+  socket.on('leave_room', ({ roomId, userId: legacyUserId }: { roomId: string; userId?: string }) => {
+    const userId: string | null = socket.data.userId || legacyUserId || null;
+
+    if (isPresenceRoomId(roomId)) {
+      socketPresenceRooms.get(socket.id)?.delete(roomId);
+      if (userId) void redisPresence.leaveRoom(userId, roomId);
+      socket.leave(roomId);
+      broadcastPresence(roomId, null);
+      return;
+    }
+
+    const leaveMsg = roomManager.leaveRoom(roomId, userId ?? '', 'switch');
     const serialized = roomManager.serializeRoom(roomId);
     if (serialized) io.to(roomId).emit('room_updated', serialized);
     if (leaveMsg) io.to(roomId).emit('new_message', leaveMsg);
+    broadcastPresence(roomId, null);
     socket.leave(roomId);
   });
 
   // ── Typing indicators (ephemeral) ──
-  socket.on('typing_start', ({ roomId, user }: { roomId: string; user: UserProfile }) => {
-    socket.to(roomId).emit('user_typing', { roomId, userId: user.id, pseudonym: user.pseudonym, avatarBg: user.avatarBg });
+  socket.on('typing_start', ({ roomId, user }: { roomId: string; user?: UserProfile }) => {
+    const profile: UserProfile | null = socket.data.profile || user || null;
+    if (!profile) return;
+    socket.to(roomId).emit('user_typing', { roomId, userId: profile.id, pseudonym: profile.pseudonym, avatarBg: profile.avatarBg });
   });
   socket.on('typing_stop', ({ roomId, userId }: { roomId: string; userId: string }) => {
-    socket.to(roomId).emit('user_stop_typing', { roomId, userId });
+    const uid: string = socket.data.userId || userId;
+    if (!uid) return;
+    socket.to(roomId).emit('user_stop_typing', { roomId, userId: uid });
   });
 
   // ── Send Message (with moderation) — touch room ephemeral ttl ──
-  socket.on('send_message', ({ roomId, user, content }: { roomId: string; user: UserProfile; content: string }) => {
-    if (!content?.trim()) return;
-
-    const check = moderation.preCheck(user.id, 'message', content);
-    if (!check.allowed) {
-      socket.emit('moderation_action', { type: 'message_blocked', message: check.message });
+  socket.on('send_message', ({ roomId, content, user }: { roomId: string; content: string; user?: UserProfile }) => {
+    const profile: UserProfile | null = socket.data.profile || user || null;
+    if (!profile) {
+      socket.emit('error_message', { error: 'Authentication required to send messages.' });
       return;
     }
+    // Guard: legacy addMessage throws for an unknown/expired room. Without this
+    // the uncaught throw crashed the whole process for every connected user.
+    try {
+      if (!content?.trim()) return;
 
-    const msg = roomManager.addMessage(roomId, user, content.trim());
-    roomManager.touchRoom(roomId);
-    io.to(roomId).emit('new_message', msg);
-    // also refresh presence counts broadcast
-    const upd = roomManager.serializeRoom(roomId);
-    if (upd) io.to(roomId).emit('room_updated', upd);
+      const check = moderation.preCheck(profile.id, 'message', content);
+      if (!check.allowed) {
+        socket.emit('moderation_action', { type: 'message_blocked', message: check.message });
+        return;
+      }
+
+      // Redis-presence room: ephemeral broadcast, no persistence (matches the
+      // live-room model — messages exist only while the room is attended).
+      if (isPresenceRoomId(roomId)) {
+        if (!socket.rooms.has(roomId)) {
+          socket.emit('error_message', { error: 'Join the room before sending.' });
+          return;
+        }
+        const msg = {
+          id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          roomId,
+          senderId: profile.id,
+          senderUsername: profile.username,
+          senderPseudonym: profile.pseudonym,
+          senderAvatarId: profile.avatarId,
+          senderAvatarBg: profile.avatarBg,
+          content: content.trim(),
+          timestamp: Date.now(),
+          type: 'text'
+        };
+        io.to(roomId).emit('new_message', msg);
+        socket.emit('message_ack', msg);
+        return;
+      }
+
+      const msg = roomManager.addMessage(roomId, profile, content.trim());
+      roomManager.touchRoom(roomId);
+      io.to(roomId).emit('new_message', msg);
+      socket.emit('message_ack', msg);
+      // also refresh presence counts broadcast
+      const upd = roomManager.serializeRoom(roomId);
+      if (upd) io.to(roomId).emit('room_updated', upd);
+    } catch (err: any) {
+      socket.emit('error_message', { error: err?.message || 'Could not send message.' });
+    }
   });
 
   // ── Connection Request ──
-  socket.on('connect_request', ({ fromUser, toUserId, contextLine, contextStation }: {
-    fromUser: UserProfile; toUserId: string; contextLine: string; contextStation: string;
+  socket.on('connect_request', ({ toUserId, contextLine, contextStation }: {
+    fromUser?: UserProfile; toUserId: string; contextLine: string; contextStation: string;
   }) => {
-    const rateCheck = moderation.checkRateLimit(fromUser.id, 'connection_request');
+    // Actor is the authenticated socket, never a client-supplied fromUser.id.
+    const me = socket.data.userId;
+    if (!me) { socket.emit('error_message', { error: 'Authentication required.' }); return; }
+    const rateCheck = moderation.checkRateLimit(me, 'connection_request');
     if (!rateCheck.allowed) {
       socket.emit('moderation_action', { type: 'rate_limited', message: rateCheck.message });
       return;
     }
 
-    const result = connectionManager.sendRequest(fromUser.id, toUserId, contextLine, contextStation);
+    const result = connectionManager.sendRequest(me, toUserId, contextLine, contextStation);
 
     socket.emit('connection_result', result);
 
@@ -536,8 +1103,10 @@ io.on('connection', (socket) => {
   });
 
   // ── Accept Connection — network effect: stronger retention via mutual trust ──
-  socket.on('accept_connection', ({ requestId, userId }: { requestId: string; userId: string }) => {
-    const result = connectionManager.acceptRequest(requestId, userId);
+  socket.on('accept_connection', ({ requestId }: { requestId: string; userId?: string }) => {
+    const me = socket.data.userId;
+    if (!me) { socket.emit('error_message', { error: 'Authentication required.' }); return; }
+    const result = connectionManager.acceptRequest(requestId, me);
     if (result.success && result.request) {
       emitToUsers([result.request.fromUserId, result.request.toUserId], 'connection_accepted', {
         userA: result.request.fromUserId,
@@ -552,14 +1121,18 @@ io.on('connection', (socket) => {
   });
 
   // ── Decline Connection ──
-  socket.on('decline_connection', ({ requestId, userId }: { requestId: string; userId: string }) => {
-    const result = connectionManager.declineRequest(requestId, userId);
+  socket.on('decline_connection', ({ requestId }: { requestId: string; userId?: string }) => {
+    const me = socket.data.userId;
+    if (!me) { socket.emit('error_message', { error: 'Authentication required.' }); return; }
+    const result = connectionManager.declineRequest(requestId, me);
     socket.emit('connection_result', result);
   });
 
   // ── Block User ──
-  socket.on('block_user', ({ userId, blockedUserId }: { userId: string; blockedUserId: string }) => {
-    const result = connectionManager.blockUser(userId, blockedUserId);
+  socket.on('block_user', ({ blockedUserId }: { userId?: string; blockedUserId: string }) => {
+    const me = socket.data.userId;
+    if (!me) { socket.emit('error_message', { error: 'Authentication required.' }); return; }
+    const result = connectionManager.blockUser(me, blockedUserId);
     moderation.decrementReputation(blockedUserId, 5, 'block');
     socket.emit('block_result', result);
 
@@ -569,26 +1142,32 @@ io.on('connection', (socket) => {
   });
 
   // ── Report User ──
-  socket.on('report_user', ({ reporterId, reportedUserId, reason, roomId }: {
-    reporterId: string; reportedUserId: string; reason: string; roomId?: string;
+  socket.on('report_user', ({ reportedUserId, reason, roomId }: {
+    reporterId?: string; reportedUserId: string; reason: string; roomId?: string;
   }) => {
-    const rateCheck = moderation.checkRateLimit(reporterId, 'report');
+    const me = socket.data.userId;
+    if (!me) { socket.emit('error_message', { error: 'Authentication required.' }); return; }
+    const rateCheck = moderation.checkRateLimit(me, 'report');
     if (!rateCheck.allowed) {
       socket.emit('moderation_action', { type: 'rate_limited', message: rateCheck.message });
       return;
     }
 
-    const result = connectionManager.reportUser(reporterId, reportedUserId, reason, roomId);
+    const result = connectionManager.reportUser(me, reportedUserId, reason, roomId);
     moderation.decrementReputation(reportedUserId, 15, 'report');
 
     socket.emit('report_result', { success: true, message: result.message });
   });
 
   // ── Direct Message ──
-  socket.on('send_dm', ({ senderId, receiverId, content }: {
-    senderId: string; receiverId: string; content: string;
+  socket.on('send_dm', ({ receiverId, content }: {
+    senderId?: string; receiverId: string; content: string;
   }) => {
     if (!content?.trim()) return;
+
+    // Sender is the authenticated socket, not a client-supplied senderId.
+    const senderId = socket.data.userId;
+    if (!senderId) { socket.emit('error_message', { error: 'Authentication required.' }); return; }
 
     // Only friends can DM
     if (!connectionManager.areFriends(senderId, receiverId)) {
@@ -626,6 +1205,13 @@ io.on('connection', (socket) => {
 
   // ── DM History fetch (persistent)
   socket.on('fetch_dm_history', ({ userId, friendId }: { userId: string; friendId: string }) => {
+    // Auth: the requesting socket must actually belong to the claimed userId,
+    // otherwise anyone could pull any pair's thread. Best-effort until real
+    // token auth exists — a socket registers its userId on join_room.
+    if (!userIdToSocketIds.get(userId)?.has(socket.id)) {
+      socket.emit('dm_history', { friendId, messages: [] });
+      return;
+    }
     try {
       const store = persistence.load();
       const key = [userId, friendId].sort().join('::');
@@ -744,6 +1330,19 @@ io.on('connection', (socket) => {
   // ── Disconnect — broadcast leave presence + ephemeral ttl ──
   socket.on('disconnect', () => {
     unregisterSocket(socket.id);
+
+    // Redis-presence rooms the socket joined — drop membership + broadcast leave.
+    const pRooms = socketPresenceRooms.get(socket.id);
+    if (pRooms && pRooms.size > 0) {
+      const pUserId: string | null = socket.data.userId;
+      for (const rid of pRooms) {
+        socket.leave(rid);
+        if (pUserId) void redisPresence.leaveRoom(pUserId, rid);
+        broadcastPresence(rid, null);
+      }
+      socketPresenceRooms.delete(socket.id);
+    }
+
     const { userId, roomIds, leaveMessages } = roomManager.disconnectSocket(socket.id);
     if (userId) {
       for (const rid of roomIds) {
@@ -753,6 +1352,7 @@ io.on('connection', (socket) => {
         if (serialized) {
           io.to(rid).emit('room_updated', serialized);
         }
+        broadcastPresence(rid, null);
       }
     }
   });
@@ -833,6 +1433,16 @@ setInterval(() => {
     }
   }
 }, 60_000);
+
+// Last-resort guards: a stray throw in a socket handler or an unhandled promise
+// rejection must not take the whole process (and every connected user) down.
+// Log and stay up rather than exit.
+process.on('uncaughtException', (err) => {
+  console.error('[uncaughtException]', err);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', reason);
+});
 
 server.listen(PORT, () => {
   console.log(`🚇 CoRide server running on port ${PORT} — beachhead ${getBeachheadInfo().line} — MVP2 live layer active`);

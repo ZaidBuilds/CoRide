@@ -1,124 +1,543 @@
-import { Train, Share2, MoreVertical, Users, Navigation } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { ArrowLeft, Map as MapIcon, GitCommit, Repeat, Clock, Radio, Users } from 'lucide-react';
+import type { UserProfile, ContextResult, ContextRoom } from '../types';
+import type { MetroFriend } from './FriendsTab';
+import { DELHI_METRO_LINES, getLineById } from '../data/metroData';
+import { FriendsMetroMap } from './FriendsMetroMap';
+import { getCommuteRelationship } from '../utils/commuteContext';
+import { triggerHaptic } from '../utils/nativeBridge';
 
 interface Props {
+  currentUser: UserProfile;
+  friends: MetroFriend[];
+  currentContext?: ContextResult | null;
+  activeRoom?: ContextRoom | null;
   onBack?: () => void;
+  onOpenChat?: (friendId: string) => void;
+  onOpenProfile?: (profile: UserProfile) => void;
+  onContextUpdated?: (newCtx: ContextResult) => void;
 }
 
-export const LiveTrackingScreen: React.FC<Props> = ({ onBack }) => {
+export const LiveTrackingScreen: React.FC<Props> = ({
+  currentUser,
+  friends,
+  currentContext,
+  activeRoom,
+  onBack,
+  onOpenChat,
+  onOpenProfile,
+  onContextUpdated
+}) => {
+  // Tab switcher: 'map' (Friends Live Map) or 'diagram' (Subway Diagram & Route)
+  const [activeTab, setActiveTab] = useState<'map' | 'diagram'>('diagram');
+
+  // Selected line in the diagram (defaults to user's active detected line or Blue Line)
+  const initialLineId = currentContext?.line || 'blue';
+  const [selectedLineId, setSelectedLineId] = useState<string>(initialLineId);
+
+  // Direction state (e.g. "Towards Noida Electronic City")
+  const currentLine = getLineById(selectedLineId) || DELHI_METRO_LINES[0];
+  const initialDirection = currentContext?.direction || `Towards ${currentLine.terminalB}`;
+  const [currentDirection, setCurrentDirection] = useState<string>(initialDirection);
+  const [flippingDirection, setFlippingDirection] = useState(false);
+
+  // Arrival countdown simulation in seconds
+  const [countdownSeconds, setCountdownSeconds] = useState(135);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCountdownSeconds(prev => (prev > 10 ? prev - 1 : 180));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Update line and direction when context changes
+  useEffect(() => {
+    if (currentContext?.line) {
+      setSelectedLineId(currentContext.line);
+    }
+    if (currentContext?.direction) {
+      setCurrentDirection(currentContext.direction);
+    }
+  }, [currentContext]);
+
+  // Order stations according to current direction
+  const isTowardsA = currentDirection.toLowerCase().includes(currentLine.terminalA.toLowerCase());
+  const orderedStations = React.useMemo(() => {
+    const list = [...currentLine.stations];
+    return isTowardsA ? list.reverse() : list;
+  }, [currentLine, isTowardsA]);
+
+  // Find user's active station index in ordered stations
+  const userStationId = currentContext?.station || '';
+  const currentStationIndex = orderedStations.findIndex(s => s.id === userStationId);
+  const activeStationIndex = currentStationIndex >= 0 ? currentStationIndex : 0;
+
+  // 1-Tap Direction Flip handler
+  const handleFlipDirection = async () => {
+    if (flippingDirection) return;
+    triggerHaptic('medium');
+    setFlippingDirection(true);
+
+    const nextDirection = isTowardsA ? `Towards ${currentLine.terminalB}` : `Towards ${currentLine.terminalA}`;
+    setCurrentDirection(nextDirection);
+
+    try {
+      const token = localStorage.getItem('coride_token');
+      const res = await fetch('/api/context/direction-override', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({
+          userId: currentUser.id,
+          lineId: currentLine.id,
+          direction: nextDirection,
+          stationId: currentContext?.station
+        })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.context && onContextUpdated) {
+          onContextUpdated(data.context);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to update direction override', err);
+    } finally {
+      setTimeout(() => setFlippingDirection(false), 300);
+    }
+  };
+
+  const formatCountdown = (secs: number) => {
+    const m = Math.floor(secs / 60);
+    const s = secs % 60;
+    return `${m}m ${s < 10 ? '0' : ''}${s}s`;
+  };
+
   return (
-    <div className="animate-fade-in" style={{ paddingBottom: 86 }}>
-      {/* Header */}
-      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:12 }}>
-        <button onClick={onBack} aria-label="Back" style={{ width:44,height:44, borderRadius:'50%', background:'var(--bg-surface)', border:'1px solid var(--border-subtle)', display:'flex', alignItems:'center', justifyContent:'center', color:'var(--text-primary)' }}>←</button>
-        <h2 style={{ fontSize:16, fontWeight:800 }}>Live Tracking</h2>
-        <div style={{ display:'flex', gap:8 }}>
-          <button aria-label="Share journey" style={{ width:44,height:44, borderRadius:'50%', background:'var(--bg-surface)', border:'1px solid var(--border-subtle)', display:'flex', alignItems:'center', justifyContent:'center', color:'var(--text-muted)' }}><Share2 size={14}/></button>
-          <button aria-label="More options" style={{ width:44,height:44, borderRadius:'50%', background:'var(--bg-surface)', border:'1px solid var(--border-subtle)', display:'flex', alignItems:'center', justifyContent:'center', color:'var(--text-muted)' }}><MoreVertical size={14}/></button>
+    <div className="animate-fade-in" style={{ paddingBottom: 90 }}>
+      {/* Top Header Bar */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: 14,
+        paddingTop: 4
+      }}>
+        <button
+          onClick={onBack}
+          aria-label="Back"
+          className="icon-btn press"
+          style={{ width: 42, height: 42 }}
+        >
+          <ArrowLeft size={18} />
+        </button>
+
+        {/* View Switcher Segmented Control */}
+        <div style={{
+          display: 'flex',
+          background: 'rgba(255, 255, 255, 0.06)',
+          borderRadius: 999,
+          padding: 3,
+          border: '1px solid rgba(255, 255, 255, 0.1)'
+        }}>
+          <button
+            onClick={() => setActiveTab('diagram')}
+            className="press"
+            style={{
+              padding: '6px 14px',
+              borderRadius: 999,
+              fontSize: 12,
+              fontWeight: 800,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              border: 'none',
+              background: activeTab === 'diagram' ? 'var(--accent-purple)' : 'transparent',
+              color: activeTab === 'diagram' ? '#fff' : 'var(--text-secondary)',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease'
+            }}
+          >
+            <GitCommit size={14} /> Route Diagram
+          </button>
+          <button
+            onClick={() => setActiveTab('map')}
+            className="press"
+            style={{
+              padding: '6px 14px',
+              borderRadius: 999,
+              fontSize: 12,
+              fontWeight: 800,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              border: 'none',
+              background: activeTab === 'map' ? 'var(--accent-purple)' : 'transparent',
+              color: activeTab === 'map' ? '#fff' : 'var(--text-secondary)',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease'
+            }}
+          >
+            <MapIcon size={14} /> Friends Map
+          </button>
         </div>
+
+        <div style={{ width: 42, height: 42 }} />
       </div>
 
-      {/* Blue Line card */}
-      <div style={{ background:'linear-gradient(135deg, var(--bg-accent-wash-2), var(--bg-accent-wash))', border:'1px solid rgba(123,93,255,0.22)', borderRadius:'var(--radius-xl)', padding:14, display:'flex', alignItems:'center', gap:12, marginBottom:12 }}>
-        <div style={{ width:44,height:44, borderRadius:12, background:'var(--accent-purple)', display:'flex', alignItems:'center', justifyContent:'center', color:'white' }}><Train size={20}/></div>
-        <div style={{ flex:1 }}>
-          <div style={{ fontSize:14, fontWeight:800, color:'var(--text-primary)' }}>Blue Line</div>
-          <div style={{ fontSize:12, color:'var(--text-muted)' }}>Rajiv Chowk → Noida Sec 18</div>
+      {/* VIEW 1: Interactive Snapchat-Style Friends Live Map */}
+      {activeTab === 'map' && (
+        <div style={{ height: 'calc(100dvh - 180px)', minHeight: 520 }}>
+          <FriendsMetroMap
+            currentUser={currentUser}
+            friends={friends}
+            currentContext={currentContext}
+            onOpenChat={onOpenChat}
+            onOpenProfile={onOpenProfile}
+          />
         </div>
-        <div style={{ textAlign:'right' }}>
-          <div style={{ fontSize:11, color:'var(--presence-active)', fontWeight:700, display:'flex', alignItems:'center', gap:4, justifyContent:'flex-end' }}><span style={{ width:6,height:6, borderRadius:'50%', background:'var(--presence-active)', display:'inline-block' }} /> On Time</div>
-          <div style={{ fontSize:11, color:'var(--text-muted)' }}>Next stop in</div>
-          <div style={{ fontSize:16, fontWeight:900, color:'var(--text-primary)' }}>3 min</div>
-        </div>
-      </div>
+      )}
 
-      {/* Map */}
-      <div style={{ height: 280, borderRadius:'var(--radius-xl)', background:'var(--bg-card)', border:'1px solid var(--border-card)', overflow:'hidden', position:'relative', marginBottom:12 }}>
-        <div style={{ position:'absolute', inset:0, background:'radial-gradient(circle at 30% 40%, rgba(123,93,255,0.08), transparent 60%), linear-gradient(180deg, var(--bg-base) 0%, var(--bg-elevated) 100%)' }} />
-        {/* Fake map grid */}
-        <div style={{ position:'absolute', inset:0, opacity:0.08, backgroundImage:'linear-gradient(rgba(255,255,255,0.12) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.12) 1px, transparent 1px)', backgroundSize:'24px 24px' }} />
-        <svg viewBox="0 0 320 260" style={{ position:'absolute', inset:0, width:'100%', height:'100%' }}>
-          <path d="M 40 140 C 100 60, 160 200, 280 110" fill="none" stroke="#7B5DFF" strokeWidth="4" strokeLinecap="round" opacity="0.9" />
-          <circle cx="40" cy="140" r="6" fill="#7B5DFF" stroke="white" strokeWidth="2" />
-          <circle cx="120" cy="100" r="14" fill="#7B5DFF" stroke="white" strokeWidth="3" />
-          <foreignObject x="108" y="88" width="24" height="24"><div style={{ width:24, height:24, display:'flex', alignItems:'center', justifyContent:'center', fontSize:12 }}>🚇</div></foreignObject>
-          <circle cx="200" cy="135" r="5" fill="white" stroke="#7B5DFF" strokeWidth="2" />
-          <circle cx="280" cy="110" r="8" fill="#EF4444" stroke="white" strokeWidth="2" />
-        </svg>
-        <div style={{ position:'absolute', top:10, right:10, display:'flex', flexDirection:'column', gap:8 }}>
-          <button aria-label="Recentre map" style={{ width:44,height:44, borderRadius:'50%', background:'var(--bg-surface)', border:'1px solid var(--border-subtle)', display:'flex', alignItems:'center', justifyContent:'center', color:'var(--text-primary)' }}><Navigation size={16}/></button>
-          <button aria-label="Change map layer" style={{ width:44,height:44, borderRadius:'50%', background:'var(--bg-surface)', border:'1px solid var(--border-subtle)', display:'flex', alignItems:'center', justifyContent:'center', color:'var(--text-primary)' }}>◈</button>
-        </div>
-        <div style={{ position:'absolute', top: 22, left: 50, background:'var(--bg-elevated)', border:'1px solid var(--border-card)', borderRadius:999, padding:'4px 8px', fontSize:11, color:'var(--text-secondary)', display:'flex', alignItems:'center', gap:4 }}>
-          <span style={{ width:8,height:8, borderRadius:'50%', background:'var(--presence-active)', display:'inline-block' }} /> Rajiv Chowk <span style={{ opacity:0.7 }}>Departed • 9:20 AM</span>
-        </div>
-        <div style={{ position:'absolute', top: 72, left: 150, background:'var(--accent-purple)', color:'white', fontSize:11, fontWeight:700, padding:'4px 8px', borderRadius:8, display:'flex', flexDirection:'column', alignItems:'center' }}>
-          <span>Barakhamba</span><span>Road</span><span style={{ fontSize:11, opacity:0.8 }}>9:34 AM</span>
-        </div>
-        <div style={{ position:'absolute', bottom: 54, right: 16, background:'var(--bg-elevated)', border:'1px solid var(--border-card)', borderRadius:999, padding:'6px 10px', fontSize:11, color:'var(--text-primary)', display:'flex', flexDirection:'column', alignItems:'center' }}>
-          <span style={{ fontWeight:800 }}>Noida Sec 18</span><span style={{ color:'var(--text-muted)', fontSize:11 }}>Arrive • 9:52 AM</span>
-        </div>
-      </div>
+      {/* VIEW 2: High-Standard Subway Route Progression Diagram */}
+      {activeTab === 'diagram' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {/* Multi-Line Carousel */}
+          <div style={{
+            display: 'flex',
+            gap: 8,
+            overflowX: 'auto',
+            paddingBottom: 4,
+            scrollbarWidth: 'none'
+          }}>
+            {DELHI_METRO_LINES.map(line => {
+              const isSelected = line.id === selectedLineId;
+              return (
+                <button
+                  key={line.id}
+                  onClick={() => {
+                    setSelectedLineId(line.id);
+                    setCurrentDirection(`Towards ${line.terminalB}`);
+                  }}
+                  className="press"
+                  style={{
+                    padding: '7px 12px',
+                    borderRadius: 999,
+                    border: isSelected ? `2px solid ${line.color}` : '1px solid rgba(255, 255, 255, 0.1)',
+                    background: isSelected ? `${line.color}22` : 'rgba(255, 255, 255, 0.04)',
+                    color: isSelected ? '#fff' : 'var(--text-secondary)',
+                    fontWeight: 800,
+                    fontSize: 12,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    whiteSpace: 'nowrap',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <span style={{
+                    width: 8,
+                    height: 8,
+                    borderRadius: '50%',
+                    background: line.color,
+                    boxShadow: isSelected ? `0 0 8px ${line.color}` : 'none'
+                  }} />
+                  <span>{line.name}</span>
+                </button>
+              );
+            })}
+          </div>
 
-      {/* Journey Progress */}
-      <div style={{ background:'var(--bg-card)', border:'1px solid var(--border-card)', borderRadius:'var(--radius-xl)', padding:14, marginBottom:12 }}>
-        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:12 }}>
-          <span style={{ fontSize:13, fontWeight:800 }}>Journey Progress</span>
-          <span style={{ fontSize:11, color:'var(--text-muted)' }}>6 Stops • 32 min</span>
-        </div>
-        <div style={{ display:'flex', alignItems:'center', gap:4, marginBottom:8 }}>
-          {[
-            { name:'Rajiv Chowk', time:'9:20 AM', done:true },
-            { name:'Barakhamba Road', time:'9:34 AM', done:true },
-            { name:'Mandi House', time:'Next • 9:37 AM', active:true },
-            { name:'Pragati Maidan', time:'9:41 AM', done:false },
-            { name:'Noida Sec 18', time:'9:52 AM', end:true },
-          ].map((s,idx)=>(
-            <div key={s.name} style={{ flex:1, textAlign:'center' }}>
-              <div style={{ width:28,height:28, borderRadius:'50%', margin:'0 auto 6px', background: s.done ? '#10B981' : s.active ? 'var(--accent-purple)' : 'var(--bg-surface)', border: s.active ? '2px solid var(--accent-purple)' : '1px solid var(--border-subtle)', display:'flex', alignItems:'center', justifyContent:'center', color: s.done || s.active ? 'white' : 'var(--text-muted)', fontSize:11 }}>
-                {s.done ? '✓' : s.active ? '🚇' : s.end ? '●' : '○'}
+          {/* Active Line & Direction Banner */}
+          <div className="glass-thick" style={{
+            padding: '16px',
+            borderRadius: 'var(--radius-xl)',
+            border: `1px solid ${currentLine.color}44`,
+            background: `linear-gradient(135deg, ${currentLine.color}15, rgba(15, 23, 42, 0.85))`,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 12
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{
+                    padding: '2px 8px',
+                    borderRadius: 999,
+                    background: currentLine.color,
+                    color: '#fff',
+                    fontWeight: 900,
+                    fontSize: 11
+                  }}>
+                    {currentLine.name}
+                  </span>
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                    {currentLine.stations.length} Stations
+                  </span>
+                </div>
+                <h3 style={{ fontSize: 17, fontWeight: 900, color: '#f8fafc', marginTop: 4, marginBottom: 0 }}>
+                  {currentDirection}
+                </h3>
               </div>
-              <div style={{ fontSize:11, fontWeight:700, color: s.active ? 'var(--accent-purple-text)' : 'var(--text-primary)', lineHeight:1.2 }}>{s.name}</div>
-              <div style={{ fontSize:11, color:'var(--text-muted)' }}>{s.time}</div>
-              {idx<4 && <div style={{ height:2, background: s.done ? '#10B981' : 'var(--border-subtle)', margin:'6px 0' }} />}
-            </div>
-          ))}
-        </div>
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8, marginTop:12 }}>
-          <div style={{ background:'var(--bg-surface)', border:'1px solid var(--border-subtle)', borderRadius:'var(--radius-lg)', padding:10, textAlign:'center' }}>
-            <div style={{ fontSize:11, color:'var(--accent-purple-text)', fontWeight:700, display:'flex', alignItems:'center', gap:4, justifyContent:'center' }}><Users size={12}/> Crowd in Coach</div>
-            <div style={{ fontSize:12, color:'var(--accent-amber)', fontWeight:700 }}>Moderate</div>
-            <div style={{ fontSize:11, color:'var(--text-muted)', display:'flex', gap:2, justifyContent:'center', marginTop:4 }}>👥👥👥👥👥<span style={{ opacity:0.3 }}>👥👥</span></div>
-            <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:4 }}>Not too crowded</div>
-          </div>
-          <div style={{ background:'var(--bg-surface)', border:'1px solid var(--border-subtle)', borderRadius:'var(--radius-lg)', padding:10, textAlign:'center' }}>
-            <div style={{ fontSize:11, color:'var(--accent-blue)', fontWeight:700 }}>Arrival Alert</div>
-            <div style={{ fontSize:11, color:'var(--text-muted)' }}>Noida Sec 18</div>
-            <div style={{ fontSize:16, fontWeight:900, color:'var(--text-primary)', marginTop:4 }}>9:52 AM</div>
-            <div style={{ fontSize:11, color:'var(--text-muted)' }}>You’ll get off in 15 min</div>
-          </div>
-          <div style={{ background:'var(--bg-surface)', border:'1px solid var(--border-subtle)', borderRadius:'var(--radius-lg)', padding:10, textAlign:'center' }}>
-            <div style={{ fontSize:11, color:'var(--accent-rose-text)', fontWeight:700 }}>Total Time</div>
-            <div style={{ fontSize:11, color:'var(--text-muted)' }}>To Destination</div>
-            <div style={{ fontSize:16, fontWeight:900, color:'var(--text-primary)', marginTop:4 }}>32 min</div>
-            <div style={{ fontSize:11, color:'var(--text-muted)' }}>Including 6 stops</div>
-          </div>
-        </div>
-      </div>
 
-      <div style={{ background:'var(--bg-card)', border:'1px solid var(--border-card)', borderRadius:'var(--radius-lg)', padding:12, display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:12 }}>
-        <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-          <div style={{ width:32,height:32, borderRadius:8, background:'rgba(123,93,255,0.14)', display:'flex', alignItems:'center', justifyContent:'center', color:'var(--accent-purple-text)' }}>🎫</div>
-          <div>
-            <div style={{ fontSize:12, fontWeight:800, color:'var(--accent-purple-text)' }}>Save this Journey</div>
-            <div style={{ fontSize:11, color:'var(--text-muted)' }}>Get quick access next time</div>
+              {/* 1-Tap Direction Reversal Button */}
+              <button
+                onClick={handleFlipDirection}
+                className="press"
+                style={{
+                  padding: '8px 12px',
+                  borderRadius: 'var(--radius-lg)',
+                  background: 'rgba(255, 255, 255, 0.08)',
+                  border: '1px solid rgba(255, 255, 255, 0.16)',
+                  color: '#f8fafc',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  fontSize: 12,
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  transform: flippingDirection ? 'rotate(180deg)' : 'none',
+                  transition: 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)'
+                }}
+                title="Flip travel direction"
+              >
+                <Repeat size={14} />
+                <span>Reverse</span>
+              </button>
+            </div>
+
+            {/* Arrival & Headway Metrics Strip */}
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: '1fr 1fr',
+              gap: 8,
+              paddingTop: 8,
+              borderTop: '1px solid rgba(255, 255, 255, 0.08)'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Clock size={16} color="#38bdf8" />
+                <div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Next Train</div>
+                  <div style={{ fontSize: 14, fontWeight: 900, color: '#38bdf8' }}>
+                    {formatCountdown(countdownSeconds)}
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Radio size={16} color="#10b981" />
+                <div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Headway Interval</div>
+                  <div style={{ fontSize: 13, fontWeight: 800, color: '#10b981' }}>
+                    Every 3 - 4 min
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Co-Riders on this Line / Room */}
+          {activeRoom && activeRoom.users && activeRoom.users.length > 0 && (
+            <div className="glass-thick" style={{
+              padding: '12px 14px',
+              borderRadius: 'var(--radius-lg)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Users size={16} color="var(--accent-purple-text)" />
+                <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--text-primary)' }}>
+                  {activeRoom.users.length} Co-Riders Active
+                </span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                {activeRoom.users.slice(0, 4).map(u => {
+                  const rel = getCommuteRelationship(u, {
+                    activeRoomId: activeRoom.id,
+                    currentContext
+                  });
+                  return (
+                    <div
+                      key={u.id}
+                      onClick={() => onOpenProfile?.(u)}
+                      className="press"
+                      style={{
+                        width: 28,
+                        height: 28,
+                        borderRadius: '50%',
+                        background: u.avatarBg || '#6366f1',
+                        color: '#fff',
+                        fontSize: 10,
+                        fontWeight: 800,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        border: '2px solid var(--bg-card)',
+                        cursor: 'pointer'
+                      }}
+                      title={`${u.pseudonym} • ${rel.label}`}
+                    >
+                      {u.pseudonym.slice(0, 2).toUpperCase()}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Vertical Subway Progression Diagram */}
+          <div className="glass-thick" style={{
+            padding: '18px 16px',
+            borderRadius: 'var(--radius-xl)',
+            background: 'var(--bg-card)'
+          }}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              marginBottom: 16
+            }}>
+              <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--text-primary)' }}>
+                Station Progression
+              </span>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                Terminal: {isTowardsA ? currentLine.terminalA : currentLine.terminalB}
+              </span>
+            </div>
+
+            <div style={{ position: 'relative', paddingLeft: 24 }}>
+              {/* Vertical Track Line */}
+              <div style={{
+                position: 'absolute',
+                left: 7,
+                top: 8,
+                bottom: 12,
+                width: 4,
+                borderRadius: 2,
+                background: currentLine.color,
+                opacity: 0.8
+              }} />
+
+              {/* Station Rows */}
+              {orderedStations.map((station, index) => {
+                const isCurrent = index === activeStationIndex;
+                const isPassed = index < activeStationIndex;
+                const isUpcoming = index > activeStationIndex;
+                const minutesAway = (index - activeStationIndex) * 2.5;
+
+                return (
+                  <div
+                    key={station.id}
+                    style={{
+                      position: 'relative',
+                      paddingBottom: index === orderedStations.length - 1 ? 0 : 20,
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      justifyContent: 'space-between'
+                    }}
+                  >
+                    {/* Track Node Bullet */}
+                    <div style={{
+                      position: 'absolute',
+                      left: -24,
+                      top: 2,
+                      width: 18,
+                      height: 18,
+                      borderRadius: '50%',
+                      background: isCurrent ? '#38bdf8' : isPassed ? currentLine.color : '#1e293b',
+                      border: isCurrent ? '3px solid #ffffff' : `2px solid ${currentLine.color}`,
+                      boxShadow: isCurrent ? '0 0 12px #38bdf8' : 'none',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      zIndex: 2
+                    }}>
+                      {isCurrent && (
+                        <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#fff' }} />
+                      )}
+                    </div>
+
+                    {/* Station Name and Details */}
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span style={{
+                          fontSize: 14,
+                          fontWeight: isCurrent ? 900 : 700,
+                          color: isCurrent ? '#38bdf8' : isPassed ? 'var(--text-muted)' : 'var(--text-primary)'
+                        }}>
+                          {station.name}
+                        </span>
+
+                        {isCurrent && (
+                          <span style={{
+                            fontSize: 10,
+                            fontWeight: 800,
+                            padding: '2px 6px',
+                            borderRadius: 999,
+                            background: 'rgba(56, 189, 248, 0.2)',
+                            color: '#38bdf8',
+                            border: '1px solid rgba(56, 189, 248, 0.4)'
+                          }}>
+                            You are here
+                          </span>
+                        )}
+                      </div>
+
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                        {station.hindiName}
+                      </div>
+
+                      {/* Multi-Line Interchange Pills */}
+                      {station.isInterchange && (
+                        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 4 }}>
+                          {(station.interchangeLines || []).map(ilId => {
+                            const il = getLineById(ilId);
+                            if (!il) return null;
+                            return (
+                              <span
+                                key={ilId}
+                                style={{
+                                  fontSize: 10,
+                                  fontWeight: 800,
+                                  padding: '1px 6px',
+                                  borderRadius: 4,
+                                  background: `${il.color}25`,
+                                  color: il.color,
+                                  border: `1px solid ${il.color}45`
+                                }}
+                              >
+                                🔀 {il.name}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Estimated Arrival Time Pill */}
+                    {isUpcoming && (
+                      <span style={{
+                        fontSize: 11,
+                        fontWeight: 700,
+                        color: 'var(--text-muted)',
+                        padding: '2px 6px',
+                        borderRadius: 6,
+                        background: 'rgba(255, 255, 255, 0.04)'
+                      }}>
+                        +{Math.round(minutesAway)} min
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
-        <label style={{ position:'relative', display:'inline-block', width:44, height:26 }}>
-          <input type="checkbox" aria-label="Save this journey" style={{ opacity:0, width:0, height:0 }} />
-          <span style={{ position:'absolute', inset:0, background:'var(--bg-surface)', border:'1px solid var(--border-subtle)', borderRadius:999 }} />
-          <span style={{ position:'absolute', top:3, left:3, width:18, height:18, borderRadius:'50%', background:'white', transition:'0.2s' }} />
-        </label>
-      </div>
+      )}
     </div>
   );
 };

@@ -158,8 +158,14 @@ export class ConnectionManager {
   ): { success: boolean; request?: ConnectionRequest; message: string } {
     const req = this.requests.get(requestId);
     if (!req) return { success: false, message: 'Request not found.' };
-    if (req.toUserId !== acceptingUserId && req.fromUserId !== acceptingUserId) {
+    // Only the RECIPIENT may accept — the sender accepting their own request
+    // would befriend the target without consent.
+    if (req.toUserId !== acceptingUserId) {
       return { success: false, message: 'Not authorized.' };
+    }
+    // Only a live request can be accepted — no reviving declined ones.
+    if (req.status !== 'pending') {
+      return { success: false, message: 'This request is no longer pending.' };
     }
 
     req.status = 'accepted';
@@ -258,6 +264,21 @@ export class ConnectionManager {
   public isBlocked(userA: string, userB: string): boolean {
     return (this.blocks.get(userA)?.has(userB) ?? false) ||
            (this.blocks.get(userB)?.has(userA) ?? false);
+  }
+
+  /**
+   * Remove a block that userId placed on blockedUserId. Only clears the caller's
+   * own block — if the other party also blocked them, that half stands.
+   * Does NOT restore a prior friendship; they must reconnect.
+   */
+  public unblock(userId: string, blockedUserId: string): { success: boolean; message: string } {
+    const set = this.blocks.get(userId);
+    if (!set || !set.has(blockedUserId)) {
+      return { success: false, message: 'That user is not blocked.' };
+    }
+    set.delete(blockedUserId);
+    this.persistToDisk();
+    return { success: true, message: 'User unblocked.' };
   }
 
   public getBlockedIds(userId: string): string[] {

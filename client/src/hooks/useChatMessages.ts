@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DirectMessage } from '../types';
+import { authHeaders } from '../utils/auth';
 
 const API = 'http://localhost:4000';
 const POLL_MS = 5000;
@@ -42,7 +43,7 @@ export function useChatMessages(currentUserId: string | undefined, peerId: strin
     if (!silent) setLoading(true);
     try {
       const res = await fetch(`${API}/api/chats/${encodeURIComponent(peerId)}/messages`, {
-        headers: { 'x-user-id': currentUserId }
+        headers: { ...authHeaders() }
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
@@ -68,7 +69,7 @@ export function useChatMessages(currentUserId: string | undefined, peerId: strin
     if (!currentUserId || !peerId) return;
     fetch(`${API}/api/chats/${encodeURIComponent(peerId)}/read`, {
       method: 'POST',
-      headers: { 'x-user-id': currentUserId }
+      headers: { ...authHeaders() }
     }).catch(() => {});
   }, [currentUserId, peerId]);
 
@@ -97,7 +98,7 @@ export function useChatMessages(currentUserId: string | undefined, peerId: strin
     if (!body || !currentUserId || !peerId) return;
     const res = await fetch(`${API}/api/chats/${encodeURIComponent(peerId)}/messages`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-user-id': currentUserId },
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ content: body })
     });
     if (!res.ok) {

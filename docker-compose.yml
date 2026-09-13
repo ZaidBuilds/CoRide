@@ -23,8 +23,9 @@ services:
     image: redis:7-alpine
     restart: unless-stopped
     command: redis-server --appendonly yes
+    # 6380, not 6379: another project (trafficai) already binds the host's 6379.
     ports:
-      - "6379:6379"
+      - "6380:6379"
     volumes:
       - redisdata:/data
     healthcheck:

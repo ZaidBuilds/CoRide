@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { io, Socket } from 'socket.io-client';
 import { Radio } from 'lucide-react';
+import type { Socket } from 'socket.io-client';
+import { useSocket } from './hooks/useSocket';
+import { setToken, getToken, authHeaders } from './utils/auth';
 import { DiscoveryScreen } from './components/DiscoveryScreen';
 import { ChatView } from './components/ChatView';
 import { FriendsTab } from './components/FriendsTab';
@@ -14,7 +16,9 @@ import { SavedCommutes } from './components/personalization/SavedCommutes';
 import { BottomNav, type NavView } from './components/BottomNav';
 import { HomeScreen } from './components/HomeScreen';
 import { ConnectScreen } from './components/ConnectScreen';
-import { ProfileDrawer } from './components/ProfileDrawer';
+import { ProfileSheet } from './components/ProfileSheet';
+import { ProfileSheetContent } from './components/ProfileSheetContent';
+import { ProfileSheetActions } from './components/ProfileSheetActions';
 import { OnboardingScreen } from './components/OnboardingScreen';
 import { DiscoverAroundYou } from './components/DiscoverAroundYou';
 import { ChatsScreen } from './components/ChatsScreen';
@@ -24,6 +28,12 @@ import { ProfileStatsScreen } from './components/ProfileStatsScreen';
 import { RoomScreen } from './components/RoomScreen';
 import { useCommuteNotifications } from './hooks/useCommuteNotifications';
 import { track } from './utils/analytics';
+import { SafetyCenterScreen } from './components/safety/SafetyCenterScreen';
+import { BlockedUsersScreen } from './components/safety/BlockedUsersScreen';
+import { OfflineBanner } from './components/ui/OfflineBanner';
+import { flushOfflineQueue } from './utils/offlineQueue';
+import { CheckInScreen } from './components/transit/CheckInScreen';
+import { DELHI_METRO_LINES } from './data/metroData';
 import type { EngagementSnapshot } from './types/engagement';
 import type {
   UserProfile,
@@ -35,11 +45,11 @@ import type {
 
 const API = 'http://localhost:4000';
 
-type View = 'home' | 'people' | 'discover' | 'liveTracking' | 'chat' | 'chats' | 'connect' | 'profile' | 'friends' | 'room';
+type View = 'home' | 'people' | 'discover' | 'liveTracking' | 'chat' | 'chats' | 'connect' | 'profile' | 'friends' | 'room' | 'safetyCenter' | 'blockedUsers';
 
 export function App() {
-  const [socket, setSocket] = useState<Socket | null>(null);
   const [user, setUser] = useState<UserProfile | null>(null);
+  const { socket, connected: socketConnected } = useSocket(user ? getToken() : null);
   const [context, setContext] = useState<ContextResult | null>(null);
   const [stationRoom, setStationRoom] = useState<ContextRoom | null>(null);
   const [trainRoom, setTrainRoom] = useState<ContextRoom | null>(null);
@@ -50,6 +60,7 @@ export function App() {
   const [selectedFriend, setSelectedFriend] = useState<MetroFriend | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [showStationPicker, setShowStationPicker] = useState(false);
+  const [showCheckInScreen, setShowCheckInScreen] = useState(false);
   const [hasManualOverride, setHasManualOverride] = useState(false);
   const [beachhead, setBeachhead] = useState<{ line: string; isBeachhead: boolean; activeLines: any[] } | null>(null);
   const [typingUsers, setTypingUsers] = useState<Record<string, { userId: string; pseudonym: string }[]>>({});
@@ -73,15 +84,13 @@ export function App() {
 
   // ─── Bootstrap with persistence ───
   useEffect(() => {
-    const s = io(API);
-    setSocket(s);
-
     const STORAGE_KEY = 'coride_profile';
     const stored = localStorage.getItem(STORAGE_KEY);
-    const initWithProfile = (profile: UserProfile) => {
+    const initWithProfile = (profile: UserProfile, token?: string) => {
+      if (token) setToken(token); // signed device token → authenticates every request
       setUser(profile);
       localStorage.setItem(STORAGE_KEY, JSON.stringify(profile));
-      detect(s, profile);
+      detect(socket, profile);
       track('session_start', profile.id, { stationHint: 'auto' });
       track('activated_user', profile.id, {});
     };
@@ -91,46 +100,46 @@ export function App() {
         const parsed: UserProfile = JSON.parse(stored);
         fetch(`${API}/api/auth/restore/${parsed.id}`)
           .then(r => r.ok ? r.json() : Promise.reject())
-          .then(d => initWithProfile(d.profile))
+          .then(d => initWithProfile(d.profile, d.token))
           .catch(() => { initWithProfile(parsed); });
       } catch {
         localStorage.removeItem(STORAGE_KEY);
-        fetch(`${API}/api/auth/random-profile`).then(r => r.json()).then(data => initWithProfile(data.profile));
+        fetch(`${API}/api/auth/random-profile`).then(r => r.json()).then(data => initWithProfile(data.profile, data.token));
       }
     } else {
-      fetch(`${API}/api/auth/random-profile`).then(r => r.json()).then(data => initWithProfile(data.profile));
+      fetch(`${API}/api/auth/random-profile`).then(r => r.json()).then(data => initWithProfile(data.profile, data.token));
     }
 
-    s.on('room_updated', (roomData: ContextRoom) => {
+    socket.on('room_updated', (roomData: ContextRoom) => {
       if (roomData.type === 'station') setStationRoom(roomData);
       else setTrainRoom(roomData);
       track('travelers_seen', undefined, { roomId: roomData.id, type: roomData.type, count: (roomData as any).userCount ?? (roomData as any).users?.length ?? 0 });
     });
 
-    s.on('new_message', (msg) => {
+    socket.on('new_message', (msg) => {
       setStationRoom(prev => { if (prev && msg.roomId === prev.id) return { ...prev, messages: [...prev.messages, msg] }; return prev; });
       setTrainRoom(prev => { if (prev && msg.roomId === prev.id) return { ...prev, messages: [...prev.messages, msg] }; return prev; });
     });
 
-    s.on('connection_result', (result: { success: boolean; message: string }) => {
+    socket.on('connection_result', (result: { success: boolean; message: string }) => {
       showToast(result.message);
       if (result.success) track('connection_request_sent', undefined, { message: result.message });
     });
 
-    s.on('connection_accepted', ({ message, userA, userB }: { userA: string; userB: string; message: string }) => {
+    socket.on('connection_accepted', ({ message, userA, userB }: { userA: string; userB: string; message: string }) => {
       showToast(message);
       track('connection_accepted', undefined, { userA, userB });
       track('mutual_acceptance', undefined, { userA, userB });
     });
 
-    s.on('block_result', (result: { message: string }) => showToast(result.message));
-    s.on('report_result', (result: { message: string }) => showToast(result.message));
-    s.on('moderation_action', ({ message }: { message: string }) => showToast(`⚠️ ${message}`));
-    s.on('new_dm', (dm: DirectMessage) => setFriendDMs(prev => {
+    socket.on('block_result', (result: { message: string }) => showToast(result.message));
+    socket.on('report_result', (result: { message: string }) => showToast(result.message));
+    socket.on('moderation_action', ({ message }: { message: string }) => showToast(`⚠️ ${message}`));
+    socket.on('new_dm', (dm: DirectMessage) => setFriendDMs(prev => {
       if (prev.some(x => x.id === dm.id)) return prev;
       return [...prev, dm];
     }));
-    s.on('dm_history', ({ messages }: { friendId: string; messages: DirectMessage[] }) => {
+    socket.on('dm_history', ({ messages }: { friendId: string; messages: DirectMessage[] }) => {
       setFriendDMs(prev => {
         const existingIds = new Set(prev.map(m => m.id));
         const newOnes = messages.filter(m => !existingIds.has(m.id));
@@ -138,21 +147,21 @@ export function App() {
       });
     });
 
-    s.on('live_count_tick', (payload: { roomId: string; count: number; presence: any }) => {
+    socket.on('live_count_tick', (payload: { roomId: string; count: number; presence: any }) => {
       setStationRoom(prev => prev && payload.roomId === prev.id ? { ...prev, userCount: payload.count, presence: payload.presence } as ContextRoom : prev);
       setTrainRoom(prev => prev && payload.roomId === prev.id ? { ...prev, userCount: payload.count, presence: payload.presence } as ContextRoom : prev);
     });
-    s.on('commute_window_live', (payload: { title: string; body: string }) => {
+    socket.on('commute_window_live', (payload: { title: string; body: string }) => {
       showToast(`${payload.title}: ${payload.body}`);
       if ('Notification' in window && Notification.permission === 'granted') {
         try { new Notification(payload.title, { body: payload.body, icon: '/vite.svg' }); } catch {}
       }
       track('commute_window_push_received', undefined, payload as any);
     });
-    s.on('commute_window_room_live', (p: { roomId: string; count: number }) => {
+    socket.on('commute_window_room_live', (p: { roomId: string; count: number }) => {
       track('commute_window_room_live', undefined, p as any);
     });
-    s.on('user_typing', (p: { roomId: string; userId: string; pseudonym: string }) => {
+    socket.on('user_typing', (p: { roomId: string; userId: string; pseudonym: string }) => {
       setTypingUsers(prev => {
         const cur = prev[p.roomId] || [];
         if (cur.some(u => u.userId === p.userId)) return prev;
@@ -165,16 +174,16 @@ export function App() {
         });
       }, 4000);
     });
-    s.on('user_stop_typing', (p: { roomId: string; userId: string }) => {
+    socket.on('user_stop_typing', (p: { roomId: string; userId: string }) => {
       setTypingUsers(prev => {
         const cur = prev[p.roomId] || [];
         return { ...prev, [p.roomId]: cur.filter(u => u.userId !== p.userId) };
       });
     });
-    s.on('engagement_updated', (snap: EngagementSnapshot) => {
+    socket.on('engagement_updated', (snap: EngagementSnapshot) => {
       setEngagement(prev => ({ ...prev, [snap.roomId]: snap }));
     });
-    s.on('reaction_updated', (p: { targetId: string; state: any; roomId?: string }) => {
+    socket.on('reaction_updated', (p: { targetId: string; state: any; roomId?: string }) => {
       setEngagement(prev => {
         const next = { ...prev };
         if (p.roomId && next[p.roomId]) {
@@ -194,15 +203,41 @@ export function App() {
         return next;
       });
     });
-    s.on('game_error', (p: { error: string }) => showToast(`⚠️ ${p.error}`));
+    socket.on('game_error', (p: { error: string }) => showToast(`⚠️ ${p.error}`));
 
-    return () => { s.disconnect(); };
+    // The socket's lifecycle is owned by useSocket now; just detach the
+    // listeners this effect registered so they don't stack on re-mount.
+    return () => {
+      socket.off('room_updated'); socket.off('new_message');
+      socket.off('connection_result'); socket.off('connection_accepted');
+      socket.off('block_result'); socket.off('report_result'); socket.off('moderation_action');
+      socket.off('new_dm'); socket.off('dm_history');
+      socket.off('live_count_tick'); socket.off('commute_window_live'); socket.off('commute_window_room_live');
+      socket.off('user_typing'); socket.off('user_stop_typing');
+      socket.off('engagement_updated'); socket.off('reaction_updated'); socket.off('game_error');
+    };
   }, []);
 
   // Fetch beachhead info
   useEffect(() => {
     fetch(`${API}/api/metro/beachhead`).then(r => r.json()).then(setBeachhead).catch(() => {});
   }, []);
+
+  // Offline tunnel queue auto-flush on reconnect
+  useEffect(() => {
+    if (socketConnected && socket && user) {
+      flushOfflineQueue(
+        (roomId, content) => {
+          socket.emit('chat_message', { roomId, senderId: user.id, content });
+        },
+        (receiverId, content) => {
+          socket.emit('send_dm', { senderId: user.id, receiverId, content });
+        }
+      ).then(count => {
+        if (count > 0) showToast(`Synced ${count} queued messages ✓`);
+      });
+    }
+  }, [socketConnected, socket, user, showToast]);
 
   // Onboarding check — if tags <2 or no onboard flag, show
   useEffect(() => {
@@ -260,6 +295,38 @@ export function App() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ event: 'manual_context_confirm', userId: user.id, payload: { stationId: station.id, stationName: station.name } })
     }).catch(() => {});
+  };
+
+  const handleHeroCheckIn = async (lineId: string, stationId: string, direction: string) => {
+    if (!socket || !user) return;
+    if (stationRoom) socket.emit('leave_room', { roomId: stationRoom.id, userId: user.id });
+    if (trainRoom) socket.emit('leave_room', { roomId: trainRoom.id, userId: user.id });
+
+    let stationLat = 28.6328;
+    let stationLng = 77.2197;
+    let stationName = stationId;
+    const lineObj = DELHI_METRO_LINES.find(l => l.id === lineId);
+    const stObj = lineObj?.stations.find(s => s.id === stationId);
+    if (stObj) {
+      stationLat = stObj.lat;
+      stationLng = stObj.lng;
+      stationName = stObj.name;
+    }
+
+    setHasManualOverride(true);
+    await detect(socket, user, {
+      userConfirmed: true,
+      overrideLat: stationLat,
+      overrideLng: stationLng,
+      overrideCellTowerId: `TOWER_DMRC_${stationId.toUpperCase()}`
+    });
+
+    showToast(`Checked in to ${stationName} (${direction}) ✓`);
+
+    setTimeout(() => {
+      setShowCheckInScreen(false);
+      setView('people');
+    }, 700);
   };
 
   const handleUseCommute = async (pattern: any, roomFromServer?: any) => {
@@ -449,7 +516,7 @@ export function App() {
   useEffect(() => {
     if (!socket || !user || !selectedFriend) return;
     socket.emit('fetch_dm_history', { userId: user.id, friendId: selectedFriend.friendId });
-    fetch(`${API}/api/dm/${user.id}/${selectedFriend.friendId}`)
+    fetch(`${API}/api/dm/${user.id}/${selectedFriend.friendId}`, { headers: { ...authHeaders() } })
       .then(r => r.json())
       .then(d => {
         if (d.messages && d.messages.length) {
@@ -462,19 +529,14 @@ export function App() {
       }).catch(() => {});
   }, [selectedFriend, socket, user]);
 
-  const openChat = (target: 'station' | 'train') => {
-    setChatTarget(target);
-    setView('chat');
-    if (user) track('room_chat_opened', user.id, { target });
-  };
-
   const activeRoom = view === 'chat' ? (chatTarget === 'station' ? stationRoom : trainRoom) : null;
   const friendIds = friends.map(f => f.friendId);
   const activePeopleRoom = trainRoom || stationRoom;
-  const navActive: NavView = view === 'home' ? 'home' : view === 'people' || view === 'discover' || view === 'liveTracking' || view === 'connect' || view === 'room' ? 'people' : view === 'chats' || view === 'chat' || view === 'friends' ? 'chats' : view === 'profile' ? 'profile' : 'home';
+  const navActive: NavView = view === 'home' ? 'home' : view === 'liveTracking' ? 'liveTracking' : view === 'people' || view === 'discover' || view === 'connect' || view === 'room' ? 'people' : view === 'chats' || view === 'chat' || view === 'friends' ? 'chats' : (view === 'profile' || view === 'safetyCenter' || view === 'blockedUsers') ? 'profile' : 'home';
 
   const handleBottomNav = (v: NavView) => {
     if (v === 'home') setView('home');
+    else if (v === 'liveTracking') setView('liveTracking');
     else if (v === 'people') setView('people');
     else if (v === 'chats') {
       setView('chats');
@@ -486,26 +548,21 @@ export function App() {
     else if (v === 'profile') setView('profile');
   };
 
-  const handleHomeQuick = (action: 'chat'|'quiz'|'icebreaker'|'post') => {
-    if (action==='chat') { setChatTarget(trainRoom ? 'train' : 'station'); setView('chat'); }
-    else if (action==='quiz') {
-      const room = trainRoom || stationRoom;
-      if (room && socket && user) { socket.emit('create_game', { roomId: room.id, type:'trivia', user }); setView('people'); }
-    }
-    else if (action==='icebreaker') {
-      const room = trainRoom || stationRoom;
-      if (room && socket && user) { socket.emit('create_game', { roomId: room.id, type:'prompt', user }); setView('people'); }
-    }
-    else if (action==='post') { setView('people'); setTimeout(()=> setShowProfileEditor(true), 200); }
-  };
-
   return (
     <div style={{ maxWidth: 520, margin: '0 auto', padding: '16px 12px 86px', minHeight:'100vh', background:'var(--bg-base)' }}>
+      {/* Offline Subway Tunnel Alert */}
+      {!socketConnected && (
+        <div style={{ marginBottom: 10 }}>
+          <OfflineBanner lastSyncTime={new Date()} />
+        </div>
+      )}
+
       {showOnboarding && user && (
         <OnboardingScreen
           user={user}
           onComplete={(np)=>{ setUser(np); setShowOnboarding(false); localStorage.setItem('coride_onboarded','1'); showToast('Welcome aboard! 🎉'); }}
           onSkip={()=>{ setShowOnboarding(false); localStorage.setItem('coride_onboarded','1'); }}
+          onSelectManualStation={() => setShowStationPicker(true)}
         />
       )}
       {/* Home */}
@@ -520,7 +577,6 @@ export function App() {
             vibe={activePeopleRoom ? vibeMap[activePeopleRoom.id] : []}
             engagement={engagement}
             onViewAllPeople={()=> setView('people')}
-            onQuickAction={handleHomeQuick}
             onOpenRoom={(roomId)=> {
               if (roomId) setSelectedPresenceRoomId(roomId);
               setView('room');
@@ -529,6 +585,8 @@ export function App() {
               const room = stationRoom?.id===roomId ? stationRoom : trainRoom?.id===roomId ? trainRoom : null;
               if (room) { setChatTarget(room.type==='train'?'train':'station'); setView('chat'); }
             }}
+            onOpenLiveTracking={()=> setView('liveTracking')}
+            onOpenCheckIn={()=> setShowCheckInScreen(true)}
           />
           {/* Saved commutes compact on home */}
           {user && (
@@ -554,7 +612,6 @@ export function App() {
             onConnect={handleConnect}
             onBlock={handleBlock}
             onReport={handleReport}
-            onOpenChat={() => openChat(activePeopleRoom.type==='train'?'train':'station')}
             onProfileOpen={handleProfileOpen}
           />
           <div style={{ marginTop:14 }}>
@@ -568,7 +625,7 @@ export function App() {
             <div style={{ marginTop:12, display:'flex', flexDirection:'column', gap:8, padding:'10px 12px', borderRadius:'var(--radius-md)', background:'var(--bg-surface)', border:'1px solid var(--border-subtle)' }}>
               <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
                 <span style={{ display:'flex', alignItems:'center', gap:6, fontSize:11, color:'var(--text-muted)' }}><Radio size={12} style={{ color: hasManualOverride?'var(--accent-emerald)':'var(--accent-blue)' }}/> {hasManualOverride?'Confirmed':'Auto'}: <strong style={{ color:'var(--text-primary)' }}>{context.stationName}</strong></span>
-                <button onClick={()=> setShowStationPicker(true)} style={{ background:'none', border:'none', color:'var(--accent-purple-text)', fontSize:11, fontWeight:700 }}>Change</button>
+                <button onClick={()=> setShowCheckInScreen(true)} style={{ background:'none', border:'none', color:'var(--accent-purple-text)', fontSize:11, fontWeight:700, cursor:'pointer' }}>Change</button>
               </div>
               <ContextConfidenceBadge context={context} />
             </div>
@@ -590,8 +647,23 @@ export function App() {
       )}
 
       {/* Live Tracking — 09 */}
-      {view === 'liveTracking' && (
-        <LiveTrackingScreen onBack={()=> setView('people')} />
+      {view === 'liveTracking' && user && (
+        <LiveTrackingScreen
+          currentUser={user}
+          friends={friends}
+          currentContext={context}
+          activeRoom={activeRoom}
+          onBack={() => setView('people')}
+          onOpenChat={(fid) => {
+            const f = friends.find(x => x.id === fid || x.friendId === fid);
+            if (f) {
+              setSelectedFriend(f);
+              setView('chats');
+            }
+          }}
+          onOpenProfile={(p) => setSelectedUser(p)}
+          onContextUpdated={(c) => setContext(c)}
+        />
       )}
 
       {/* Chat — 04 Train Room */}
@@ -628,7 +700,6 @@ export function App() {
             </div>
           ) : (
             <ChatsScreen
-              user={user}
               friends={friends}
               onSelect={(id)=> {
                 const f = friends.find(x=> (x.friendId===id || x.id===id));
@@ -655,9 +726,34 @@ export function App() {
         />
       )}
 
-      {/* Profile Stats — 10 + Detail */}
+      {/* Profile Stats / Account Screen */}
       {view === 'profile' && user && (
-        <ProfileStatsScreen user={user} />
+        <ProfileStatsScreen
+          user={user}
+          onEdit={() => setShowProfileEditor(true)}
+          onOpenSafetyCenter={() => setView('safetyCenter')}
+          onOpenBlockedUsers={() => setView('blockedUsers')}
+          onAccountDeleted={() => {
+            setUser(null);
+            setShowOnboarding(true);
+            showToast('Account permanently deleted.');
+          }}
+        />
+      )}
+
+      {/* Safety Centre Screen */}
+      {view === 'safetyCenter' && (
+        <SafetyCenterScreen onBack={() => setView('profile')} />
+      )}
+
+      {/* Blocked Users Screen */}
+      {view === 'blockedUsers' && (
+        <BlockedUsersScreen
+          onBack={() => setView('profile')}
+          onUnblocked={() => {
+            showToast('Commuter unblocked ✓');
+          }}
+        />
       )}
 
       {/* Live Room Presence Screen */}
@@ -668,6 +764,8 @@ export function App() {
           onBack={()=> setView('home')}
           onProfileOpen={(u)=> setSelectedUser(u)}
           onConnect={(targetId)=> handleConnect(targetId)}
+          socket={socket}
+          socketConnected={socketConnected}
         />
       )}
 
@@ -678,23 +776,59 @@ export function App() {
         <ProfileEditor user={user} onClose={()=> setShowProfileEditor(false)} onSaved={(np)=>{ setUser(np); showToast('Profile enhanced ✓'); track('profile_enhanced', np.id, { tags: np.interestTags.length }); }} />
       )}
 
-      {/* Selected user profile */}
-      {selectedUser && view!=='profile' && view!=='home' && (
-        <ProfileDrawer
-          user={selectedUser}
-          isMe={selectedUser.id===user?.id}
-          isFriend={friendIds.includes(selectedUser.id)}
-          onClose={()=> setSelectedUser(null)}
-          onConnect={()=> { if(selectedUser) handleConnect(selectedUser.id); setSelectedUser(null); }}
-          onBlock={()=> { if(selectedUser) handleBlock(selectedUser.id); setSelectedUser(null); }}
-          onReport={(reason)=> { if(selectedUser) handleReport(selectedUser.id, reason); setSelectedUser(null); }}
-          onMessage={()=> setSelectedUser(null)}
-        />
-      )}
+      {/* Selected user profile sheet */}
+      <ProfileSheet
+        open={selectedUser !== null && view !== 'profile' && view !== 'home'}
+        onClose={() => setSelectedUser(null)}
+        labelledBy="app-profile-sheet-title"
+      >
+        {selectedUser && (
+          <>
+            <ProfileSheetContent
+              traveler={selectedUser}
+              titleId="app-profile-sheet-title"
+              isFriend={friendIds.includes(selectedUser.id)}
+              currentContext={context}
+              activeRoomId={activeRoom?.id}
+            />
+            <ProfileSheetActions
+              initialState={
+                selectedUser.id === user?.id
+                  ? 'already-friends'
+                  : friendIds.includes(selectedUser.id)
+                    ? 'already-friends'
+                    : 'idle'
+              }
+              onSendRequest={() => {
+                if (selectedUser) handleConnect(selectedUser.id);
+              }}
+              onReport={() => {
+                if (selectedUser) handleReport(selectedUser.id, 'General report');
+                setSelectedUser(null);
+              }}
+              onBlock={() => {
+                if (selectedUser) handleBlock(selectedUser.id);
+                setSelectedUser(null);
+              }}
+            />
+          </>
+        )}
+      </ProfileSheet>
 
       {/* Station picker */}
       {showStationPicker && view==='home' && (
         <StationPicker onConfirm={(st,_line)=> handleStationPicked(st)} onDismiss={()=> setShowStationPicker(false)} />
+      )}
+
+      {/* ══ The One Bold Element: Hero Check-In Screen & Orchestrated Moment ══ */}
+      {showCheckInScreen && user && (
+        <CheckInScreen
+          onCheckIn={handleHeroCheckIn}
+          onCancel={() => setShowCheckInScreen(false)}
+          initialLineId={context?.line || 'blue'}
+          initialStationId={context?.station || 'rajiv_chowk'}
+          initialDirection={context?.direction}
+        />
       )}
 
       {/* Toast — announced to screen readers */}

@@ -1,4 +1,4 @@
-import { MessageCircle, Gamepad2, Sparkles, PenLine, Train, Shield, Bell, Users } from 'lucide-react';
+import { Train, Users, Map } from 'lucide-react';
 import { ThemeToggle } from './ThemeToggle';
 import type { UserProfile, ContextRoom, RankedTraveler } from '../types';
 import type { EngagementSnapshot } from '../types/engagement';
@@ -19,13 +19,14 @@ interface Props {
   vibe?: RankedTraveler[];
   engagement?: Record<string, EngagementSnapshot>;
   onViewAllPeople: () => void;
-  onQuickAction: (action: 'chat' | 'quiz' | 'icebreaker' | 'post') => void;
   onJoinRoom: (roomId: string) => void;
   onOpenRoom?: (roomId?: string) => void;
   onShowNotifications?: () => void;
+  onOpenLiveTracking?: () => void;
+  onOpenCheckIn?: () => void;
 }
 
-export const HomeScreen: React.FC<Props> = ({ user, contextStationName, contextLineName, stationRoom, trainRoom, vibe, engagement, onViewAllPeople, onQuickAction, onJoinRoom, onOpenRoom }) => {
+export const HomeScreen: React.FC<Props> = ({ user, contextStationName, contextLineName, stationRoom, trainRoom, vibe, engagement, onViewAllPeople, onJoinRoom, onOpenRoom, onOpenLiveTracking, onOpenCheckIn }) => {
   const greeting = greetingFor(new Date().getHours());
   const nearbyCount = stationRoom?.userCount || trainRoom?.userCount || 0;
   const line = contextLineName || trainRoom?.lineName || 'Blue Line';
@@ -47,9 +48,8 @@ export const HomeScreen: React.FC<Props> = ({ user, contextStationName, contextL
       }
     });
 
-  // Active rooms demo + real engagement rooms
+  // Active rooms from real engagement rooms only — no demo fallbacks.
   const activeRooms: { id: string; title: string; desc: string; emoji: string; count: number }[] = [];
-  // push real engagement active rooms
   if (engagement) {
     for (const snap of Object.values(engagement)) {
       if (snap.activeGame) {
@@ -58,12 +58,6 @@ export const HomeScreen: React.FC<Props> = ({ user, contextStationName, contextL
         activeRooms.push({ id: snap.roomId, title: `${titleMap[g.type] || g.type} • Live`, desc: g.type==='prompt' ? g.currentPrompt?.text?.slice(0,28) || 'Share your vibe' : `${g.players?.length || 0} playing`, emoji: g.type==='trivia'?'⚡':g.type==='prompt'?'💬':'🎮', count: g.players?.length || 0 });
       }
     }
-  }
-  // fallback demo rooms if empty
-  if (activeRooms.length===0) {
-    activeRooms.push({ id:'rajiv_chowk:blue:towards_noida', title:'Rajiv Chowk · Blue Line 🚇', desc:'Live presence · 15 active commuters', emoji:'🚇', count: 15 });
-    activeRooms.push({ id:'demo1', title:'Friday Music Vibes 🎵', desc:"Let's share some good songs!", emoji:'🎵', count:32 });
-    activeRooms.push({ id:'demo2', title:'DU Students Room 🎓', desc:'North Campus peeps', emoji:'🎓', count:18 });
   }
 
   return (
@@ -78,19 +72,8 @@ export const HomeScreen: React.FC<Props> = ({ user, contextStationName, contextL
         </div>
         <div style={{ display:'flex', gap:8, flexShrink:0 }}>
           <ThemeToggle />
-          <button aria-label="Safety centre" className="icon-btn">
-            <Shield size={18} />
-          </button>
-          <button aria-label="Notifications, unread" className="icon-btn">
-            <Bell size={18} />
-            <span className="pip" />
-          </button>
         </div>
       </div>
-
-      <p style={{ fontSize:22, fontWeight:800, lineHeight:1.2, marginBottom:16, color:'var(--text-primary)' }}>
-        Your journey, <br/>your people.
-      </p>
 
       {/* On Ride */}
       <div
@@ -117,15 +100,85 @@ export const HomeScreen: React.FC<Props> = ({ user, contextStationName, contextL
           </div>
           <div style={{ fontSize:14, color:'var(--text-primary)', fontWeight:600 }}>{line} • {station} → {next}</div>
         </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          {onOpenCheckIn && (
+            <button
+              className="btn-secondary press"
+              style={{
+                background: 'var(--ink-700)',
+                border: '1px solid var(--border-subtle)',
+                color: 'var(--text-primary)',
+                padding: '8px 14px',
+                fontSize: 13,
+                fontWeight: 700,
+                borderRadius: 'var(--radius-pill)',
+                minHeight: 40
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenCheckIn();
+              }}
+            >
+              Check In
+            </button>
+          )}
+          <button
+            className="btn-secondary press"
+            style={{
+              background: 'transparent',
+              border: '1px solid var(--border-purple)',
+              color: 'var(--accent-purple-text)',
+              padding: '8px 14px',
+              fontSize: 13,
+              fontWeight: 700,
+              borderRadius: 'var(--radius-pill)',
+              minHeight: 40
+            }}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (onOpenRoom) onOpenRoom();
+            }}
+          >
+            View Room
+          </button>
+        </div>
+      </div>
+
+      {/* Live Metro Map & Subway Route Tracker Tile */}
+      <div
+        className="glass-thick press"
+        style={{
+          borderRadius: 'var(--radius-xl)',
+          padding: 14,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          marginBottom: 16,
+          cursor: 'pointer',
+          background: 'linear-gradient(135deg, rgba(56, 189, 248, 0.12), rgba(123, 93, 255, 0.15))',
+          border: '1px solid rgba(56, 189, 248, 0.25)'
+        }}
+        onClick={() => onOpenLiveTracking && onOpenLiveTracking()}
+      >
+        <div className="avatar" style={{ width: 42, height: 42, background: 'linear-gradient(135deg, #0284c7, #38bdf8)' }}>
+          <Map size={20} color="#fff" />
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 13, color: '#38bdf8', fontWeight: 800 }}>Delhi Metro Live Map</span>
+            <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 999, background: 'rgba(16, 185, 129, 0.2)', color: '#10b981', fontWeight: 800 }}>10 Lines</span>
+          </div>
+          <div style={{ fontSize: 13, color: 'var(--text-primary)', fontWeight: 600 }}>Friends Transit Map & Route Diagram</div>
+        </div>
         <button
           className="btn-secondary press"
-          style={{ background:'transparent', border:'1px solid var(--border-purple)', color:'var(--accent-purple-text)', padding:'6px 12px', fontSize:13 }}
+          style={{ background: 'rgba(56, 189, 248, 0.15)', border: '1px solid rgba(56, 189, 248, 0.3)', color: '#38bdf8', padding: '6px 12px', fontSize: 13, fontWeight: 700 }}
           onClick={(e) => {
             e.stopPropagation();
-            if (onOpenRoom) onOpenRoom();
+            if (onOpenLiveTracking) onOpenLiveTracking();
           }}
         >
-          View Room
+          Open Map
         </button>
       </div>
 
@@ -171,22 +224,6 @@ export const HomeScreen: React.FC<Props> = ({ user, contextStationName, contextL
             </div>
           )}
         </div>
-      </div>
-
-      {/* Quick Actions */}
-      <div className="section-head"><h3>Quick Actions</h3></div>
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:16 }}>
-        {[
-          { icon: <MessageCircle size={20} color="var(--accent-purple)"/>,  label:'Chat Room',   bg:'var(--bg-quick-purple)',  action:'chat' as const },
-          { icon: <Gamepad2 size={20} color="var(--accent-emerald)"/>,      label:'Play Quiz',   bg:'var(--bg-quick-emerald)', action:'quiz' as const },
-          { icon: <Sparkles size={20} color="var(--accent-amber)"/>,        label:'Ice Breaker', bg:'var(--bg-quick-amber)',   action:'icebreaker' as const },
-          { icon: <PenLine size={20} color="var(--accent-blue)"/>,          label:'Add Post',    bg:'var(--bg-quick-blue)',    action:'post' as const },
-        ].map(card => (
-          <button key={card.label} onClick={()=>onQuickAction(card.action)} className="quick-tile" style={{ background: card.bg }}>
-            <div className="chip">{card.icon}</div>
-            <span className="label">{card.label}</span>
-          </button>
-        ))}
       </div>
 
       {/* Active Rooms */}

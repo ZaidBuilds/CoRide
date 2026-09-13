@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { DELHI_METRO_LINES, getActiveMetroLines } from '../data/metroData';
 import type { MetroStation, MetroLine, TrainScheduleInfo } from '../types';
 import { ScheduleEngine } from './scheduleEngine';
+import { PathTrackerEngine } from './pathTrackerEngine';
 
 // ─── Input / Output Types ───
 
@@ -13,6 +14,8 @@ export interface ContextInput {
   cellTowerId?: string;
   movementState: 'STILL' | 'WALKING' | 'IN_VEHICLE';
   speedKmh?: number;
+  headingDegrees?: number;
+  userConfirmedDirection?: string;
   routeHistory?: { lat: number; lng: number; t: number }[];
   userConfirmed?: boolean; // optional "Yes I'm on this train" tap
 }
@@ -165,10 +168,22 @@ export class TransitContextEngine {
     }
 
     // ── Signal D+E: Schedule window match (+20) — real window check + direction inference ──
-    const inferred = input.routeHistory && input.routeHistory.length >= 2
-      ? this.inferDirectionFromHistory(input.routeHistory, matchedLine)
-      : null;
-    const direction = inferred || `Towards ${matchedLine.terminalB}`;
+    const pathTracker = PathTrackerEngine.getInstance();
+    const resolvedPath = pathTracker.updateAndResolvePath(
+      input.userId,
+      matchedStation,
+      matchedLine,
+      {
+        timestamp: input.timestamp,
+        headingDegrees: input.headingDegrees,
+        speedKmh: input.speedKmh,
+        userConfirmedDirection: input.userConfirmedDirection
+      }
+    );
+    const direction = resolvedPath.direction;
+    if (resolvedPath.isHighConfidence) {
+      breakdown.routeMatch = Math.min(25, Math.max(breakdown.routeMatch, 18));
+    }
     const nowDate = input.timestamp ? new Date(input.timestamp) : new Date();
     const scheduleInfo = this.scheduleEngine.getScheduleForStation(
       matchedLine.id, matchedStation.id, direction, nowDate

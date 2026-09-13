@@ -1,129 +1,153 @@
-/* CoRide design system — light + dark, restrained Apple-style glass.
-   Every colour token is declared ONCE via light-dark(); the theme is switched
-   by flipping `color-scheme` on <html>, not by redeclaring the palette. */
-
-:root{
-  /* System default follows the OS; [data-theme] overrides it. */
-  color-scheme: light dark;
-}
-:root[data-theme="light"]{ color-scheme: light }
-:root[data-theme="dark"] { color-scheme: dark }
+/* CoRide design system — The Craft Layer Specification.
+   Dark-mode-first, Glass on Chrome only, Solid on Content.
+   8pt spatial grid, line-height-first vertical rhythm, 48dp minimum physical touch targets. */
 
 :root {
-  /* ── Surfaces — light is iOS grouped-background, dark is the Figma palette ── */
-  --bg-base:       light-dark(#F2F2F7, #08080F);
-  --bg-elevated:   light-dark(#FFFFFF, #13131E);
-  --bg-surface:    light-dark(#FFFFFF, #1A1A26);
-  --bg-card:       light-dark(#FFFFFF, #1E1E2E);
-  --bg-card-hover: light-dark(#F7F7FA, #232334);
-  --bg-input:      light-dark(#FFFFFF, #15151E);
-  /* purple-washed hero cards ("On Ride", line banners) */
-  --bg-accent-wash: light-dark(#EFEBFF, #1A1033);
-  --bg-accent-wash-2: light-dark(#E7E1FF, #1E1A3A);
-  /* neutral overlay chips that sat on rgba(255,255,255,.06) — invisible on white */
-  --bg-overlay: light-dark(rgba(0,0,0,0.05), rgba(255,255,255,0.06));
+  /* ── 1. 11-Stop Oklch Neutral Ramp (Blue-Mixed, Night Canvas) ── */
+  --ink-950: #05060A; /* Deepest: modal scrim, pressed states */
+  --ink-900: #0A0C11; /* Canvas: night, lifted off pure black */
+  --ink-850: #0F1218; /* Recessed backgrounds */
+  --ink-800: #14181F; /* Surface: cards, feed rows */
+  --ink-750: #1A1E27; /* Surface hover */
+  --ink-700: #20252F; /* Surface-raised: sheets, popovers */
+  --ink-600: #2B313D; /* Border-strong */
+  --ink-500: #3A4150; /* Border-subtle */
+  --ink-400: #6B7382; /* Text-muted: timestamps, helper text */
+  --ink-300: #9AA2B1; /* Text-secondary: metadata, labels */
+  --ink-200: #DDE1E8; /* Text-primary: high contrast, zero halo */
 
-  /* Quick-action tiles — light keeps the pastel, dark drops to a deep tint of the
-     same hue so the card still reads as "the purple one" without glowing. */
-  --bg-quick-purple:  light-dark(#EDE9FF, #1E1A33);
-  --bg-quick-emerald: light-dark(#E0F7F0, #0F2620);
-  --bg-quick-amber:   light-dark(#FEF3C7, #2A2113);
-  --bg-quick-blue:    light-dark(#DBEAFE, #12203A);
-  /* the small icon chip that sits on a quick tile — was hardcoded `white` */
-  --bg-quick-chip:    light-dark(#FFFFFF, rgba(255,255,255,0.10));
-  --border-quick:     light-dark(rgba(0,0,0,0.04), rgba(255,255,255,0.07));
+  /* Aliases for backwards compatibility */
+  --fog-500: var(--ink-400);
+  --fog-400: var(--ink-300);
+  --fog-300: var(--ink-300);
+  --fog-200: var(--ink-200);
+  --fog-100: var(--ink-200);
 
-  /* ── Glass — only for layers that FLOAT over content (nav, sheets, headers).
-     Content cards stay near-opaque; stacked backdrop-filter kills Android framerate. ── */
-  --glass-bg:        light-dark(rgba(255,255,255,0.72), rgba(20,20,30,0.72));
-  --glass-bg-strong: light-dark(rgba(255,255,255,0.86), rgba(16,16,24,0.86));
-  /* mid tier: frosts, but at a blur cheap enough to sit inside a scrolling list */
-  --glass-bg-soft:   light-dark(rgba(255,255,255,0.80), rgba(26,26,38,0.80));
-  --glass-blur-soft: 12px;
+  /* ── 2. Functional Accents (10% Maximum Coverage) ── */
+  --signal-600: #0B4FE0;
+  --signal-500: #2563EB;
+  --signal-400: #5B8DEF;
 
-  /* ── Material tiers (thin → thick). Blur radius AND fill opacity both rise;
-     changing only one reads as "blurrier", not as a different material. ── */
-  --glass-blur-thin:  8px;
-  --glass-blur-thick: 40px;
-  --glass-bg-thin:  light-dark(rgba(255,255,255,0.55), rgba(20,20,30,0.55));
-  --glass-bg-thick: light-dark(rgba(255,255,255,0.92), rgba(14,14,22,0.92));
-  --glass-border:    light-dark(rgba(0,0,0,0.08), rgba(255,255,255,0.10));
-  --glass-highlight: light-dark(rgba(255,255,255,0.90), rgba(255,255,255,0.14));
-  --glass-blur: 24px;
-  --glass-saturate: 180%;
-  --scrim: light-dark(rgba(0,0,0,0.28), rgba(5,5,12,0.62));
+  --amber-500: #D97706;
+  --rose-500:   #DC2626;
+  --mint-500:   #059669;
 
-  /* ── Elevation — light uses soft ambient shadow, dark uses depth + rim light ──
-     light-dark() is a <color> function ONLY. Wrapping a whole shadow value in it
-     (`light-dark(0 4px 16px …, …)`) is invalid, so the declaration is dropped and
-     the element renders with NO shadow. Keep the geometry outside and let
-     light-dark() resolve just the colour. */
-  --shadow-color-sm: light-dark(rgba(0,0,0,0.06), rgba(0,0,0,0.40));
-  --shadow-color-md: light-dark(rgba(0,0,0,0.08), rgba(0,0,0,0.45));
-  --shadow-color-lg: light-dark(rgba(0,0,0,0.12), rgba(0,0,0,0.55));
-  --shadow-sm: 0 1px 2px var(--shadow-color-sm);
-  --shadow-md: 0 4px 16px var(--shadow-color-md);
-  --shadow-lg: 0 12px 40px var(--shadow-color-lg);
+  /* Official DMRC Line Palette (Data Collection — Never Semantic Roles) */
+  --line-yellow:  #EAB308; /* Hue-shifted toward gold/amber to prevent mud on dark */
+  --line-blue:    #0057B8;
+  --line-red:     #E4002B;
+  --line-green:   #00A651;
+  --line-violet:  #7B2D8E;
+  --line-pink:    #E5008B;
+  --line-magenta: #C8007B;
+  --line-grey:    #8C8C8C;
+  --line-aqua:    #00B5C9;
+  --line-airport: #F97316;
 
-  /* ── Motion — Apple-ish spring for enter, quick ease for exit ── */
-  /* iOS sheet/spring curve — decelerates harder than a plain ease-out, which is
-     what reads as "Apple" rather than merely smooth. */
-  --ease-enter: cubic-bezier(0.32, 0.72, 0, 1);
-  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
-  --dur-micro: 150ms;
-  --dur-std: 250ms;
-  --dur-slow: 350ms;   /* sheets */
+  /* ── 3. 8pt Spatial Grid Scale & 4pt Half-Step ── */
+  --space-1: 4px;   /* Half-step: micro alignment */
+  --space-2: 8px;   /* Standard compact gap */
+  --space-3: 16px;  /* Screen margin, card padding */
+  --space-4: 24px;  /* Section gap, card separation */
+  --space-5: 32px;  /* Major section gap */
+  --space-6: 40px;
+  --space-7: 48px;  /* Standard touch target height */
+  --space-8: 64px;
 
-  /* ── Presence — light variants darkened to stay ≥4.5:1 on white ── */
-  --presence-active:    light-dark(#15803D, #22c55e);
-  --presence-nearby:    light-dark(#A16207, #EAB308);
-  --presence-other:     light-dark(#64748B, #475569);
-  --presence-sameTrain: light-dark(#0369A1, #38bdf8);
+  /* ── 4. Hierarchy-Differentiated Radius Scale ── */
+  --radius-chip:    8px;
+  --radius-card:    16px;
+  --radius-sheet:   24px;
+  --radius-pill:    999px;
+  --radius-sm:      8px;
+  --radius-md:      12px;
+  --radius-lg:      16px;
+  --radius-xl:      24px;
+  --radius-full:    9999px;
 
-  /* ── Accent — Figma purple #7B5DFF + violet #8B5CF6 ──
-     FILL variants: use behind white text only via --accent-fill-* (≥4.5:1).
-     TEXT variants: use when the accent IS the text/icon on a dark surface.
-     Raw --accent-purple/--accent-violet are 3.8–4.3:1 as text on cards — borders/fills only. */
-  --accent-purple: #7B5DFF;
-  --accent-violet: #8B5CF6;
-  --accent-indigo: #6D5BF0;
-  /* gradient partner for the purple — decorative fills only, never text */
-  --accent-pink: #EC4899;
-  /* text-on-surface: dark 6.03:1 on bg-card · light 6.32:1 on white */
-  --accent-purple-text: light-dark(#5B3FE8, #A78BFA);
-  /* dark 6.09:1 · light 5.67:1 (raw --accent-rose was 4.47:1) */
-  --accent-rose-text:   light-dark(#C81E3C, #FB7185);
-  /* white on #6D5BF0 = 4.77:1 · on #7C4DEE = 5.06:1 (was 4.33/4.23 — failed) */
-  --accent-fill-from: #6D5BF0;
-  --accent-fill-to: #7C4DEE;
-  --accent-blue:    light-dark(#0369A1, #38bdf8);
-  --accent-emerald: light-dark(#047857, #10b981);
-  --accent-rose:    light-dark(#C81E3C, #f43f5e);
-  --accent-amber:   light-dark(#B45309, #f59e0b);
+  /* ── 5. Semantic Surfaces ── */
+  --bg-canvas:         var(--ink-900);
+  --bg-surface:        var(--ink-800);
+  --bg-surface-raised: var(--ink-700);
+  --bg-elevated:       var(--ink-800);
+  --bg-card:           var(--ink-800);
+  --bg-card-hover:     var(--ink-750);
+  --bg-base:           var(--ink-900);
+  --bg-input:          var(--ink-700);
 
-  /* ── Text — light values measured on #FFFFFF / #F2F2F7 ── */
-  --text-primary:   light-dark(#1C1C1E, #F2F2FF);  /* 17.0 / 15.5 */
-  --text-secondary: light-dark(#4A4A55, #9AA0B5);  /*  8.7 /  6.6 */
-  --text-muted:     light-dark(#65656F, #8B90AC);  /*  5.8 /  5.5 */
-  --text-label:     light-dark(#65656F, #8B8DB0);
+  /* Glass — strictly floating chrome (Nav, headers, sheets) */
+  --bg-glass:          rgba(20, 24, 31, 0.85);
+  --glass-bg:          rgba(20, 24, 31, 0.85);
+  --glass-bg-strong:   rgba(15, 18, 24, 0.92);
+  --glass-bg-soft:     rgba(20, 24, 31, 0.85);
+  --glass-blur:        24px;
+  --glass-blur-soft:   12px;
+  --glass-border:      rgba(255, 255, 255, 0.08);
+  --glass-highlight:   rgba(255, 255, 255, 0.10);
+  --glass-saturate:    180%;
+  --scrim:             rgba(5, 6, 10, 0.80);
 
-  /* ── Focus & tap ── */
-  --focus-ring: light-dark(#5B3FE8, #A78BFA);
-  --tap: 44px;
+  /* Borders */
+  --border-subtle:     var(--ink-500);
+  --border-strong:     var(--ink-600);
+  --border-card:       rgba(255, 255, 255, 0.07);
+  --border-hover:      rgba(37, 99, 235, 0.40);
+  --border-purple:     rgba(123, 93, 255, 0.35);
 
-  /* ── Border ── */
-  --border-subtle: light-dark(rgba(0,0,0,0.07), rgba(255,255,255,0.07));
-  --border-card:   light-dark(rgba(0,0,0,0.10), rgba(255,255,255,0.09));
-  --border-hover:  light-dark(rgba(91,63,232,0.30), rgba(123,93,255,0.25));
-  --border-purple: light-dark(rgba(91,63,232,0.40), rgba(123,93,255,0.35));
+  /* Typography Colors */
+  --text-primary:      var(--ink-200); /* #DDE1E8 - zero halo */
+  --text-secondary:    var(--ink-300); /* #9AA2B1 */
+  --text-muted:        var(--ink-400); /* #6B7382 */
+  --text-label:        var(--ink-300);
+  --text-on-accent:    #FFFFFF;
 
-  /* ── Radii ── */
-  --radius-sm: 10px;
-  --radius-md: 14px;
-  --radius-lg: 18px;
-  --radius-xl: 24px;
-  --radius-2xl: 28px;
-  --radius-full: 9999px;
+  /* Brand & Functional Accents */
+  --accent:            var(--signal-500);
+  --accent-pressed:    var(--signal-600);
+  --accent-purple:     #7B5DFF;
+  --accent-violet:     #8B5CF6;
+  --accent-purple-text: #A78BFA;
+  --accent-rose-text:  #FB7185;
+  --accent-fill-from:  #2563EB;
+  --accent-fill-to:    #1D4ED8;
+  --accent-blue:       #38bdf8;
+  --accent-emerald:    #10b981;
+
+  /* Status Colors */
+  --status-success:    var(--mint-500);
+  --status-warning:    var(--amber-500);
+  --status-danger:     var(--rose-500); /* Strictly reserved for Report, Block, Delete Account */
+  --status-offline:    var(--ink-400);
+
+  /* Presence Badges */
+  --presence-active:    var(--mint-500);
+  --presence-nearby:    var(--amber-500);
+  --presence-other:     var(--ink-400);
+  --presence-sameTrain: #38bdf8;
+
+  /* Elevation Shadows */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.45);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.55);
+  --shadow-lg: 0 12px 36px rgba(0, 0, 0, 0.65);
+
+  /* ── 6. Motion Tokens (Asymmetric Restraint) ── */
+  --motion-instant: 100ms;
+  --motion-fast:    150ms;
+  --motion-medium:  300ms;
+  --motion-slow:    600ms; /* Check-in confirmation only */
+
+  --ease-standard:   cubic-bezier(0.2, 0, 0, 1);
+  --ease-decelerate: cubic-bezier(0, 0, 0, 1);   /* Entrances: fast start, gentle stop */
+  --ease-accelerate: cubic-bezier(0.4, 0, 1, 1); /* Exits: gentle start, fast away */
+
+  --dur-micro: var(--motion-fast);
+  --dur-std:   var(--motion-medium);
+  --dur-slow:  var(--motion-slow);
+  --ease-enter: var(--ease-decelerate);
+  --ease-exit:  var(--ease-accelerate);
+
+  /* ── 7. Ergonomics: 48dp Minimum Touch Target ── */
+  --tap: 48px;
 }
 
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -557,11 +581,36 @@ body{
 .presence-bar{display:flex;align-items:center;gap:16px;padding:8px 0;font-size:12px;font-weight:600}
 .presence-bar .tier{display:flex;align-items:center;gap:6px}
 
-/* ── Chat ── */
-.chat-bubble{max-width:78%;padding:10px 14px;border-radius:18px;font-size:14px;line-height:1.5}
-.chat-bubble.outgoing{background:var(--accent-fill-from);color:white;border-bottom-right-radius:6px}
-.chat-bubble.incoming{background:var(--bg-surface);color:var(--text-primary);border:1px solid var(--border-subtle);border-bottom-left-radius:6px}
-.chat-bubble.system{background:transparent;color:var(--text-muted);font-size:11px;text-align:center;max-width:100%;padding:6px 12px}
+/* ── Chat (The Craft Layer Asymmetric Bubbles) ── */
+.chat-bubble{
+  max-width: 82%;
+  padding: 10px 14px;
+  font-size: 16px;
+  line-height: 24px;
+  word-break: break-word;
+  box-shadow: var(--shadow-sm);
+}
+.chat-bubble.outgoing{
+  background: linear-gradient(135deg, var(--signal-500), var(--signal-600));
+  color: #FFFFFF;
+  border-radius: 16px 16px 4px 16px;
+}
+.chat-bubble.incoming{
+  background: var(--ink-800);
+  color: var(--ink-200);
+  border: 1px solid var(--ink-600);
+  border-radius: 16px 16px 16px 4px;
+}
+.chat-bubble.system{
+  background: transparent;
+  color: var(--ink-400);
+  font-size: 12px;
+  line-height: 16px;
+  text-align: center;
+  max-width: 100%;
+  padding: 6px 12px;
+  box-shadow: none;
+}
 
 /* ── Drawer — 03 profile full ── */
 .drawer-overlay{
@@ -662,6 +711,17 @@ body{
 .animate-push{animation:slideUp var(--dur-slow) var(--ease-enter)}
 .animate-pulse-glow{animation:pulseGlow 2s infinite}
 
+/* ══ Skeleton loading animation (Offset pulse, transform & opacity only) ══ */
+@keyframes skeletonPulse {
+  0% { opacity: 0.45; }
+  50% { opacity: 0.85; }
+  100% { opacity: 0.45; }
+}
+.skeleton-pulse {
+  animation: skeletonPulse 1.6s ease-in-out infinite;
+  will-change: opacity;
+}
+
 /* ══ Accessibility base ══ */
 
 /* Keyboard focus — one rule covers every control */
@@ -731,3 +791,273 @@ input:focus-visible,textarea:focus-visible{
   .nav-bar-large,.nav-bar-compact{transform:none}
   .nav-bar.collapsed .nav-bar-large{transform:none}
 }
+
+/* ─────────────────────────────────────────────────────────────
+   Snapchat-Style Friends Metro Map (CartoDB Dark Matter)
+   ───────────────────────────────────────────────────────────── */
+.leaflet-container {
+  background-color: #0b0f19 !important;
+  font-family: inherit !important;
+}
+
+/* Custom dark popup styling */
+.leaflet-popup-content-wrapper {
+  background: rgba(15, 23, 42, 0.92) !important;
+  backdrop-filter: blur(16px) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  color: #f8fafc !important;
+  border-radius: 14px !important;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.6) !important;
+  padding: 4px 6px !important;
+}
+.leaflet-popup-tip {
+  background: rgba(15, 23, 42, 0.92) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+}
+
+/* Snap-style Animated Avatar Pin */
+.snap-map-icon {
+  background: transparent !important;
+  border: none !important;
+}
+
+.snap-pin-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+  cursor: pointer;
+  transform: translateY(-8px);
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.snap-pin-wrap:hover {
+  transform: translateY(-14px) scale(1.08);
+}
+
+.snap-bubble {
+  background: rgba(15, 23, 42, 0.94);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #f8fafc;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  margin-bottom: 5px;
+  pointer-events: none;
+}
+.snap-bubble-emoji {
+  font-size: 12px;
+}
+.snap-bubble-text {
+  max-width: 90px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.snap-avatar-ring {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.snap-avatar {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: 2.5px solid #ffffff;
+  box-shadow: 0 0 0 2px rgba(123, 93, 255, 0.6), 0 8px 20px rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 900;
+  z-index: 2;
+  position: relative;
+}
+
+.snap-pulse {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: rgba(56, 189, 248, 0.4);
+  animation: snapPulse 2s cubic-bezier(0.25, 1, 0.5, 1) infinite;
+  z-index: 1;
+}
+
+@keyframes snapPulse {
+  0% {
+    transform: scale(0.85);
+    opacity: 0.9;
+  }
+  100% {
+    transform: scale(1.6);
+    opacity: 0;
+  }
+}
+
+/* ══ Utility classes for Tier 1, 2, 3 Components & Offline States ══ */
+
+/* Danger button — strictly reserved for Report, Block, Delete Account */
+.btn-danger, .pill-button.danger {
+  background: var(--status-danger) !important;
+  color: #ffffff !important;
+  border: none !important;
+  font-weight: 700;
+  min-height: 44px;
+}
+.btn-danger:active, .pill-button.danger:active {
+  filter: brightness(0.85);
+}
+
+/* 44px accessible thumb tap target */
+.touch-target-44 {
+  min-width: 44px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Offline banner — tunnel indicator */
+.offline-banner {
+  background: rgba(22, 25, 31, 0.94);
+  border: 1px solid var(--amber-500);
+  border-radius: var(--radius-lg);
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  box-shadow: var(--shadow-md);
+  animation: fadeIn 0.25s var(--ease-enter);
+}
+
+/* Empty State Card (Actionable anti-death state) */
+.empty-state-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xl);
+  padding: 24px 18px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+/* Message status indicators */
+.msg-status-queued {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--amber-500);
+  font-weight: 600;
+}
+.msg-status-sent {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--ink-300);
+}
+
+/* ══ The Craft Typography Scale (Line-Height First, Multiples of 4) ══ */
+.type-display {
+  font-size: 34px;
+  line-height: 40px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.type-title {
+  font-size: 28px;
+  line-height: 32px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+.type-heading {
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.type-body-lg {
+  font-size: 18px;
+  line-height: 24px;
+  font-weight: 400;
+}
+.type-body {
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 400;
+}
+.type-label {
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+.type-caption {
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+/* ══ Physical Subway Ergonomics: 48dp Touch Targets ══ */
+.touch-target-48, .touch-target-44 {
+  min-width: 48px;
+  min-height: 48px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ══ Asymmetric Message Bubbles (Hierarchy-Differentiated Radius) ══ */
+.chat-bubble-sent {
+  background: var(--signal-500);
+  color: #FFFFFF;
+  border-radius: 16px 16px 4px 16px;
+  padding: 10px 14px;
+  font-size: 16px;
+  line-height: 24px;
+  max-width: 82%;
+  word-break: break-word;
+  box-shadow: var(--shadow-sm);
+}
+.chat-bubble-received {
+  background: var(--ink-800);
+  color: var(--ink-200);
+  border: 1px solid var(--ink-600);
+  border-radius: 16px 16px 16px 4px;
+  padding: 10px 14px;
+  font-size: 16px;
+  line-height: 24px;
+  max-width: 82%;
+  word-break: break-word;
+  box-shadow: var(--shadow-sm);
+}
+
+/* ══ Accessibility: prefers-reduced-motion fallback ══ */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 100ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+

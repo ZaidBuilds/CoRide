@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Train, Radio, ArrowLeft, RefreshCw, Users, AlertTriangle, UserPlus, Check, Sparkles, MapPin } from 'lucide-react';
+import { Train, ArrowLeft, RefreshCw, Users, AlertTriangle, UserPlus, Check, MapPin } from 'lucide-react';
+import type { Socket } from 'socket.io-client';
 import type { UserProfile, RoomPresenceTraveler, RoomPresenceResponse } from '../types';
 import { INTEREST_TAXONOMY } from '../types';
+import { authHeaders } from '../utils/auth';
 import { ProfileSheet } from './ProfileSheet';
 import { ProfileSheetContent } from './ProfileSheetContent';
 import { ProfileSheetActions } from './ProfileSheetActions';
@@ -67,13 +69,17 @@ interface Props {
   onBack?: () => void;
   onProfileOpen?: (user: UserProfile) => void;
   onConnect?: (targetUserId: string) => void;
+  socket?: Socket | null;
+  socketConnected?: boolean;
 }
 
 export const RoomScreen: React.FC<Props> = ({
   currentUser,
   initialRoomId = 'rajiv_chowk:blue:towards_noida',
   onBack,
-  onConnect
+  onConnect,
+  socket = null,
+  socketConnected = false
 }) => {
   const [activeRoomId, setActiveRoomId] = useState(initialRoomId);
   const [data, setData] = useState<RoomPresenceResponse | null>(null);
@@ -100,7 +106,7 @@ export const RoomScreen: React.FC<Props> = ({
     try {
       const res = await fetch(`${API}/api/blocks`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-user-id': currentUser.id },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ targetId: traveler.id })
       });
       if (!res.ok) throw new Error();
@@ -140,9 +146,9 @@ export const RoomScreen: React.FC<Props> = ({
   const fetchRoomData = useCallback(async (roomId: string, silent = false) => {
     if (!silent) setIsRefreshing(true);
     try {
-      // x-user-id lets the server hide anyone in a block relationship with us.
+      // Token lets the server hide anyone in a block relationship with us.
       const res = await fetch(`${API}/api/room/${encodeURIComponent(roomId)}`, {
-        headers: currentUser?.id ? { 'x-user-id': currentUser.id } : undefined
+        headers: { ...authHeaders() }
       });
       if (!res.ok) {
         throw new Error(`Server returned status ${res.status}`);
@@ -160,18 +166,24 @@ export const RoomScreen: React.FC<Props> = ({
     }
   }, []);
 
-  // Heartbeat presence for current user
+  // Heartbeat presence for current user.
   const sendHeartbeat = useCallback(async (roomId: string) => {
     if (!currentUser?.id) return;
+    if (socket && socketConnected) {
+      // Socket heartbeat keeps the Redis TTL fresh and broadcasts live
+      // presence to everyone else in the room.
+      socket.emit('heartbeat', { roomId });
+      return;
+    }
     try {
       await fetch(`${API}/api/room/${encodeURIComponent(roomId)}/heartbeat`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-user-id': currentUser.id }
+        headers: { 'Content-Type': 'application/json', ...authHeaders() }
       });
     } catch {
       // heartbeats fail silently if server is momentarily down
     }
-  }, [currentUser]);
+  }, [currentUser, socket, socketConnected]);
 
   // Leave room on cleanup
   const sendLeave = useCallback(async (roomId: string) => {
@@ -179,14 +191,16 @@ export const RoomScreen: React.FC<Props> = ({
     try {
       await fetch(`${API}/api/room/${encodeURIComponent(roomId)}/leave`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-user-id': currentUser.id }
+        headers: { 'Content-Type': 'application/json', ...authHeaders() }
       });
     } catch {
       // silent
     }
   }, [currentUser]);
 
-  // Polling setup: 15 seconds
+  // Polling setup: 15 seconds — the REST/Redis fallback used whenever the
+  // socket isn't connected. When connected, presence_updated events drive
+  // refreshes instead, so a live session never polls the API.
   useEffect(() => {
     setLoading(true);
     setError(null);
@@ -199,6 +213,11 @@ export const RoomScreen: React.FC<Props> = ({
     // shouldn't keep two requests going every 15s.
     pollTimerRef.current = setInterval(() => {
       if (document.visibilityState !== 'visible') return;
+      if (socket && socketConnected) {
+        // Live via socket events; just keep our own presence fresh.
+        sendHeartbeat(activeRoomId);
+        return;
+      }
       fetchRoomData(activeRoomId, true);
       sendHeartbeat(activeRoomId);
     }, POLL_INTERVAL_MS);
@@ -216,7 +235,26 @@ export const RoomScreen: React.FC<Props> = ({
       document.removeEventListener('visibilitychange', onVis);
       sendLeave(activeRoomId);
     };
-  }, [activeRoomId, fetchRoomData, sendHeartbeat, sendLeave]);
+  }, [activeRoomId, fetchRoomData, sendHeartbeat, sendLeave, socket, socketConnected]);
+
+  // Socket join/leave for the active room + live presence diffs. Server binds
+  // identity from the handshake auth (useSocket), so no user payload is sent.
+  useEffect(() => {
+    if (!socket || !socketConnected || !currentUser?.id) return;
+    socket.emit('join_room', { roomId: activeRoomId });
+
+    const onPresence = (p: { roomId: string; userId: string; state: string | null }) => {
+      if (p.roomId !== activeRoomId) return;
+      // Event-driven refresh — a single round-trip, in place of polling.
+      fetchRoomData(activeRoomId, true);
+    };
+    socket.on('presence_updated', onPresence);
+
+    return () => {
+      socket.off('presence_updated', onPresence);
+      socket.emit('leave_room', { roomId: activeRoomId });
+    };
+  }, [socket, socketConnected, activeRoomId, currentUser?.id, fetchRoomData]);
 
   const handleManualRefresh = () => {
     fetchRoomData(activeRoomId);
@@ -238,7 +276,7 @@ export const RoomScreen: React.FC<Props> = ({
     if (!currentUser?.id) throw new Error('Sign in to send requests.');
     const res = await fetch(`${API}/api/connections`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-user-id': currentUser.id },
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ targetId: traveler.id })
     });
     if (!res.ok) {
@@ -593,22 +631,6 @@ export const RoomScreen: React.FC<Props> = ({
                         You
                       </span>
                     )}
-                    <span
-                      style={{
-                        fontSize: 10,
-                        fontWeight: 700,
-                        color: 'var(--presence-active)',
-                        background: 'rgba(16, 185, 129, 0.10)',
-                        padding: '1px 6px',
-                        borderRadius: 999,
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 3
-                      }}
-                    >
-                      <Radio size={9} />
-                      Active
-                    </span>
                   </div>
 
                   {/* Bio */}
@@ -687,25 +709,6 @@ export const RoomScreen: React.FC<Props> = ({
           })}
         </div>
       )}
-
-      {/* Footer Info Pill */}
-      <div
-        style={{
-          marginTop: 18,
-          textAlign: 'center',
-          fontSize: 11,
-          color: 'var(--text-muted)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 6
-        }}
-      >
-        <Sparkles size={13} style={{ color: 'var(--accent-purple)' }} />
-        <span>Room key: <code style={{ color: 'var(--accent-purple-text)' }}>{activeRoomId}</code></span>
-        <span>•</span>
-        <span>Binary Redis TTL presence</span>
-      </div>
 
       {/* Traveler profile sheet */}
       <ProfileSheet

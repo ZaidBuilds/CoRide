@@ -29,5 +29,12 @@ Thumbs.db
 !.vscode/extensions.json
 .idea
 
-# Temp
+# Temp & Logs
 C:/Users/zaidn/AppData/Local/Temp/opencode/
+.claude/
+mobile/
+server_output.txt
+server_log.txt
+server/b2test.ts
+server/src/b1test.ts
+server/test_confidence*

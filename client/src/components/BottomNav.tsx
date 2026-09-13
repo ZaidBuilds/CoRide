@@ -1,6 +1,7 @@
-import { Home, Users, MessageCircle, User, ScanQrCode } from 'lucide-react';
+import { Home, Users, MessageCircle, User, Map } from 'lucide-react';
+import { triggerHaptic } from '../utils/nativeBridge';
 
-export type NavView = 'home' | 'people' | 'chats' | 'profile' | 'connect' | 'station' | 'train' | 'friends' | 'chat';
+export type NavView = 'home' | 'people' | 'chats' | 'profile' | 'connect' | 'station' | 'train' | 'friends' | 'chat' | 'liveTracking';
 
 interface Props {
   active: NavView;
@@ -11,32 +12,39 @@ interface Props {
 export const BottomNav: React.FC<Props> = ({ active, onNavigate, unreadChats = 0 }) => {
   const isPeopleActive = active === 'people' || active === 'station' || active === 'train';
   const isChatsActive = active === 'chats' || active === 'chat' || active === 'friends' || active === 'connect';
+  const isMapActive = active === 'liveTracking';
+
+  const nav = (v: NavView) => {
+    triggerHaptic('light');
+    onNavigate(v);
+  };
+
   return (
     <nav className="bottom-nav" aria-label="Primary">
-      <button className={`bottom-nav-item ${active === 'home' ? 'active' : ''}`} aria-current={active === 'home' ? 'page' : undefined} onClick={() => onNavigate('home')}>
+      <button className={`bottom-nav-item ${active === 'home' ? 'active' : ''}`} aria-current={active === 'home' ? 'page' : undefined} onClick={() => nav('home')}>
         <Home />
         <span>Home</span>
       </button>
 
-      <button className={`bottom-nav-item ${isPeopleActive ? 'active' : ''}`} aria-current={isPeopleActive ? 'page' : undefined} onClick={() => onNavigate('people')}>
+      <button className={`bottom-nav-item ${isPeopleActive ? 'active' : ''}`} aria-current={isPeopleActive ? 'page' : undefined} onClick={() => nav('people')}>
         <Users />
         <span>People</span>
       </button>
 
       <button
-        onClick={() => onNavigate('people')}
-        className="bottom-nav-scan"
-        aria-label="Scan / Discover"
-        title="Discover"
+        onClick={() => nav('liveTracking')}
+        className={`bottom-nav-scan ${isMapActive ? 'active' : ''}`}
+        aria-label="Live Metro Map & Tracking"
+        title="Live Metro Map"
       >
-        <ScanQrCode size={28} />
+        <Map size={26} />
       </button>
 
       <button
         className={`bottom-nav-item ${isChatsActive ? 'active' : ''}`}
         aria-current={isChatsActive ? 'page' : undefined}
         aria-label={unreadChats > 0 ? `Chats, ${unreadChats} unread` : 'Chats'}
-        onClick={() => onNavigate('chats')}
+        onClick={() => nav('chats')}
         style={{ position:'relative' }}
       >
         <MessageCircle />
@@ -46,7 +54,7 @@ export const BottomNav: React.FC<Props> = ({ active, onNavigate, unreadChats = 0
         )}
       </button>
 
-      <button className={`bottom-nav-item ${active === 'profile' ? 'active' : ''}`} aria-current={active === 'profile' ? 'page' : undefined} onClick={() => onNavigate('profile')}>
+      <button className={`bottom-nav-item ${active === 'profile' ? 'active' : ''}`} aria-current={active === 'profile' ? 'page' : undefined} onClick={() => nav('profile')}>
         <User />
         <span>Profile</span>
       </button>

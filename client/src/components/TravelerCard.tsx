@@ -1,6 +1,7 @@
 import { UserPlus } from 'lucide-react';
 import type { UserProfile } from '../types';
 import { INTEREST_TAXONOMY } from '../types';
+import { getCommuteRelationship } from '../utils/commuteContext';
 
 interface Props {
   user: UserProfile;
@@ -11,6 +12,8 @@ interface Props {
   trustTier?: string;
   rankedScore?: number;
   vibeTagline?: string;
+  isFriend?: boolean;
+  activeRoomId?: string;
   onTap: () => void;
   onConnect: () => void;
   onBlock: () => void;
@@ -32,16 +35,20 @@ export const TravelerCard: React.FC<Props> = ({
   trustTier,
   rankedScore,
   vibeTagline,
+  isFriend,
+  activeRoomId,
 }) => {
   const tier = user.presenceTier || 'other';
   const initials = user.pseudonym.substring(0, 2).toUpperCase();
   const hasMutual = (mutualCount || 0) > 0;
   void rankedScore;
 
-  // Badge logic: Nearby vs Same Train
-  const badge = tier === 'nearby' ? { label: 'Nearby', dot: 'var(--presence-nearby)', bg: 'rgba(234,179,8,0.16)', border: 'rgba(234,179,8,0.28)', color: 'var(--accent-amber)' }
-    : tier === 'active' ? { label: 'Same Train', dot: 'var(--presence-sameTrain)', bg: 'rgba(56,189,248,0.14)', border: 'rgba(56,189,248,0.28)', color: 'var(--presence-sameTrain)' }
-    : null;
+  // Rich Commute Relationship Badge (🚇 Same Train, 🔀 Same Line & Dir, 🏛️ At Station, 🟡 Nearby, 👥 Metro Friend)
+  const commuteRel = getCommuteRelationship(user, {
+    isFriend,
+    activeRoomId,
+    userPresenceTier: user.presenceTier
+  });
 
   const topTags = (user.interestTags || []).slice(0, 2);
 
@@ -65,14 +72,24 @@ export const TravelerCard: React.FC<Props> = ({
         <div style={{ flex:1, minWidth:0, display:'flex', flexDirection:'column', gap:4 }}>
           <div style={{ display:'flex', alignItems:'center', gap:6, flexWrap:'wrap' }}>
             <span style={{ fontSize:14, fontWeight:800, color:'var(--text-primary)', letterSpacing:-0.1 }}>{user.pseudonym}</span>
-            {badge && !isMe && (
-              <span style={{
-                fontSize:10, fontWeight:800, padding:'3px 8px', borderRadius:999,
-                background: badge.bg, border:`1px solid ${badge.border}`, color: badge.color,
-                display:'inline-flex', alignItems:'center', gap:5
-              }}>
-                <span style={{ width:6,height:6, borderRadius:'50%', background: badge.dot, display:'inline-block' }} />
-                {badge.label}
+            {commuteRel.type !== 'none' && !isMe && (
+              <span
+                style={{
+                  fontSize: 10,
+                  fontWeight: 800,
+                  padding: '3px 8px',
+                  borderRadius: 999,
+                  background: commuteRel.bgColor,
+                  border: `1px solid ${commuteRel.borderColor}`,
+                  color: commuteRel.textColor,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4
+                }}
+                title={commuteRel.description}
+              >
+                <span>{commuteRel.emoji}</span>
+                {commuteRel.label}
               </span>
             )}
             {trustBadge && trustTier && !isMe && (
@@ -109,19 +126,19 @@ export const TravelerCard: React.FC<Props> = ({
       {!isMe ? (
         <button
           onClick={(e)=> { e.stopPropagation(); onConnect(); }}
-          className="press"
+          className="press touch-target-48"
           style={{
-            width:44, height:44, borderRadius:'50%',
+            width:48, height:48, borderRadius:'50%',
             background:'linear-gradient(135deg, var(--accent-fill-from), var(--accent-fill-to))',
             border:'none', color:'#fff', display:'flex', alignItems:'center', justifyContent:'center',
             boxShadow:'0 4px 14px rgba(123,93,255,0.35)', cursor:'pointer', flexShrink:0
           }}
           aria-label={`Connect with ${user.pseudonym}`}
         >
-          <UserPlus size={18} />
+          <UserPlus size={20} />
         </button>
       ) : (
-        <div style={{ width:44, height:44 }} />
+        <div style={{ width:48, height:48 }} />
       )}
     </div>
   );
