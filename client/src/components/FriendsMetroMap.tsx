@@ -1,522 +1,249 @@
 import React, { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { Ghost, Eye, Navigation, MessageCircle, Sparkles, MapPin, X, Layers } from 'lucide-react';
-import type { FriendEntry, UserProfile, ContextResult } from '../types';
+import { Plus, Minus, Maximize2, LocateFixed, X } from 'lucide-react';
+import type { FriendEntry, UserProfile, ContextResult, MetroLine, MetroStation } from '../types';
 import type { MetroFriend } from './FriendsTab';
-import { DELHI_METRO_LINES, getStationById } from '../data/metroData';
-import { getCommuteRelationship } from '../utils/commuteContext';
+import { DELHI_METRO_LINES, getLineById, getStationById } from '../data/metroData';
+import { linePaths, textOnLineColor } from './transit/lineSegments';
+import { resolvedTheme } from '../utils/theme';
 import { triggerHaptic } from '../utils/nativeBridge';
 
 interface Props {
   currentUser: UserProfile;
-  friends: (MetroFriend | FriendEntry)[];
+  /**
+   * Accepted for compatibility. Friends are NOT drawn: the server doesn't share
+   * friends' locations, and pinning them anywhere would be made up.
+   */
+  friends?: (MetroFriend | FriendEntry)[];
   currentContext?: ContextResult | null;
   onOpenChat?: (friendId: string) => void;
   onOpenProfile?: (friend: UserProfile) => void;
 }
 
-interface FriendMapPin {
-  friendId: string;
-  profile: UserProfile;
-  lat: number;
-  lng: number;
-  stationName: string;
-  lineName: string;
-  statusText: string;
-  statusEmoji: string;
+const TILE_URL = (theme: 'light' | 'dark') =>
+  `https://{s}.basemaps.cartocdn.com/${theme === 'light' ? 'light_all' : 'dark_all'}/{z}/{x}/{y}{r}.png`;
+// CARTO basemaps are built on OpenStreetMap data — both credits are required.
+const ATTRIBUTION =
+  '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a>';
+
+const NETWORK_BOUNDS = L.latLngBounds(
+  DELHI_METRO_LINES.flatMap(l => l.stations.map(s => [s.lat, s.lng] as [number, number]))
+);
+
+interface Selected {
+  station: MetroStation;
+  line: MetroLine;
 }
 
-export const FriendsMetroMap: React.FC<Props> = ({
-  currentUser,
-  friends,
-  currentContext,
-  onOpenChat,
-  onOpenProfile
-}) => {
-  const mapContainerRef = useRef<HTMLDivElement>(null);
+/**
+ * Delhi Metro network map (Leaflet + CARTO tiles). Draws the static network
+ * from metroData and the user's own station from their context — nothing else.
+ */
+export const FriendsMetroMap: React.FC<Props> = ({ currentUser, currentContext }) => {
+  const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
-  const markersLayerRef = useRef<L.LayerGroup | null>(null);
+  const tilesRef = useRef<L.TileLayer | null>(null);
+  const meLayerRef = useRef<L.LayerGroup | null>(null);
+  const [selected, setSelected] = useState<Selected | null>(null);
 
-  // Ghost Mode state (persisted locally)
-  const [ghostMode, setGhostMode] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem('coride_ghost_mode') === 'true';
-    } catch {
-      return false;
-    }
-  });
+  const myStation = currentContext?.station ? getStationById(currentContext.station) : undefined;
+  const myLine = currentContext?.line ? getLineById(currentContext.line) : undefined;
 
-  const [selectedFriendPin, setSelectedFriendPin] = useState<FriendMapPin | null>(null);
-  const [waveSent, setWaveSent] = useState<string | null>(null);
-
-  const toggleGhostMode = () => {
-    triggerHaptic('medium');
-    const next = !ghostMode;
-    setGhostMode(next);
-    try {
-      localStorage.setItem('coride_ghost_mode', String(next));
-    } catch {}
-  };
-
-  // Assign realistic active stations to friends for live demonstration
-  const friendPins: FriendMapPin[] = React.useMemo(() => {
-    return friends.map((f, idx) => {
-      const profile: UserProfile = 'friendProfile' in f ? f.friendProfile : f.profile;
-      const friendId: string = 'friendId' in f ? f.friendId : f.id;
-
-      // Deterministic station assignment based on friend ID if not explicit
-      const linesPool = DELHI_METRO_LINES;
-      const targetLine = linesPool[idx % linesPool.length];
-      const stations = targetLine.stations;
-      const stationIdx = Math.abs(friendId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0)) % stations.length;
-      const station = stations[stationIdx];
-
-      const statusChoices = [
-        { emoji: '🚇', text: `On ${targetLine.name}` },
-        { emoji: '🏛️', text: `At ${station.name}` },
-        { emoji: '🎧', text: 'Commuting' },
-        { emoji: '⚡', text: 'Heading Home' },
-      ];
-      const status = statusChoices[idx % statusChoices.length];
-
-      return {
-        friendId,
-        profile,
-        lat: station.lat,
-        lng: station.lng,
-        stationName: station.name,
-        lineName: targetLine.name,
-        statusText: status.text,
-        statusEmoji: status.emoji
-      };
-    });
-  }, [friends]);
-
-  // Initialize Leaflet Map
+  // Create the map once.
   useEffect(() => {
-    if (!mapContainerRef.current || mapRef.current) return;
+    const el = containerRef.current;
+    if (!el || mapRef.current) return;
 
-    // Center on Central Delhi (Connaught Place / Rajiv Chowk)
-    const map = L.map(mapContainerRef.current, {
-      center: [28.6328, 77.2197],
-      zoom: 12,
-      minZoom: 10,
-      maxZoom: 16,
-      zoomControl: false
+    const map = L.map(el, {
+      zoomControl: false,
+      minZoom: 9,
+      maxZoom: 17,
+      maxBounds: NETWORK_BOUNDS.pad(0.6),
+      attributionControl: true
     });
+    map.attributionControl.setPrefix('<a href="https://leafletjs.com" target="_blank" rel="noopener">Leaflet</a>');
+    map.fitBounds(NETWORK_BOUNDS, { padding: [16, 16] });
 
-    // CartoDB Dark Matter Tiles (Clean, fast, high aesthetic contrast)
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-      attribution: '&copy; <a href="https://carto.com/">CARTO</a> | &copy; Delhi Metro (DMRC)',
+    tilesRef.current = L.tileLayer(TILE_URL(resolvedTheme()), {
+      attribution: ATTRIBUTION,
       subdomains: 'abcd',
       maxZoom: 19
     }).addTo(map);
 
-    // Zoom control in bottom-right
-    L.control.zoom({ position: 'bottomright' }).addTo(map);
-
-    // Draw all 10 Delhi Metro Network Lines
-    DELHI_METRO_LINES.forEach(line => {
-      const coords = line.stations.map(s => [s.lat, s.lng] as [number, number]);
-
-      // Ambient Outer Glow
-      L.polyline(coords, {
-        color: line.color,
-        weight: 6,
-        opacity: 0.3,
-        smoothFactor: 1
-      }).addTo(map);
-
-      // Core Line Track
-      L.polyline(coords, {
-        color: line.color,
-        weight: 3.5,
-        opacity: 0.95,
-        smoothFactor: 1
-      }).addTo(map);
-
-      // Station nodes
-      line.stations.forEach(st => {
-        const marker = L.circleMarker([st.lat, st.lng], {
-          radius: st.isInterchange ? 4.5 : 2.5,
-          color: st.isInterchange ? '#ffffff' : line.color,
-          weight: st.isInterchange ? 2 : 1,
-          fillColor: st.isInterchange ? '#ffffff' : '#0f172a',
-          fillOpacity: 1
+    for (const line of DELHI_METRO_LINES) {
+      for (const path of linePaths(line)) {
+        L.polyline(path, { color: line.color, weight: 4, opacity: 0.95, interactive: false }).addTo(map);
+      }
+      for (const st of line.stations) {
+        L.circleMarker([st.lat, st.lng], {
+          radius: st.isInterchange ? 5 : 3.5,
+          color: line.color,
+          weight: 2,
+          fillColor: st.isInterchange ? '#FFFFFF' : line.color,
+          fillOpacity: 1,
+          interactive: false
         }).addTo(map);
+        // Invisible, finger-sized hit target on top of the tiny dot.
+        L.circleMarker([st.lat, st.lng], { radius: 14, stroke: false, fillOpacity: 0 })
+          .on('click', () => {
+            triggerHaptic('light');
+            setSelected({ station: st, line });
+          })
+          .addTo(map);
+      }
+    }
 
-        marker.bindPopup(`
-          <div style="font-family: inherit; font-size: 12px; color: #fff; line-height: 1.4; padding: 2px;">
-            <div style="font-weight: 800; font-size: 13px; color: #f8fafc;">${st.name}</div>
-            <div style="color: #94a3b8; font-size: 11px;">${st.hindiName} • <span style="color:${line.color}; font-weight:700;">${line.name}</span></div>
-            ${st.isInterchange ? `<div style="margin-top: 5px; display: inline-block; padding: 2px 7px; border-radius: 999px; background: rgba(168,85,247,0.25); color: #c084fc; font-weight: 800; font-size: 10px;">Interchange Hub</div>` : ''}
-          </div>
-        `);
-      });
-    });
-
-    const markersGroup = L.layerGroup().addTo(map);
-    markersLayerRef.current = markersGroup;
+    meLayerRef.current = L.layerGroup().addTo(map);
     mapRef.current = map;
 
+    // Leaflet measures its container once; tab switches and rotation change it.
+    const ro = new ResizeObserver(() => map.invalidateSize());
+    ro.observe(el);
+
+    // Swap tiles when the app theme (data-theme) or the OS scheme changes.
+    const retile = () => tilesRef.current?.setUrl(TILE_URL(resolvedTheme()));
+    const mo = new MutationObserver(retile);
+    mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    const mq = window.matchMedia('(prefers-color-scheme: light)');
+    mq.addEventListener?.('change', retile);
+
     return () => {
+      ro.disconnect();
+      mo.disconnect();
+      mq.removeEventListener?.('change', retile);
       map.remove();
       mapRef.current = null;
     };
   }, []);
 
-  // Update dynamic markers (Friends pins & Current User pin)
+  // The user's own position (their checked-in / detected station).
   useEffect(() => {
     const map = mapRef.current;
-    const group = markersLayerRef.current;
-    if (!map || !group) return;
-
-    group.clearLayers();
-
-    // 1. Current user pin (if not Ghost Mode)
-    if (!ghostMode && currentContext) {
-      const userStation = getStationById(currentContext.station);
-      if (userStation) {
-        const userInitials = (currentUser.pseudonym || 'ME').slice(0, 2).toUpperCase();
-        const userIcon = L.divIcon({
-          className: 'snap-map-icon',
-          html: `
-            <div class="snap-pin-wrap">
-              <div class="snap-bubble" style="border-color: rgba(56, 189, 248, 0.5); background: rgba(14, 116, 144, 0.85);">
-                <span class="snap-bubble-emoji">📍</span>
-                <span class="snap-bubble-text">You • ${userStation.name}</span>
-              </div>
-              <div class="snap-avatar-ring">
-                <div class="snap-avatar" style="background: ${currentUser.avatarBg || '#0284c7'}; border-color: #38bdf8;">
-                  ${userInitials}
-                </div>
-                <div class="snap-pulse" style="background: rgba(56, 189, 248, 0.6);"></div>
-              </div>
-            </div>
-          `,
-          iconSize: [80, 70],
-          iconAnchor: [40, 68]
-        });
-
-        L.marker([userStation.lat, userStation.lng], { icon: userIcon, zIndexOffset: 1000 }).addTo(group);
-      }
-    }
-
-    // 2. Friends pins (Strictly friends only — privacy first!)
-    friendPins.forEach(pin => {
-      const initials = (pin.profile.pseudonym || pin.profile.username).slice(0, 2).toUpperCase();
-      const pinIcon = L.divIcon({
-        className: 'snap-map-icon',
-        html: `
-          <div class="snap-pin-wrap">
-            <div class="snap-bubble">
-              <span class="snap-bubble-emoji">${pin.statusEmoji}</span>
-              <span class="snap-bubble-text">${pin.statusText}</span>
-            </div>
-            <div class="snap-avatar-ring">
-              <div class="snap-avatar" style="background: ${pin.profile.avatarBg || '#7c3aed'}">
-                ${initials}
-              </div>
-              <div class="snap-pulse"></div>
-            </div>
-          </div>
-        `,
-        iconSize: [80, 70],
-        iconAnchor: [40, 68]
-      });
-
-      const marker = L.marker([pin.lat, pin.lng], { icon: pinIcon }).addTo(group);
-      marker.on('click', () => {
-        setSelectedFriendPin(pin);
-        map.flyTo([pin.lat, pin.lng], 14, { duration: 0.8 });
-      });
+    const layer = meLayerRef.current;
+    if (!map || !layer) return;
+    layer.clearLayers();
+    if (!myStation) return;
+    const color = myLine?.color || '#2563EB';
+    const icon = L.divIcon({
+      className: '',
+      html: `<div style="width:22px;height:22px;border-radius:50%;background:${color};border:3px solid #FFFFFF;box-shadow:0 0 0 6px ${color}55, 0 2px 6px rgba(0,0,0,0.4)"></div>`,
+      iconSize: [22, 22],
+      iconAnchor: [11, 11]
     });
-  }, [friendPins, ghostMode, currentContext, currentUser]);
+    L.marker([myStation.lat, myStation.lng], {
+      icon,
+      zIndexOffset: 1000,
+      keyboard: false,
+      title: `You: ${myStation.name}`
+    })
+      .bindTooltip(`You · ${myStation.name}`, { permanent: true, direction: 'top', offset: [0, -14] })
+      .addTo(layer);
+    map.setView([myStation.lat, myStation.lng], Math.max(map.getZoom(), 13), { animate: false });
+  }, [myStation, myLine, currentUser.id]);
 
-  const handleZoomPreset = (preset: 'all' | 'central' | 'me') => {
+  const zoomBy = (d: number) => {
+    triggerHaptic('light');
     const map = mapRef.current;
-    if (!map) return;
-    if (preset === 'all') {
-      map.flyTo([28.625, 77.215], 11, { duration: 1 });
-    } else if (preset === 'central') {
-      map.flyTo([28.6328, 77.2197], 14, { duration: 1 });
-    } else if (preset === 'me' && currentContext) {
-      const st = getStationById(currentContext.station);
-      if (st) map.flyTo([st.lat, st.lng], 14, { duration: 1 });
-    }
+    if (map) map.setZoom(map.getZoom() + d);
+  };
+  const fitNetwork = () => {
+    triggerHaptic('light');
+    mapRef.current?.flyToBounds(NETWORK_BOUNDS, { padding: [16, 16], duration: 0.6 });
+  };
+  const goToMe = () => {
+    if (!myStation) return;
+    triggerHaptic('light');
+    mapRef.current?.flyTo([myStation.lat, myStation.lng], 14, { duration: 0.6 });
   };
 
+  const servedBy: MetroLine[] = selected
+    ? [
+        selected.line,
+        ...(selected.station.interchangeLines || [])
+          .map(id => getLineById(id))
+          .filter((l): l is MetroLine => l !== undefined && l.id !== selected.line.id)
+      ]
+    : [];
+
   return (
-    <div style={{ position: 'relative', width: '100%', height: '100%', minHeight: 480, overflow: 'hidden', borderRadius: 'var(--radius-xl)' }}>
-      {/* Top Map Floating Control Bar */}
-      <div style={{
-        position: 'absolute',
-        top: 12,
-        left: 12,
-        right: 12,
-        zIndex: 500,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: 8,
-        pointerEvents: 'none'
-      }}>
-        {/* Left: Network Badge */}
-        <div className="glass-thick" style={{
-          pointerEvents: 'auto',
-          padding: '6px 12px',
-          borderRadius: 999,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-          fontSize: 12,
-          fontWeight: 800,
-          color: 'var(--text-primary)',
-          boxShadow: '0 8px 24px rgba(0,0,0,0.5)'
-        }}>
-          <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#10b981', display: 'inline-block' }} />
-          <span>10 Metro Lines Live</span>
-          <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>• {friends.length} Friends</span>
-        </div>
+    <div
+      style={{
+        position: 'relative',
+        width: '100%',
+        height: '100%',
+        minHeight: 320,
+        overflow: 'hidden',
+        borderRadius: 'var(--radius-lg)',
+        border: '1px solid var(--border-card)',
+        // Own stacking context so Leaflet's z-indexed panes (400–1000) can't paint over the bottom nav.
+        isolation: 'isolate',
+        zIndex: 0
+      }}
+    >
+      <div
+        ref={containerRef}
+        role="application"
+        aria-label="Delhi Metro network map"
+        style={{ position: 'absolute', inset: 0 }}
+      />
 
-        {/* Right: Ghost Mode Toggle Button */}
-        <button
-          onClick={toggleGhostMode}
-          className="press glass-thick"
-          style={{
-            pointerEvents: 'auto',
-            padding: '6px 12px',
-            borderRadius: 999,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            fontSize: 12,
-            fontWeight: 800,
-            color: ghostMode ? 'var(--accent-purple-text)' : 'var(--text-secondary)',
-            border: ghostMode ? '1px solid rgba(168, 85, 247, 0.4)' : '1px solid rgba(255, 255, 255, 0.1)',
-            background: ghostMode ? 'rgba(168, 85, 247, 0.18)' : 'rgba(15, 23, 42, 0.85)',
-            boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
-            cursor: 'pointer'
-          }}
-          title={ghostMode ? 'Ghost Mode: On (Hidden from friends)' : 'Ghost Mode: Off (Visible to friends)'}
-        >
-          {ghostMode ? <Ghost size={14} color="#c084fc" /> : <Eye size={14} />}
-          <span>{ghostMode ? 'Ghost: ON' : 'Ghost: OFF'}</span>
-        </button>
+      {/* Map controls — 48dp targets, top-right, clear of the attribution */}
+      <div style={{ position: 'absolute', top: 12, right: 12, zIndex: 1000, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <MapButton label="Zoom in" onClick={() => zoomBy(1)}><Plus size={20} /></MapButton>
+        <MapButton label="Zoom out" onClick={() => zoomBy(-1)}><Minus size={20} /></MapButton>
+        <MapButton label="Show whole network" onClick={fitNetwork}><Maximize2 size={18} /></MapButton>
+        {myStation && <MapButton label="Go to my station" onClick={goToMe}><LocateFixed size={20} /></MapButton>}
       </div>
 
-      {/* Quick Filter Strip (Bottom Left of Map) */}
-      <div style={{
-        position: 'absolute',
-        bottom: 16,
-        left: 12,
-        zIndex: 500,
-        display: 'flex',
-        gap: 6
-      }}>
-        <button
-          onClick={() => handleZoomPreset('all')}
-          className="glass-thick press"
-          style={{
-            padding: '6px 10px',
-            borderRadius: 999,
-            fontSize: 11,
-            fontWeight: 700,
-            color: 'var(--text-primary)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 4,
-            cursor: 'pointer'
-          }}
-        >
-          <Layers size={13} /> Network
-        </button>
-        <button
-          onClick={() => handleZoomPreset('central')}
-          className="glass-thick press"
-          style={{
-            padding: '6px 10px',
-            borderRadius: 999,
-            fontSize: 11,
-            fontWeight: 700,
-            color: 'var(--text-primary)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 4,
-            cursor: 'pointer'
-          }}
-        >
-          <Navigation size={13} /> Rajiv Chowk
-        </button>
-      </div>
-
-      {/* The Leaflet Canvas */}
-      <div ref={mapContainerRef} style={{ width: '100%', height: '100%', minHeight: 480 }} />
-
-      {/* Ghost Mode Notification Banner if enabled */}
-      {ghostMode && (
-        <div style={{
-          position: 'absolute',
-          top: 54,
-          left: 12,
-          right: 12,
-          zIndex: 490,
-          padding: '8px 14px',
-          borderRadius: 'var(--radius-md)',
-          background: 'rgba(30, 27, 75, 0.90)',
-          border: '1px solid rgba(168, 85, 247, 0.3)',
-          backdropFilter: 'blur(12px)',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          fontSize: 12,
-          color: '#e9d5ff'
-        }}>
-          <Ghost size={16} color="#c084fc" />
-          <span>Ghost Mode active. Your location is hidden from friends on the map.</span>
-        </div>
-      )}
-
-      {/* Selected Friend Snap Drawer / Sheet */}
-      {selectedFriendPin && (
+      {selected && (
         <div
+          role="dialog"
+          aria-label={`${selected.station.name} station`}
           className="animate-slide-up"
           style={{
-            position: 'absolute',
-            bottom: 12,
-            left: 12,
-            right: 12,
-            zIndex: 600,
-            padding: '16px',
-            borderRadius: 'var(--radius-xl)',
-            background: 'rgba(15, 23, 42, 0.94)',
-            backdropFilter: 'blur(20px)',
-            border: '1px solid rgba(255, 255, 255, 0.15)',
-            boxShadow: '0 20px 40px rgba(0, 0, 0, 0.7)',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 12
+            position: 'absolute', left: 12, right: 12, bottom: 28, zIndex: 1000,
+            padding: 16, borderRadius: 'var(--radius-lg)',
+            background: 'var(--bg-surface-raised)', border: '1px solid var(--border-subtle)', boxShadow: 'var(--shadow-lg)',
+            display: 'flex', gap: 12, alignItems: 'flex-start'
           }}
         >
-          {/* Header */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <div
-                style={{
-                  width: 44,
-                  height: 44,
-                  borderRadius: '50%',
-                  background: selectedFriendPin.profile.avatarBg || '#7c3aed',
-                  color: '#fff',
-                  fontWeight: 900,
-                  fontSize: 16,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  border: '2px solid rgba(255,255,255,0.2)'
-                }}
-              >
-                {(selectedFriendPin.profile.pseudonym || 'FR').slice(0, 2).toUpperCase()}
-              </div>
-              <div>
-                <div style={{ fontWeight: 800, fontSize: 15, color: '#f8fafc' }}>
-                  {selectedFriendPin.profile.pseudonym}
-                </div>
-                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                  {selectedFriendPin.statusEmoji} {selectedFriendPin.statusText} • {selectedFriendPin.lineName}
-                </div>
-              </div>
-            </div>
-
-            <button
-              onClick={() => setSelectedFriendPin(null)}
-              className="icon-btn"
-              style={{ width: 32, height: 32 }}
-              aria-label="Close friend details"
-            >
-              <X size={16} />
-            </button>
-          </div>
-
-          {/* Location details & Commute Relation */}
-          <div style={{
-            background: 'rgba(255, 255, 255, 0.05)',
-            padding: '8px 12px',
-            borderRadius: 'var(--radius-md)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            fontSize: 12
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#e2e8f0' }}>
-              <MapPin size={14} color="#38bdf8" />
-              <span>{selectedFriendPin.stationName}</span>
-            </div>
-            {(() => {
-              const commuteRel = getCommuteRelationship(selectedFriendPin.profile, {
-                isFriend: true,
-                currentContext
-              });
-              return (
-                <span style={{
-                  fontSize: 11,
-                  fontWeight: 800,
-                  padding: '2px 8px',
-                  borderRadius: 999,
-                  background: commuteRel.bgColor,
-                  color: commuteRel.textColor,
-                  border: `1px solid ${commuteRel.borderColor}`,
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 4
-                }}>
-                  <span>{commuteRel.emoji}</span>
-                  {commuteRel.label}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)' }}>{selected.station.name}</div>
+            {selected.station.hindiName && (
+              <div lang="hi" style={{ fontSize: 13, color: 'var(--text-muted)' }}>{selected.station.hindiName}</div>
+            )}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+              {servedBy.map(l => (
+                <span key={l.id} style={{ fontSize: 12, fontWeight: 700, padding: '3px 10px', borderRadius: 999, background: l.color, color: textOnLineColor(l.color) }}>
+                  {l.name}
                 </span>
-              );
-            })()}
+              ))}
+            </div>
+            {myStation?.id === selected.station.id && (
+              <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 8 }}>You’re checked in here.</div>
+            )}
           </div>
-
-          {/* Action CTAs */}
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button
-              onClick={() => {
-                onOpenChat?.(selectedFriendPin.friendId);
-                setSelectedFriendPin(null);
-              }}
-              className="btn-primary press"
-              style={{ flex: 1, padding: '10px 14px', fontSize: 13, justifyContent: 'center' }}
-            >
-              <MessageCircle size={15} /> Chat Now
-            </button>
-
-            <button
-              onClick={() => {
-                triggerHaptic('success');
-                setWaveSent(selectedFriendPin.friendId);
-                setTimeout(() => setWaveSent(null), 2500);
-              }}
-              className="pill-button secondary press"
-              style={{ padding: '10px 14px', fontSize: 13 }}
-            >
-              <Sparkles size={15} />
-              {waveSent === selectedFriendPin.friendId ? 'Wave Sent! 👋' : 'Say Hi 👋'}
-            </button>
-
-            <button
-              onClick={() => {
-                onOpenProfile?.(selectedFriendPin.profile);
-                setSelectedFriendPin(null);
-              }}
-              className="pill-button secondary press"
-              style={{ padding: '10px 14px', fontSize: 13 }}
-            >
-              Profile
-            </button>
-          </div>
+          <button type="button" className="icon-btn" onClick={() => setSelected(null)} aria-label="Close station details">
+            <X size={18} />
+          </button>
         </div>
       )}
     </div>
   );
 };
+
+function MapButton({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      className="icon-btn"
+      style={{ background: 'var(--bg-surface-raised)', color: 'var(--text-primary)', boxShadow: 'var(--shadow-md)' }}
+    >
+      {children}
+    </button>
+  );
+}

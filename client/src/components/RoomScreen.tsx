@@ -1,14 +1,17 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Train, ArrowLeft, RefreshCw, Users, AlertTriangle, UserPlus, Check, MapPin } from 'lucide-react';
+import { Train, ArrowLeft, RefreshCw, Users, AlertTriangle, UserPlus, Check, MapPin, MessageCircle } from 'lucide-react';
 import type { Socket } from 'socket.io-client';
-import type { UserProfile, RoomPresenceTraveler, RoomPresenceResponse } from '../types';
+import type { UserProfile, RoomPresenceTraveler, RoomPresenceResponse, RoomMessage, ContextRoom } from '../types';
+import type { ReactionState } from '../types/engagement';
 import { INTEREST_TAXONOMY } from '../types';
 import { authHeaders } from '../utils/auth';
 import { ProfileSheet } from './ProfileSheet';
 import { ProfileSheetContent } from './ProfileSheetContent';
 import { ProfileSheetActions } from './ProfileSheetActions';
 import { ReportSheet } from './ReportSheet';
+import { ChatView } from './ChatView';
 import { API } from '../config';
+import { getLineById, getStationById } from '../data/metroData';
 
 const POLL_INTERVAL_MS = 15000;
 
@@ -56,8 +59,33 @@ const PRESET_ROOMS: PresetRoom[] = [
   }
 ];
 
-/** Picker options are derived from PRESET_ROOMS so the two can never drift. */
-const STATIONS = Array.from(new Set(PRESET_ROOMS.map(p => p.station)));
+const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+const titleCase = (s: string) => s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+
+/**
+ * Human names for any `station:line:direction` room id (Home links to rooms
+ * beyond the presets), resolved from the metro map; unknown parts fall back
+ * to a title-cased slug rather than raw ids.
+ */
+function roomFromId(id: string): PresetRoom {
+  const preset = PRESET_ROOMS.find(p => p.id === id);
+  if (preset) return preset;
+  const [stationId = '', lineId = '', dirSlug = ''] = id.split(':');
+  const line = getLineById(lineId);
+  const stationName = getStationById(stationId)?.name.replace(/\s*\(.*\)\s*$/, '') || titleCase(stationId) || 'Metro station';
+  const terminals = line ? [line.terminalA, line.terminalB] : [];
+  const terminal = terminals.find(t => slug(`towards ${t}`) === dirSlug || slug(t) === dirSlug);
+  const direction = terminal ? `Towards ${terminal}` : titleCase(dirSlug) || 'Any direction';
+  const lineName = line?.name || (lineId ? `${titleCase(lineId)} Line` : 'Metro');
+  return {
+    id,
+    station: stationName,
+    line: lineName,
+    direction,
+    label: `${stationName} · ${lineName} · ${direction}`,
+    color: line?.color || 'var(--accent-purple)'
+  };
+}
 
 function tagMeta(id: string) {
   return INTEREST_TAXONOMY.find(t => t.id === id) || { emoji: '✨', label: id };
@@ -130,17 +158,42 @@ export const RoomScreen: React.FC<Props> = ({
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
-  const activePreset = PRESET_ROOMS.find(p => p.id === activeRoomId) || {
-    id: activeRoomId,
-    station: activeRoomId.split(':')[0]?.replace(/_/g, ' ') || 'Rajiv Chowk',
-    line: activeRoomId.split(':')[1]?.toUpperCase() || 'METRO',
-    direction: activeRoomId.split(':')[2]?.replace(/_/g, ' ') || 'Towards Noida',
-    label: activeRoomId,
-    color: 'var(--accent-purple)'
-  };
+  const activePreset = roomFromId(activeRoomId);
+  // The room we were opened with stays pickable even when it isn't a preset.
+  const [entryRoom] = useState(() => roomFromId(initialRoomId));
+  const rooms = PRESET_ROOMS.some(p => p.id === entryRoom.id) ? PRESET_ROOMS : [entryRoom, ...PRESET_ROOMS];
+  const stations = Array.from(new Set(rooms.map(p => p.station)));
 
   const [pickerStation, setPickerStation] = useState(activePreset.station);
-  const stationRooms = PRESET_ROOMS.filter(p => p.station === pickerStation);
+
+  // ── Room chat (ephemeral socket messages for this presence room) ──
+  const [chatOpen, setChatOpen] = useState(false);
+  const [roomMessages, setRoomMessages] = useState<RoomMessage[]>([]);
+  const [roomTyping, setRoomTyping] = useState<{ userId: string; pseudonym: string }[]>([]);
+  const [roomReactions, setRoomReactions] = useState<Record<string, ReactionState>>({});
+  const [unseenChat, setUnseenChat] = useState(0);
+  const chatOpenRef = useRef(false);
+  useEffect(() => { chatOpenRef.current = chatOpen; }, [chatOpen]);
+
+  // Switching rooms: drop the previous room's list during render so it never
+  // shows under the new room's header while the fetch is in flight.
+  const [shownRoomId, setShownRoomId] = useState(activeRoomId);
+  if (shownRoomId !== activeRoomId) {
+    setShownRoomId(activeRoomId);
+    setData(null);
+    setError(null);
+    setLoading(true);
+    setLastUpdated('');
+    setRoomMessages([]);
+    setRoomTyping([]);
+    setRoomReactions({});
+    setUnseenChat(0);
+    setChatOpen(false);
+  }
+  // Responses for a room we've since left are ignored.
+  const activeRoomRef = useRef(activeRoomId);
+  useEffect(() => { activeRoomRef.current = activeRoomId; }, [activeRoomId]);
+  const stationRooms = rooms.filter(p => p.station === pickerStation);
   const liveCount = data?.count ?? 0;
 
   const fetchRoomData = useCallback(async (roomId: string, silent = false) => {
@@ -154,15 +207,21 @@ export const RoomScreen: React.FC<Props> = ({
         throw new Error(`Server returned status ${res.status}`);
       }
       const json: RoomPresenceResponse = await res.json();
+      if (roomId !== activeRoomRef.current) return;
       setData(json);
       setError(null);
-      setLastUpdated(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
-    } catch (err: any) {
+      setLastUpdated(new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }));
+    } catch (err) {
+      if (roomId !== activeRoomRef.current) return;
       console.warn('[RoomScreen] Failed to fetch room presence:', err);
-      setError(err?.message || 'Presence unavailable. Redis might be starting up.');
+      setError(navigator.onLine === false
+        ? "You're offline. We'll refresh when you reconnect."
+        : "Couldn't load who's here right now.");
     } finally {
-      setLoading(false);
-      setIsRefreshing(false);
+      if (roomId === activeRoomRef.current) {
+        setLoading(false);
+        setIsRefreshing(false);
+      }
     }
   }, []);
 
@@ -202,9 +261,6 @@ export const RoomScreen: React.FC<Props> = ({
   // socket isn't connected. When connected, presence_updated events drive
   // refreshes instead, so a live session never polls the API.
   useEffect(() => {
-    setLoading(true);
-    setError(null);
-
     // Initial fetch & heartbeat
     fetchRoomData(activeRoomId);
     sendHeartbeat(activeRoomId);
@@ -256,6 +312,69 @@ export const RoomScreen: React.FC<Props> = ({
     };
   }, [socket, socketConnected, activeRoomId, currentUser?.id, fetchRoomData]);
 
+  // Live room chat events. Messages exist only while people are here — the
+  // server doesn't store presence-room chat — so the list starts empty.
+  useEffect(() => {
+    if (!socket) return;
+    const typingTimers = new Map<string, ReturnType<typeof setTimeout>>();
+    const onMessage = (m: RoomMessage) => {
+      if (!m || m.roomId !== activeRoomId) return;
+      setRoomMessages(prev => prev.some(x => x.id === m.id) ? prev : [...prev, m].slice(-200));
+      setRoomTyping(prev => prev.filter(u => u.userId !== m.senderId));
+      if (!chatOpenRef.current && !m.isSystem && m.senderId !== currentUser?.id) setUnseenChat(n => n + 1);
+    };
+    const onTyping = (p: { roomId: string; userId: string; pseudonym: string }) => {
+      if (p?.roomId !== activeRoomId || p.userId === currentUser?.id) return;
+      setRoomTyping(prev => prev.some(u => u.userId === p.userId) ? prev : [...prev, { userId: p.userId, pseudonym: p.pseudonym }]);
+      const old = typingTimers.get(p.userId);
+      if (old) clearTimeout(old);
+      typingTimers.set(p.userId, setTimeout(() => {
+        setRoomTyping(prev => prev.filter(u => u.userId !== p.userId));
+      }, 5000));
+    };
+    const onStopTyping = (p: { roomId: string; userId: string }) => {
+      if (p?.roomId !== activeRoomId) return;
+      setRoomTyping(prev => prev.filter(u => u.userId !== p.userId));
+    };
+    const onReaction = (p: { targetId: string; state: ReactionState; roomId?: string }) => {
+      if (p?.roomId !== activeRoomId) return;
+      setRoomReactions(prev => ({ ...prev, [p.targetId]: p.state }));
+    };
+    socket.on('new_message', onMessage);
+    socket.on('user_typing', onTyping);
+    socket.on('user_stop_typing', onStopTyping);
+    socket.on('reaction_updated', onReaction);
+    return () => {
+      socket.off('new_message', onMessage);
+      socket.off('user_typing', onTyping);
+      socket.off('user_stop_typing', onStopTyping);
+      socket.off('reaction_updated', onReaction);
+      typingTimers.forEach(t => clearTimeout(t));
+    };
+  }, [socket, activeRoomId, currentUser?.id]);
+
+  const openChat = () => {
+    setUnseenChat(0);
+    setChatOpen(true);
+  };
+
+  const chatRoom: ContextRoom = {
+    id: activeRoomId,
+    type: 'station',
+    lineId: activeRoomId.split(':')[1] || '',
+    lineName: activePreset.line,
+    lineColor: activePreset.color,
+    stationId: activeRoomId.split(':')[0] || '',
+    stationName: activePreset.station,
+    direction: activePreset.direction,
+    users: [],
+    userCount: liveCount,
+    presence: { active: liveCount, nearby: 0, other: 0, total: liveCount },
+    messages: roomMessages,
+    createdAt: 0,
+    expiresAt: 0
+  };
+
   const handleManualRefresh = () => {
     fetchRoomData(activeRoomId);
     sendHeartbeat(activeRoomId);
@@ -305,7 +424,9 @@ export const RoomScreen: React.FC<Props> = ({
             <span style={{ width: 'var(--tap)' }} />
           )}
 
-          <span className="nav-bar-compact">{activePreset.station} · {liveCount} live</span>
+          <span className="nav-bar-compact">
+            {activePreset.station}{data && !error ? ` · ${liveCount} live` : ''}
+          </span>
 
           <button
             onClick={handleManualRefresh}
@@ -321,20 +442,23 @@ export const RoomScreen: React.FC<Props> = ({
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingBottom: 8 }}>
           <span
+            aria-hidden="true"
             className={data && !error ? 'animate-pulse-glow' : undefined}
             style={{
               width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
-              background: error ? 'var(--presence-other)' : 'var(--presence-active)'
+              background: data && !error ? 'var(--presence-active)' : 'var(--presence-other)'
             }}
           />
-          <span style={{ fontSize: 13, color: 'var(--text-secondary)', fontWeight: 600 }}>
+          <span role="status" style={{ fontSize: 13, color: 'var(--text-secondary)', fontWeight: 600 }}>
             {error
-              ? 'Presence unavailable'
-              : `${liveCount} ${liveCount === 1 ? 'traveler' : 'travelers'} live`}
+              ? 'Live presence unavailable'
+              : !data
+                ? 'Checking who\'s here…'
+                : `${liveCount} ${liveCount === 1 ? 'traveler' : 'travelers'} live`}
           </span>
-          {lastUpdated && !error && (
+          {lastUpdated && (
             <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 'auto' }}>
-              {lastUpdated}
+              {error ? `Last updated ${lastUpdated}` : `Updated ${lastUpdated}`}
             </span>
           )}
         </div>
@@ -343,7 +467,7 @@ export const RoomScreen: React.FC<Props> = ({
       {/* Context picker — station via segmented control, then line → direction */}
       <div className="section-head"><h3>Station</h3></div>
       <div className="segmented" role="tablist" aria-label="Pick your station" style={{ marginBottom: 20 }}>
-        {STATIONS.map(station => (
+        {stations.map(station => (
           <button
             key={station}
             role="tab"
@@ -419,7 +543,7 @@ export const RoomScreen: React.FC<Props> = ({
                   fontWeight: 700,
                   padding: '2px 8px',
                   borderRadius: 999,
-                  background: 'rgba(255,255,255,0.08)',
+                  background: 'var(--bg-surface)',
                   color: 'var(--text-secondary)',
                   border: '1px solid var(--border-subtle)'
                 }}
@@ -441,58 +565,85 @@ export const RoomScreen: React.FC<Props> = ({
                 gap: 6,
                 padding: '4px 10px',
                 borderRadius: 'var(--radius-full)',
-                background: 'rgba(16, 185, 129, 0.12)',
-                border: '1px solid rgba(16, 185, 129, 0.28)',
+                background: 'var(--bg-surface)',
+                border: '1px solid var(--border-subtle)',
                 fontSize: 12,
                 fontWeight: 700,
-                color: 'var(--presence-active)'
+                color: data && !error ? 'var(--presence-active)' : 'var(--text-muted)'
               }}
             >
               <div
+                aria-hidden="true"
                 style={{
                   width: 7,
                   height: 7,
                   borderRadius: '50%',
-                  background: 'var(--presence-active)',
-                  boxShadow: '0 0 8px var(--presence-active)'
+                  background: data && !error ? 'var(--presence-active)' : 'var(--presence-other)'
                 }}
-                className="animate-pulse-glow"
+                className={data && !error ? 'animate-pulse-glow' : undefined}
               />
-              <span>{data ? data.count : '...'} live</span>
+              <span>{data && !error ? `${data.count} live` : error ? 'Offline' : '…'}</span>
             </div>
-            {lastUpdated && (
-              <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>
-                Updated {lastUpdated}
-              </div>
-            )}
           </div>
         </div>
+
+        {currentUser && (
+          <button
+            onClick={openChat}
+            disabled={!socket || !socketConnected}
+            className="btn-primary press"
+            aria-label={unseenChat > 0 ? `Open room chat, ${unseenChat} new ${unseenChat === 1 ? 'message' : 'messages'}` : 'Open room chat'}
+            style={{
+              marginTop: 14, width: '100%', minHeight: 48, borderRadius: 'var(--radius-full)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+              fontSize: 15, fontWeight: 700,
+              opacity: !socket || !socketConnected ? 0.55 : 1
+            }}
+          >
+            <MessageCircle size={18} aria-hidden="true" />
+            {!socket || !socketConnected ? 'Chat reconnecting…' : 'Room chat'}
+            {unseenChat > 0 && (
+              <span
+                aria-hidden="true"
+                style={{
+                  minWidth: 22, height: 22, padding: '0 6px', borderRadius: 'var(--radius-full)',
+                  background: 'var(--text-on-accent)', color: 'var(--accent-purple)',
+                  fontSize: 12, fontWeight: 800, display: 'inline-flex', alignItems: 'center', justifyContent: 'center'
+                }}
+              >
+                {unseenChat > 99 ? '99+' : unseenChat}
+              </span>
+            )}
+          </button>
+        )}
       </div>
 
       {/* Error state */}
       {error && (
         <div
+          role="alert"
           className="glass-panel"
           style={{
-            padding: 14,
+            padding: '8px 8px 8px 14px',
             marginBottom: 16,
             display: 'flex',
             alignItems: 'center',
             gap: 10,
-            borderColor: 'rgba(239, 68, 68, 0.4)',
-            background: 'rgba(239, 68, 68, 0.08)'
+            borderColor: 'var(--status-danger)'
           }}
         >
-          <AlertTriangle size={20} style={{ color: '#ef4444', flexShrink: 0 }} />
-          <div style={{ flex: 1, fontSize: 13, color: 'var(--text-primary)' }}>
-            <strong>Presence connection warning:</strong> {error}
+          <AlertTriangle size={20} aria-hidden="true" style={{ color: 'var(--status-danger)', flexShrink: 0 }} />
+          <div style={{ flex: 1, fontSize: 14, color: 'var(--text-primary)', lineHeight: 1.4 }}>
+            {error}
+            {data && <span style={{ color: 'var(--text-muted)' }}> Showing the last list we saw.</span>}
           </div>
           <button
             onClick={handleManualRefresh}
             className="btn-secondary press"
-            style={{ padding: '6px 12px', fontSize: 12, flexShrink: 0 }}
+            disabled={isRefreshing}
+            style={{ minHeight: 48, padding: '0 16px', fontSize: 14, flexShrink: 0 }}
           >
-            Retry
+            {isRefreshing ? 'Retrying…' : 'Retry'}
           </button>
         </div>
       )}
@@ -501,10 +652,15 @@ export const RoomScreen: React.FC<Props> = ({
       <div className="section-head" style={{ marginBottom: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <Users size={16} style={{ color: 'var(--accent-purple-text)' }} />
-          <h3>Active Travelers ({data?.travelers?.length ?? 0})</h3>
+          <h3>Travelers here{data ? ` (${data.travelers.length})` : ''}</h3>
         </div>
-        <button onClick={handleManualRefresh} className="link">
-          {isRefreshing ? 'Refreshing...' : 'Poll status'}
+        <button
+          onClick={handleManualRefresh}
+          className="link"
+          disabled={isRefreshing}
+          style={{ minHeight: 48, padding: '0 4px', background: 'none', border: 'none', cursor: 'pointer' }}
+        >
+          {isRefreshing ? 'Refreshing…' : 'Refresh'}
         </button>
       </div>
 
@@ -571,11 +727,17 @@ export const RoomScreen: React.FC<Props> = ({
               .replace(/^@/, '')
               .substring(0, 2)
               .toUpperCase();
+            // Server derives this per user from their heartbeat TTL.
+            const presence = (traveler as { presenceState?: string }).presenceState === 'active' ? 'active' : 'away';
+            const displayName = traveler.pseudonym || traveler.username.replace(/^@/, '');
 
             return (
               <div
                 key={traveler.id}
                 className="glass-panel animate-fade-in"
+                role="button"
+                tabIndex={0}
+                aria-label={`${displayName}${isMe ? ' (you)' : ''}, ${presence === 'active' ? 'active now' : 'away'}. View profile`}
                 style={{
                   padding: 14,
                   display: 'flex',
@@ -585,6 +747,10 @@ export const RoomScreen: React.FC<Props> = ({
                   transition: 'transform 0.15s ease, border-color 0.15s ease'
                 }}
                 onClick={() => handleTravelerTap(traveler)}
+                onKeyDown={e => {
+                  if (e.target !== e.currentTarget) return;
+                  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleTravelerTap(traveler); }
+                }}
               >
                 {/* Avatar with live active dot */}
                 <div className="avatar-wrap">
@@ -602,8 +768,9 @@ export const RoomScreen: React.FC<Props> = ({
                     {initials}
                   </div>
                   <div
-                    className="avatar-dot active"
-                    title="Active in room"
+                    className={`avatar-dot ${presence === 'active' ? 'active' : 'other'}`}
+                    title={presence === 'active' ? 'Active now' : 'Away'}
+                    aria-hidden="true"
                   />
                 </div>
 
@@ -616,16 +783,19 @@ export const RoomScreen: React.FC<Props> = ({
                     <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
                       {traveler.username.startsWith('@') ? traveler.username : `@${traveler.username}`}
                     </span>
+                    {presence === 'away' && (
+                      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>· away</span>
+                    )}
                     {isMe && (
                       <span
                         style={{
                           fontSize: 10,
                           fontWeight: 700,
                           color: 'var(--accent-purple-text)',
-                          background: 'rgba(123,93,255,0.12)',
+                          background: 'var(--bg-surface)',
                           padding: '1px 6px',
                           borderRadius: 999,
-                          border: '1px solid rgba(123,93,255,0.22)'
+                          border: '1px solid var(--border-purple)'
                         }}
                       >
                         You
@@ -676,19 +846,23 @@ export const RoomScreen: React.FC<Props> = ({
                   <button
                     onClick={e => {
                       e.stopPropagation();
-                      handleConnectClick(traveler);
+                      if (!isConnected) handleConnectClick(traveler);
                     }}
+                    onKeyDown={e => e.stopPropagation()}
+                    disabled={isConnected}
+                    aria-label={isConnected ? `Request sent to ${displayName}` : `Send connection request to ${displayName}`}
                     className={isConnected ? 'btn-secondary press' : 'btn-primary press'}
                     style={{
-                      padding: '6px 12px',
-                      fontSize: 12,
+                      padding: '0 14px',
+                      fontSize: 13,
                       fontWeight: 700,
                       borderRadius: 'var(--radius-full)',
                       display: 'inline-flex',
                       alignItems: 'center',
                       gap: 4,
                       flexShrink: 0,
-                      height: 32
+                      minHeight: 48,
+                      alignSelf: 'center'
                     }}
                   >
                     {isConnected ? (
@@ -710,6 +884,20 @@ export const RoomScreen: React.FC<Props> = ({
         </div>
       )}
 
+      {/* Room chat — full-screen over the room */}
+      {chatOpen && currentUser && (
+        <ChatView
+          room={chatRoom}
+          currentUser={currentUser}
+          socket={socket}
+          typingUsers={roomTyping}
+          reactions={roomReactions}
+          onSendMessage={(content) => socket?.emit('send_message', { roomId: activeRoomId, content })}
+          onReaction={(targetId, emoji) => socket?.emit('reaction_toggle', { targetId, targetType: 'message', userId: currentUser.id, emoji, roomId: activeRoomId })}
+          onBack={() => setChatOpen(false)}
+        />
+      )}
+
       {/* Traveler profile sheet */}
       <ProfileSheet
         open={sheetTraveler !== null}
@@ -718,13 +906,24 @@ export const RoomScreen: React.FC<Props> = ({
       >
         {sheetTraveler && (
           <>
-            <ProfileSheetContent traveler={sheetTraveler} titleId="profile-sheet-title" />
+            <ProfileSheetContent
+              traveler={sheetTraveler}
+              titleId="profile-sheet-title"
+              activeRoomId={activeRoomId}
+              sharedTags={
+                sheetTraveler.id === currentUser?.id
+                  ? undefined
+                  : (sheetTraveler.interestTags || []).filter(t => currentUser?.interestTags?.includes(t))
+              }
+            />
             <ProfileSheetActions
+              key={sheetTraveler.id}
+              travelerName={sheetTraveler.pseudonym || sheetTraveler.username.replace(/^@/, '')}
               initialState={
                 sheetTraveler.id === currentUser?.id
-                  ? 'already-friends'
+                  ? 'self'
                   : connectedIds.has(sheetTraveler.id)
-                    ? 'already-friends'
+                    ? 'sent'
                     : 'idle'
               }
               onSendRequest={() => sendConnectionRequest(sheetTraveler)}
@@ -741,7 +940,11 @@ export const RoomScreen: React.FC<Props> = ({
         traveler={reportTraveler}
         currentUserId={currentUser?.id}
         onClose={() => setReportTraveler(null)}
-        onReported={(msg) => { setReportTraveler(null); showToast(msg); }}
+        // ReportSheet shows its own confirmation — no second toast here.
+        onReported={() => setReportTraveler(null)}
+        onBlocked={(targetId) => {
+          setData(prev => prev ? { ...prev, travelers: prev.travelers.filter(t => t.id !== targetId), count: Math.max(0, prev.count - 1) } : prev);
+        }}
       />
 
       {/* Confirmation toast — glass pill, announced to screen readers */}

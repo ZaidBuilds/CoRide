@@ -3,12 +3,14 @@ import { Skeleton } from '../ui/Skeleton';
 
 export const CarriageFeedSkeleton: React.FC = () => {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, width: '100%' }}>
+    <div role="status" aria-busy="true" style={{ display: 'flex', flexDirection: 'column', gap: 12, width: '100%' }}>
+      <span className="sr-only">Loading travelers</span>
       {[0, 1, 2].map((idx) => {
         const delay = idx * 150;
         return (
           <div
             key={idx}
+            aria-hidden="true"
             className="traveler-card"
             style={{
               padding: '14px',

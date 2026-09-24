@@ -1,6 +1,18 @@
 -- CoRide Postgres init (MVP4 → prod)
 -- Replace store.json with real tables when DATABASE_URL is set
 
+-- Authoritative application state (single-instance snapshot). The server
+-- keeps the whole durable store in memory and writes it here as one JSONB row
+-- (debounced); it is loaded at boot. See server/src/services/persistence.ts.
+CREATE TABLE IF NOT EXISTS app_state (
+  id TEXT PRIMARY KEY,
+  data JSONB NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- The tables below are the target per-entity schema for multi-instance
+-- scaling. They are not written by the current server (legacy `profiles` and
+-- `reads` rows are imported into app_state on first boot).
 CREATE TABLE IF NOT EXISTS profiles (
   id TEXT PRIMARY KEY,
   data JSONB NOT NULL,

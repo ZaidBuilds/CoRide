@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Clock, MapPin, Trash2, Zap, Star } from 'lucide-react';
 import type { CommutePattern } from '../../types';
 import { API } from '../../config';
+import { authHeaders, jsonAuthHeaders } from '../../utils/auth';
 
 
 interface Props {
@@ -21,7 +22,8 @@ export const SavedCommutes: React.FC<Props> = ({ userId, onUse }) => {
   const load = async () => {
     setStatus('loading');
     try {
-      const r = await fetch(`${API}/api/commute/patterns/${userId}`);
+      const r = await fetch(`${API}/api/commute/patterns/${encodeURIComponent(userId)}`, { headers: authHeaders() });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const j = await r.json();
       setPatterns(j.patterns || []);
       setStatus('ready');
@@ -35,7 +37,6 @@ export const SavedCommutes: React.FC<Props> = ({ userId, onUse }) => {
     // Use current context as defaults if not filled — we just save form + last station fallback
     // For demo we default to blue line rajiv chowk if not set
     const payload: any = {
-      userId,
       lineId: (form as any).lineId || 'blue',
       lineName: (form as any).lineName || 'Blue Line',
       lineColor: (form as any).lineColor || '#0284c7',
@@ -46,19 +47,24 @@ export const SavedCommutes: React.FC<Props> = ({ userId, onUse }) => {
       daysOfWeek: form.daysOfWeek,
       label: form.label
     };
-    const r = await fetch(`${API}/api/commute/patterns`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
-    const j = await r.json();
-    if (j.pattern) { setPatterns(prev=> [...prev, j.pattern].slice(-5)); setShowAdd(false); }
+    try {
+      const r = await fetch(`${API}/api/commute/patterns`, { method:'POST', headers: jsonAuthHeaders(), body: JSON.stringify(payload)});
+      const j = await r.json().catch(() => ({}));
+      if (r.ok && j.pattern) { setPatterns(prev=> [...prev, j.pattern].slice(-5)); setShowAdd(false); }
+    } catch { /* offline — keep the form open so nothing typed is lost */ }
   };
 
   const remove = async (id: string) => {
-    await fetch(`${API}/api/commute/patterns/${userId}/${id}`, { method:'DELETE' });
-    setPatterns(prev=> prev.filter(p=>p.id!==id));
+    try {
+      const r = await fetch(`${API}/api/commute/patterns/${encodeURIComponent(userId)}/${encodeURIComponent(id)}`, { method:'DELETE', headers: authHeaders() });
+      // 404 means it is already gone server-side — drop it locally too.
+      if (r.ok || r.status === 404) setPatterns(prev=> prev.filter(p=>p.id!==id));
+    } catch { /* offline — leave it in place */ }
   };
   const use = async (p: CommutePattern) => {
     try {
-      const r = await fetch(`${API}/api/commute/patterns/${userId}/${p.id}/use`, { method:'POST' });
-      const j = await r.json();
+      const r = await fetch(`${API}/api/commute/patterns/${encodeURIComponent(userId)}/${encodeURIComponent(p.id)}/use`, { method:'POST', headers: authHeaders() });
+      const j = r.ok ? await r.json() : {};
       onUse(j.pattern || p, j.room);
     } catch { onUse(p); }
   };

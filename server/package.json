@@ -7,7 +7,9 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "seed:room": "ts-node src/scripts/seedRoom.ts",
-    "seed:room:clear": "ts-node src/scripts/seedRoom.ts --clear"
+    "seed:room:clear": "ts-node src/scripts/seedRoom.ts --clear",
+    "test": "node --require ts-node/register/transpile-only --test src/services/confidenceScorer.test.ts src/tests/api.test.ts",
+    "typecheck": "tsc --noEmit -p ."
   },
   "dependencies": {
     "cors": "^2.8.5",
@@ -27,5 +29,8 @@
     "nodemon": "^3.1.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.4.5"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

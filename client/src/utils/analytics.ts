@@ -1,18 +1,14 @@
 import { API } from '../config';
+import { jsonAuthHeaders } from './auth';
 
-export function track(event: string, userId?: string, payload?: Record<string, any>) {
-  const uid = userId || (() => {
-    try {
-      const raw = localStorage.getItem('coride_profile');
-      if (raw) return JSON.parse(raw).id;
-    } catch {}
-    return 'anonymous';
-  })();
+// `userId` is kept for call-site compatibility; the server attributes events
+// to the signed token's user, never to a client-claimed id.
+export function track(event: string, _userId?: string, payload?: Record<string, any>) {
   // fire and forget
   fetch(`${API}/api/analytics/event`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ event, userId: uid, payload: { ...payload, ts: Date.now(), path: window.location.pathname } })
+    headers: jsonAuthHeaders(),
+    body: JSON.stringify({ event, payload: { ...payload, ts: Date.now(), path: window.location.pathname } })
   }).catch(() => {});
   // also console for dev
   if (import.meta.env.DEV) {

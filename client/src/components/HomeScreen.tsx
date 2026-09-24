@@ -1,13 +1,15 @@
-import { Train, Users, Map } from 'lucide-react';
+import { Train, Users, Sparkles, ChevronRight, MapPin } from 'lucide-react';
 import { ThemeToggle } from './ThemeToggle';
+import { Button } from './ui/Button';
+import { Skeleton } from './ui/Skeleton';
 import type { UserProfile, ContextRoom, RankedTraveler } from '../types';
 import type { EngagementSnapshot } from '../types/engagement';
 
 /** CoRide peaks on the evening commute as much as the morning — greeting follows the clock. */
 function greetingFor(hour: number): string {
-  if (hour < 12) return 'Good Morning';
-  if (hour < 17) return 'Good Afternoon';
-  return 'Good Evening';
+  if (hour < 12) return 'Good morning';
+  if (hour < 17) return 'Good afternoon';
+  return 'Good evening';
 }
 
 interface Props {
@@ -21,241 +23,288 @@ interface Props {
   onViewAllPeople: () => void;
   onJoinRoom: (roomId: string) => void;
   onOpenRoom?: (roomId?: string) => void;
+  /** Open a traveler's profile sheet. Without it, tapping a person opens People. */
+  onOpenProfile?: (u: UserProfile) => void;
   onShowNotifications?: () => void;
   onOpenLiveTracking?: () => void;
   onOpenCheckIn?: () => void;
 }
 
-export const HomeScreen: React.FC<Props> = ({ user, contextStationName, contextLineName, stationRoom, trainRoom, vibe, engagement, onViewAllPeople, onJoinRoom, onOpenRoom, onOpenLiveTracking, onOpenCheckIn }) => {
+interface AroundItem {
+  profile: UserProfile;
+  shared: number;
+}
+
+const GAME_TITLES: Record<string, string> = {
+  word_chain: 'Word Chain',
+  trivia: 'Fast Trivia',
+  twenty_q: '20 Questions',
+  prompt: 'Prompt Wall'
+};
+
+/** Presence-room id (`station:line:direction`) for the live context, as RoomScreen expects. */
+function presenceRoomId(room: ContextRoom | null): string | undefined {
+  if (!room?.stationId || !room.lineId || !room.direction) return undefined;
+  const slug = (s: string, max: number) => s.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, max);
+  const id = `${slug(room.stationId, 40)}:${slug(room.lineId, 30)}:${slug(room.direction, 40)}`;
+  return /^[a-z0-9_]{1,40}:[a-z0-9_]{1,30}:[a-z0-9_]{1,40}$/.test(id) ? id : undefined;
+}
+
+function firstName(pseudonym: string): string {
+  return pseudonym.split('_')[0] || pseudonym;
+}
+
+/**
+ * Home — "who's around me?". Three real signals only: where you are (live
+ * context), who is there (room presence, best matches first), and live games
+ * in your rooms. No placeholder rooms, schedules or match scores.
+ */
+export const HomeScreen: React.FC<Props> = ({
+  user, contextStationName, contextLineName, stationRoom, trainRoom, vibe, engagement,
+  onViewAllPeople, onJoinRoom, onOpenRoom, onOpenProfile, onOpenCheckIn
+}) => {
   const greeting = greetingFor(new Date().getHours());
-  const nearbyCount = stationRoom?.userCount || trainRoom?.userCount || 0;
-  const line = contextLineName || trainRoom?.lineName || 'Blue Line';
-  const station = contextStationName || trainRoom?.stationName || 'Rajiv Chowk';
-  const next = trainRoom?.stationName ? 'Mandi House' : 'Noida Sec 18';
+  const liveRoom = trainRoom || stationRoom;
+  const detecting = !liveRoom;
+  const line = contextLineName || liveRoom?.lineName;
+  const station = contextStationName || liveRoom?.stationName;
+  const lineColor = liveRoom?.lineColor || 'var(--accent-purple)';
+  const direction = (trainRoom?.direction || stationRoom?.direction || '').replace(/^Towards\s+/i, '');
+  const presenceId = presenceRoomId(trainRoom) || presenceRoomId(stationRoom);
 
-  // Build Around You Now avatars — use vibe or first 6 station users
-  const around = vibe && vibe.length ? vibe : (stationRoom?.users.slice(0,6) || trainRoom?.users.slice(0,6) || []);
-  // For around, we need to map RankedTraveler[] vs UserProfile[] — normalize
-  const aroundItems: { id: string; name: string; bg: string; match: number; avatar?: string; tier?: string }[] =
-    (around as any).slice(0,6).map((r: any, idx: number) => {
-      if (r.profile) {
-        const pct = Math.max(65, 90 - idx*5); // 90,80,75,70,65
-        return { id: r.profile.id, name: r.profile.pseudonym.split('_')[0] || r.profile.pseudonym, bg: r.profile.avatarBg, match: pct, tier: r.profile.presenceTier };
-      } else {
-        const u = r as UserProfile;
-        const pct = 90 - idx*5;
-        return { id: u.id, name: u.pseudonym.split('_')[0] || u.pseudonym, bg: u.avatarBg, match: pct, tier: (u as any).presenceTier };
-      }
+  // Around you: best matches (shared interests) first, then everyone else in
+  // your rooms. Never yourself, never duplicates, and only real shared counts.
+  const aroundItems: AroundItem[] = [];
+  const seen = new Set<string>(user ? [user.id] : []);
+  for (const r of vibe || []) {
+    if (seen.has(r.profile.id)) continue;
+    seen.add(r.profile.id);
+    aroundItems.push({ profile: r.profile, shared: r.mutualCount || 0 });
+  }
+  for (const u of [...(trainRoom?.users || []), ...(stationRoom?.users || [])]) {
+    if (seen.has(u.id)) continue;
+    seen.add(u.id);
+    const shared = user ? u.interestTags?.filter(t => user.interestTags?.includes(t)).length || 0 : 0;
+    aroundItems.push({ profile: u, shared });
+  }
+  const shown = aroundItems.slice(0, 8);
+  const othersCount = aroundItems.length;
+
+  // Live games in your own rooms (real engagement snapshots only).
+  const liveGames: { roomId: string; title: string; desc: string; players: number }[] = [];
+  for (const snap of Object.values(engagement || {})) {
+    const g = snap.activeGame as { type?: string; players?: unknown[]; currentPrompt?: { text?: string } } | null;
+    if (!g?.type) continue;
+    const players = Array.isArray(g.players) ? g.players.length : 0;
+    liveGames.push({
+      roomId: snap.roomId,
+      title: GAME_TITLES[g.type] || g.type.replace(/_/g, ' '),
+      desc: g.type === 'prompt'
+        ? (g.currentPrompt?.text?.slice(0, 60) || 'Share your answer')
+        : players > 0 ? `${players} playing now` : 'Starting now',
+      players
     });
-
-  // Active rooms from real engagement rooms only — no demo fallbacks.
-  const activeRooms: { id: string; title: string; desc: string; emoji: string; count: number }[] = [];
-  if (engagement) {
-    for (const snap of Object.values(engagement)) {
-      if (snap.activeGame) {
-        const g: any = snap.activeGame;
-        const titleMap: Record<string,string> = { word_chain: 'Word Chain', trivia: 'Fast Trivia', twenty_q: '20 Questions', prompt: 'Prompt Wall' };
-        activeRooms.push({ id: snap.roomId, title: `${titleMap[g.type] || g.type} • Live`, desc: g.type==='prompt' ? g.currentPrompt?.text?.slice(0,28) || 'Share your vibe' : `${g.players?.length || 0} playing`, emoji: g.type==='trivia'?'⚡':g.type==='prompt'?'💬':'🎮', count: g.players?.length || 0 });
-      }
-    }
   }
 
+  const openGame = (roomId: string) => {
+    // Games are played in the People tab's room hub for your current room;
+    // a game in your other room opens that room's chat.
+    if (liveRoom && roomId === liveRoom.id) onViewAllPeople();
+    else onJoinRoom(roomId);
+  };
+
+  const openPerson = (u: UserProfile) => (onOpenProfile ? onOpenProfile(u) : onViewAllPeople());
+
   return (
-    <div className="animate-fade-in" style={{ paddingBottom: 86 }}>
-      {/* Header — sticky frosted bar; content scrolls under it */}
-      <div className="app-header">
-        <div style={{ minWidth:0 }}>
-          <h1 className="display" style={{ fontSize:24, fontWeight:700, letterSpacing:-0.6, margin:0 }}>CoRide</h1>
-          <p style={{ fontSize:13, color:'var(--text-secondary)', marginTop:1 }}>
-            {greeting}, {user ? user.pseudonym.split('_')[0] : 'there'} <span>👋</span>
+    <div className="animate-fade-in">
+      {/* Header */}
+      <header className="app-header">
+        <div style={{ minWidth: 0 }}>
+          <h1 className="display" style={{ fontSize: 24, fontWeight: 700, letterSpacing: -0.6, margin: 0 }}>CoRide</h1>
+          <p style={{ fontSize: 14, color: 'var(--text-secondary)', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {greeting}{user ? `, ${firstName(user.pseudonym)}` : ''}
           </p>
         </div>
-        <div style={{ display:'flex', gap:8, flexShrink:0 }}>
-          <ThemeToggle />
-        </div>
-      </div>
+        <ThemeToggle />
+      </header>
 
-      {/* On Ride */}
-      <div
+      {/* Live context — where you are right now */}
+      <section
+        aria-label="Your current ride"
         style={{
-          background:'var(--bg-accent-wash)',
-          border:'1px solid var(--border-purple)',
-          borderRadius:'var(--radius-xl)',
-          padding:14,
-          display:'flex',
-          alignItems:'center',
-          gap:12,
-          marginBottom:16,
-          cursor: onOpenRoom ? 'pointer' : 'default'
+          background: 'var(--bg-card)',
+          border: '1px solid var(--border-card)',
+          borderRadius: 'var(--radius-xl)',
+          padding: 16,
+          marginBottom: 16,
+          boxShadow: 'var(--shadow-sm)'
         }}
-        onClick={() => onOpenRoom && onOpenRoom()}
       >
-        <div className="avatar" style={{ width:42, height:42, background:'linear-gradient(135deg, var(--accent-fill-from), var(--accent-fill-to))' }}>
-          <Train size={20} />
-        </div>
-        <div style={{ flex:1, minWidth:0 }}>
-          <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-            <span style={{ fontSize:13, color:'var(--accent-purple-text)', fontWeight:700 }}>On Ride · Live Presence</span>
-            <span style={{ width:6, height:6, borderRadius:'50%', background:'var(--presence-active)' }} />
+        {detecting ? (
+          <div aria-busy="true" aria-live="polite">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <Skeleton width={44} height={44} borderRadius="50%" />
+              <div style={{ flex: 1 }}>
+                <Skeleton width="45%" height={12} />
+                <Skeleton width="75%" height={16} style={{ marginTop: 8 }} />
+              </div>
+            </div>
+            <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '12px 0 0' }}>Finding your station…</p>
+            {onOpenCheckIn && (
+              <Button variant="secondary" size="sm" icon={<MapPin size={16} />} onClick={onOpenCheckIn} style={{ marginTop: 12 }}>
+                Pick my station
+              </Button>
+            )}
           </div>
-          <div style={{ fontSize:14, color:'var(--text-primary)', fontWeight:600 }}>{line} • {station} → {next}</div>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          {onOpenCheckIn && (
-            <button
-              className="btn-secondary press"
-              style={{
-                background: 'var(--ink-700)',
-                border: '1px solid var(--border-subtle)',
-                color: 'var(--text-primary)',
-                padding: '8px 14px',
-                fontSize: 13,
-                fontWeight: 700,
-                borderRadius: 'var(--radius-pill)',
-                minHeight: 40
-              }}
-              onClick={(e) => {
-                e.stopPropagation();
-                onOpenCheckIn();
-              }}
-            >
-              Check In
+        ) : (
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div
+                aria-hidden="true"
+                style={{
+                  width: 44, height: 44, borderRadius: '50%', flexShrink: 0,
+                  background: lineColor, color: '#fff',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center'
+                }}
+              >
+                <Train size={20} />
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)' }}>
+                  <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--presence-active)' }} />
+                  {trainRoom ? 'On the train' : 'At the station'}
+                  {line ? ` · ${line}` : ''}
+                </div>
+<div style={{ fontSize: 17, fontWeight: 800, color: 'var(--text-primary)', marginTop: 2, lineHeight: 1.25, overflowWrap: 'anywhere' }}>
+                  {station}
+                </div>
+                {direction && (
+                  <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 2, lineHeight: 1.35 }}>
+                    Towards {direction}
+                  </div>
+                )}
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+              {onOpenRoom && (
+                <Button variant="primary" size="sm" fullWidth style={{ flex: 1 }} onClick={() => onOpenRoom(presenceId)}>
+                  View room
+                </Button>
+              )}
+              {onOpenCheckIn && (
+                <Button variant="secondary" size="sm" fullWidth style={{ flex: 1 }} onClick={onOpenCheckIn}>
+                  Change station
+                </Button>
+              )}
+            </div>
+          </>
+        )}
+      </section>
+
+      {/* Around you now */}
+      <section aria-labelledby="home-around" className="glass-panel" style={{ padding: 16, marginBottom: 16 }}>
+        <div className="section-head" style={{ marginBottom: 4 }}>
+          <h3 id="home-around">Around you now</h3>
+          {othersCount > 0 && (
+            <button type="button" onClick={onViewAllPeople} className="link" style={{ minHeight: 'var(--tap)', display: 'inline-flex', alignItems: 'center', gap: 2, background: 'none', border: 'none', color: 'var(--accent-purple-text)', fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>
+              See all <ChevronRight size={16} aria-hidden="true" />
             </button>
           )}
-          <button
-            className="btn-secondary press"
-            style={{
-              background: 'transparent',
-              border: '1px solid var(--border-purple)',
-              color: 'var(--accent-purple-text)',
-              padding: '8px 14px',
-              fontSize: 13,
-              fontWeight: 700,
-              borderRadius: 'var(--radius-pill)',
-              minHeight: 40
-            }}
-            onClick={(e) => {
-              e.stopPropagation();
-              if (onOpenRoom) onOpenRoom();
-            }}
-          >
-            View Room
-          </button>
         </div>
-      </div>
 
-      {/* Live Metro Map & Subway Route Tracker Tile */}
-      <div
-        className="glass-thick press"
-        style={{
-          borderRadius: 'var(--radius-xl)',
-          padding: 14,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 12,
-          marginBottom: 16,
-          cursor: 'pointer',
-          background: 'linear-gradient(135deg, rgba(56, 189, 248, 0.12), rgba(123, 93, 255, 0.15))',
-          border: '1px solid rgba(56, 189, 248, 0.25)'
-        }}
-        onClick={() => onOpenLiveTracking && onOpenLiveTracking()}
-      >
-        <div className="avatar" style={{ width: 42, height: 42, background: 'linear-gradient(135deg, #0284c7, #38bdf8)' }}>
-          <Map size={20} color="#fff" />
-        </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ fontSize: 13, color: '#38bdf8', fontWeight: 800 }}>Delhi Metro Live Map</span>
-            <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 999, background: 'rgba(16, 185, 129, 0.2)', color: '#10b981', fontWeight: 800 }}>10 Lines</span>
+        {detecting ? (
+          <div style={{ display: 'flex', gap: 12, paddingTop: 8 }} aria-hidden="true">
+            {[0, 1, 2, 3].map(i => (
+              <div key={i} style={{ flex: '0 0 72px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+                <Skeleton width={60} height={60} borderRadius="50%" delayMs={i * 120} />
+                <Skeleton width={48} height={10} delayMs={i * 120} />
+              </div>
+            ))}
           </div>
-          <div style={{ fontSize: 13, color: 'var(--text-primary)', fontWeight: 600 }}>Friends Transit Map & Route Diagram</div>
-        </div>
-        <button
-          className="btn-secondary press"
-          style={{ background: 'rgba(56, 189, 248, 0.15)', border: '1px solid rgba(56, 189, 248, 0.3)', color: '#38bdf8', padding: '6px 12px', fontSize: 13, fontWeight: 700 }}
-          onClick={(e) => {
-            e.stopPropagation();
-            if (onOpenLiveTracking) onOpenLiveTracking();
-          }}
-        >
-          Open Map
-        </button>
-      </div>
-
-      {/* Around You Now */}
-      <div className="glass-panel" style={{ padding:16, marginBottom:16 }}>
-        <div className="section-head" style={{ marginBottom:6 }}>
-          <h3>Around You Now</h3>
-          <button onClick={onViewAllPeople} className="link">View all</button>
-        </div>
-        {/* Only claim a live count when there is one — the old `|| 74` fallback
-            contradicted the empty state directly below it. */}
-        {nearbyCount > 0 && (
-          <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:12 }}>
-            <div style={{ width:7,height:7, borderRadius:'50%', background:'var(--presence-active)', boxShadow:'0 0 6px var(--presence-active)' }} />
-            <span style={{ fontSize:13, color:'var(--text-secondary)', fontWeight:600 }}>
-              {nearbyCount} {nearbyCount === 1 ? 'person' : 'people'} nearby
-            </span>
+        ) : shown.length > 0 ? (
+          <>
+            <p style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--text-secondary)', fontWeight: 600, margin: '0 0 12px' }}>
+              <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--presence-active)' }} />
+              {othersCount} {othersCount === 1 ? 'person' : 'people'} in your rooms
+            </p>
+            <ul
+              style={{ display: 'flex', gap: 8, overflowX: 'auto', listStyle: 'none', margin: '0 -16px', padding: '0 16px 4px', scrollbarWidth: 'none' }}
+            >
+              {shown.map(({ profile: p, shared }) => (
+                <li key={p.id} style={{ flex: '0 0 76px', width: 76, minWidth: 0 }}>
+                  <button
+                    type="button"
+                    onClick={() => openPerson(p)}
+                    aria-label={`${p.pseudonym}${shared ? `, ${shared} interest${shared === 1 ? '' : 's'} in common` : ''}. View profile`}
+                    style={{ width: 76, minWidth: 0, minHeight: 'var(--tap)', background: 'none', border: 'none', padding: '4px 0', cursor: 'pointer', color: 'inherit', display: 'flex', flexDirection: 'column', alignItems: 'center', borderRadius: 'var(--radius-md)' }}
+                  >
+                    <div className="avatar-wrap" style={{ width: 60, height: 60, marginBottom: 6 }}>
+                      <div className="avatar" style={{ width: 60, height: 60, background: p.avatarBg, fontSize: 16 }}>
+                        {p.pseudonym.slice(0, 2).toUpperCase()}
+                      </div>
+                      {p.presenceTier && <div className={`avatar-dot ${p.presenceTier}`} />}
+                    </div>
+                    <span style={{ display: 'block', width: '100%', textAlign: 'center', fontSize: 12, fontWeight: 700, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {firstName(p.pseudonym)}
+                    </span>
+                    {shared > 0 ? (
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, marginTop: 2, fontSize: 11, fontWeight: 700, color: 'var(--accent-purple-text)', whiteSpace: 'nowrap' }}>
+                        <Sparkles size={11} aria-hidden="true" /> {shared} shared
+                      </span>
+                    ) : (
+                      <span style={{ marginTop: 2, fontSize: 11, color: 'var(--text-muted)' }}>&nbsp;</span>
+                    )}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </>
+        ) : (
+          // Honest zero-state: context + one action.
+          <div style={{ textAlign: 'center', padding: '16px 8px 4px' }}>
+            <div aria-hidden="true" style={{ width: 52, height: 52, borderRadius: '50%', background: 'var(--bg-surface-raised)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)', marginBottom: 10 }}>
+              <Users size={24} />
+            </div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--text-primary)' }}>No one else here yet</div>
+            <p style={{ fontSize: 14, color: 'var(--text-secondary)', margin: '4px auto 0', lineHeight: 1.5, maxWidth: 300 }}>
+              People riding with you appear here as they check in. Wrong station? Update it so you land in the right room.
+            </p>
+            {onOpenCheckIn && (
+              <Button variant="secondary" size="sm" icon={<MapPin size={16} />} onClick={onOpenCheckIn} style={{ marginTop: 14 }}>
+                Change station
+              </Button>
+            )}
           </div>
         )}
-        <div style={{ display: aroundItems.length ? 'flex' : 'block', gap:12, overflowX:'auto', paddingBottom:4, scrollbarWidth:'none' }}>
-          {aroundItems.length ? aroundItems.map(it => (
-            <div key={it.id} style={{ flex:'0 0 72px', textAlign:'center' }}>
-              <div className="avatar-wrap" style={{ width:64, height:64, margin:'0 auto 6px' }}>
-                <div className="avatar" style={{ width:64, height:64, background: it.bg, fontSize:15 }}>
-                  {it.name[0]}
-                </div>
-                <div className={`avatar-dot ${it.tier === 'nearby' ? 'nearby' : it.tier === 'other' ? 'other' : 'active'}`} />
-              </div>
-              <div style={{ fontSize:13, fontWeight:700, color:'var(--text-primary)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{it.name}</div>
-              <span className="tag-pill active" style={{ marginTop:4, padding:'3px 8px', fontSize:11, fontWeight:800 }}>{it.match}% Match</span>
-            </div>
-          )) : (
-            // Empty state — context + one action, rather than a row of grey voids
-            <div style={{ textAlign:'center', padding:'20px 12px' }}>
-              <div style={{ width:48,height:48, borderRadius:'50%', background:'var(--bg-surface)', border:'1px solid var(--border-card)', display:'inline-flex', alignItems:'center', justifyContent:'center', color:'var(--text-muted)', marginBottom:10 }}>
-                <Users size={22} />
-              </div>
-              <div style={{ fontSize:14, fontWeight:700, color:'var(--text-primary)' }}>Nobody nearby yet</div>
-              <div style={{ fontSize:13, color:'var(--text-muted)', marginTop:4, lineHeight:1.5 }}>
-                Set your station and we'll show who's riding with you.
-              </div>
-              <button onClick={onViewAllPeople} className="btn-secondary" style={{ marginTop:12 }}>Set my station</button>
-            </div>
-          )}
-        </div>
-      </div>
+      </section>
 
-      {/* Active Rooms */}
-      <div className="section-head">
-        <h3>Active Rooms</h3>
-        <button onClick={onViewAllPeople} className="link">View all</button>
-      </div>
-      <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
-        {activeRooms.map(rm=>(
-          <div key={rm.id} className="glass-panel" style={{ padding:14, display:'flex', alignItems:'center', gap:12 }}>
-            <div style={{ flex:1, minWidth:0 }}>
-              <div style={{ fontSize:14, fontWeight:800, display:'flex', alignItems:'center', gap:6 }}>
-                {rm.title} <span style={{ fontSize:12, color:'var(--text-muted)', fontWeight:500 }}>👥 {rm.count}</span>
-              </div>
-              <div style={{ fontSize:13, color:'var(--text-muted)', marginTop:2 }}>{rm.desc}</div>
-            </div>
-            <button
-              onClick={() => {
-                if (rm.id.includes(':') && onOpenRoom) {
-                  onOpenRoom(rm.id);
-                } else {
-                  onJoinRoom(rm.id);
-                }
-              }}
-              className="btn-primary press"
-              style={{ padding:'8px 18px', fontSize:13 }}
-            >
-              Join
-            </button>
+      {/* Live games — only when a real game is running in one of your rooms */}
+      {liveGames.length > 0 && (
+        <section aria-labelledby="home-live-games">
+          <div className="section-head">
+            <h3 id="home-live-games">Live in your rooms</h3>
           </div>
-        ))}
-      </div>
+          <div className="list-group" style={{ marginBottom: 0 }}>
+            {liveGames.map(g => (
+              <button
+                key={g.roomId}
+                type="button"
+                className="list-row navigable"
+                onClick={() => openGame(g.roomId)}
+                style={{ minHeight: 64 }}
+              >
+                <span aria-hidden="true" style={{ width: 40, height: 40, borderRadius: 'var(--radius-md)', background: 'var(--bg-surface-raised)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--accent-purple-text)', flexShrink: 0 }}>
+                  <Sparkles size={18} />
+                </span>
+                <span className="row-text">
+                  <span className="row-title">{g.title}</span>
+                  <span className="row-sub">{g.desc}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   );
 };

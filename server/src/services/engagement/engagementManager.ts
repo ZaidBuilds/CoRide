@@ -276,6 +276,13 @@ export class EngagementManager {
     if (!rs) {
       rs = { targetId, targetType, counts: {}, users: {}, total: 0 };
       this.reactions.set(key, rs);
+      // Bound memory and snapshot size: every snapshot ships all reactions, so
+      // evict the oldest targets (Map keeps insertion order).
+      while (this.reactions.size > 2000) {
+        const oldest = this.reactions.keys().next().value;
+        if (oldest === undefined) break;
+        this.reactions.delete(oldest);
+      }
     }
     if (!rs.counts[emoji]) rs.counts[emoji] = 0;
     if (!rs.users[emoji]) rs.users[emoji] = [];

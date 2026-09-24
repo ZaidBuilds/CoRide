@@ -10,7 +10,7 @@ interface Props {
 function shortDirection(dir?: string): string {
   if (!dir) return '';
   const raw = dir.replace(/^Towards\s+/i, '').trim();
-  const first = raw.split(/[\/,]/)[0]?.trim() || raw;
+  const first = raw.split(/[/,]/)[0]?.trim() || raw;
   return first.split(/\s+/)[0] || raw;
 }
 
@@ -27,8 +27,13 @@ function formatISTNow(): string {
   }
 }
 
+/**
+ * Current room summary: line, direction, local time and how many people are
+ * in the room right now. The live dot only pulses when someone is actually
+ * here — an empty room reads as empty, not "Live".
+ */
 export const LiveRoomHeader: React.FC<Props> = ({ room, compact }) => {
-  const [now, setNow] = useState(formatISTNow());
+  const [now, setNow] = useState(formatISTNow);
 
   useEffect(() => {
     const id = setInterval(() => setNow(formatISTNow()), 30 * 1000);
@@ -40,44 +45,64 @@ export const LiveRoomHeader: React.FC<Props> = ({ room, compact }) => {
   const dirShort = shortDirection(room.direction);
   const line = room.lineName || 'Metro';
   const count = room.userCount ?? room.users?.length ?? 0;
+  const live = count > 0;
+  const people = `${count} ${count === 1 ? 'person' : 'people'} here now`;
 
   if (compact) {
     return (
-      <div style={{
-        display:'inline-flex', alignItems:'center', gap:8,
-        padding:'6px 12px', borderRadius:'var(--radius-full)',
-        background:'rgba(123,93,255,0.12)', border:'1px solid rgba(123,93,255,0.22)',
-        fontSize:12, fontWeight:700, color:'var(--accent-purple-text)'
-      }}>
-        <span style={{ width:8,height:8, borderRadius:'50%', background: room.lineColor || 'var(--accent-purple)', display:'inline-block', boxShadow:`0 0 6px ${room.lineColor}` }} />
-        {line} · {dirShort} · {now} — {count} online
-        <Radio size={12} className="animate-pulse-glow" style={{ color:'var(--presence-active)' }} />
+      <div
+        role="status"
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 8,
+          padding: '6px 12px', borderRadius: 'var(--radius-full)',
+          background: 'var(--bg-surface)', border: '1px solid var(--border-purple)',
+          fontSize: 12, fontWeight: 700, color: 'var(--accent-purple-text)'
+        }}
+      >
+        <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: '50%', background: room.lineColor || 'var(--accent-purple)', display: 'inline-block' }} />
+        {line}{dirShort ? ` · ${dirShort}` : ''} · {now} — {people}
+        {live && <Radio size={12} aria-hidden="true" className="animate-pulse-glow" style={{ color: 'var(--presence-active)' }} />}
       </div>
     );
   }
 
-  // Figma 02 purple card style
   return (
-    <div style={{
-      display:'flex', alignItems:'center', gap:12,
-      padding:'14px',
-      borderRadius:'var(--radius-xl)',
-      background:'linear-gradient(135deg, var(--bg-accent-wash-2) 0%, var(--bg-accent-wash) 100%)',
-      border:'1px solid var(--border-purple)',
-      boxShadow:'var(--shadow-md)'
-    }}>
-      <div style={{ width:40, height:40, borderRadius:'50%', background:'var(--accent-purple)', display:'flex', alignItems:'center', justifyContent:'center', color:'white', flexShrink:0 }}>
+    <div
+      role="status"
+      style={{
+        display: 'flex', alignItems: 'center', gap: 12,
+        padding: 14,
+        borderRadius: 'var(--radius-xl)',
+        background: 'var(--bg-card)',
+        border: '1px solid var(--border-purple)',
+        boxShadow: 'var(--shadow-md)'
+      }}
+    >
+      <div
+        aria-hidden="true"
+        style={{
+          width: 40, height: 40, borderRadius: '50%', flexShrink: 0,
+          background: room.lineColor || 'var(--accent-purple)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff'
+        }}
+      >
         <Train size={20} />
       </div>
-      <div style={{ flex:1, minWidth:0 }}>
-        <div style={{ fontSize:14, fontWeight:800, color:'var(--text-primary)', display:'flex', alignItems:'center', gap:6 }}>
-          {line} <span style={{ opacity:0.5 }}>•</span> {dirShort} <span style={{ opacity:0.5 }}>•</span> {now}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          {line}
+          {dirShort && <><span aria-hidden="true" style={{ opacity: 0.5 }}>•</span> {dirShort}</>}
+          <span aria-hidden="true" style={{ opacity: 0.5 }}>•</span> {now}
         </div>
-        <div style={{ fontSize:12, color:'var(--accent-purple-text)', marginTop:2, display:'flex', alignItems:'center', gap:6 }}>
-          <Users size={12} /> {count} travelers online — Live
+        <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 2, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Users size={13} aria-hidden="true" /> {people}
         </div>
       </div>
-      <div style={{ width:10,height:10, borderRadius:'50%', background:'var(--presence-active)', boxShadow:'0 0 8px var(--presence-active)', flexShrink:0 }} className="animate-pulse-glow" />
+      <div
+        aria-hidden="true"
+        className={live ? 'animate-pulse-glow' : undefined}
+        style={{ width: 10, height: 10, borderRadius: '50%', flexShrink: 0, background: live ? 'var(--presence-active)' : 'var(--presence-other)' }}
+      />
     </div>
   );
 };

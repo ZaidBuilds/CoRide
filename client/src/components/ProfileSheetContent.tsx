@@ -11,7 +11,21 @@ interface Props {
   activeRoomId?: string;
   currentContext?: ContextResult | null;
   isFriend?: boolean;
+  /**
+   * Interest ids the viewer shares with this traveler (from /api/rank's
+   * mutualTags, or a client-side intersection). Shared tags are listed first
+   * and highlighted — the single strongest "would I connect?" signal.
+   */
+  sharedTags?: string[];
 }
+
+type Tier = 'active' | 'nearby' | 'other';
+
+const TIER_LABEL: Record<Tier, string> = {
+  active: 'Active now',
+  nearby: 'Nearby',
+  other: 'Recently active'
+};
 
 function initials(t: RoomPresenceTraveler | UserProfile): string {
   return (t.pseudonym || t.username || '??').replace(/^@/, '').slice(0, 2).toUpperCase();
@@ -21,130 +35,188 @@ function joinedLabel(ms: number): string {
   return new Date(ms).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
 }
 
+function tagMeta(id: string) {
+  return INTEREST_TAXONOMY.find(t => t.id === id) || { id, emoji: '', label: id.replace(/_/g, ' ') };
+}
+
+/** Presence is only shown when the payload actually carries it — never assumed. */
+function presenceOf(t: RoomPresenceTraveler | UserProfile): Tier | null {
+  if ('presenceState' in t && t.presenceState === 'active') return 'active';
+  const tier = (t as UserProfile).presenceTier;
+  return tier === 'active' || tier === 'nearby' || tier === 'other' ? tier : null;
+}
+
+const sectionLabel: React.CSSProperties = {
+  fontSize: 12,
+  fontWeight: 700,
+  letterSpacing: 0.4,
+  textTransform: 'uppercase',
+  color: 'var(--text-muted)',
+  margin: '0 0 8px'
+};
+
 /**
  * Display-only profile body for the ProfileSheet.
- * Features prominent Commute Relationship badge, live presence, and interest tags.
+ * Identity first (avatar, name, handle), then context (commute relation,
+ * trust), then the decision inputs (about, shared interests, languages).
  */
-export function ProfileSheetContent({ traveler, joinedAt, titleId, activeRoomId, currentContext, isFriend }: Props) {
+export function ProfileSheetContent({ traveler, joinedAt, titleId, activeRoomId, currentContext, isFriend, sharedTags }: Props) {
   const name = traveler.pseudonym || traveler.username.replace(/^@/, '');
-  const actualJoined = joinedAt || ('joinedAt' in traveler ? (traveler as UserProfile).joinedAt : undefined);
-  const trustBadge = ('trustBadge' in traveler ? (traveler as UserProfile).trustBadge : undefined);
-  const trustTier = ('trustTier' in traveler ? (traveler as UserProfile).trustTier : undefined);
+  const handle = traveler.username.startsWith('@') ? traveler.username : `@${traveler.username}`;
+  const profile = traveler as Partial<UserProfile>;
+  const actualJoined = joinedAt ?? profile.joinedAt;
+  const trustBadge = profile.trustBadge;
+  const trustTier = profile.trustTier;
+  const vibeTagline = profile.vibeTagline;
+  const languages = profile.languages?.filter(Boolean) ?? [];
+  const tier = presenceOf(traveler);
 
-  // Commute Context relation (🚇 Same Train, 🔀 Same Line & Dir, 🏛️ At Station, 🟡 Nearby, 👥 Metro Friend)
   const commuteRel = getCommuteRelationship(traveler, {
     isFriend,
     activeRoomId,
     currentContext
   });
 
+  const tags = traveler.interestTags ?? [];
+  const shared = new Set((sharedTags ?? []).filter(t => tags.includes(t)));
+  const orderedTags = [...tags.filter(t => shared.has(t)), ...tags.filter(t => !shared.has(t))];
+
   return (
-    <div style={{ textAlign: 'center', padding: '4px 4px 20px' }}>
-      {/* Avatar — large, with live presence dot */}
-      <div className="avatar-wrap" style={{ width: 88, height: 88, margin: '0 auto 14px' }}>
-        <div
-          className="avatar"
-          style={{
-            width: 88,
-            height: 88,
-            fontSize: 30,
-            fontWeight: 800,
-            background: traveler.avatarBg || 'linear-gradient(135deg, var(--accent-fill-from), var(--accent-fill-to))'
-          }}
-        >
-          {initials(traveler)}
+    <div style={{ padding: '0 0 20px' }}>
+      {/* Identity */}
+      <div style={{ textAlign: 'center' }}>
+        <div className="avatar-wrap" style={{ width: 96, height: 96, margin: '4px auto 14px' }}>
+          <div
+            className="avatar"
+            aria-hidden="true"
+            style={{
+              width: 96,
+              height: 96,
+              fontSize: 32,
+              fontWeight: 800,
+              background: traveler.avatarBg || 'linear-gradient(135deg, var(--accent-fill-from), var(--accent-fill-to))'
+            }}
+          >
+            {initials(traveler)}
+          </div>
+          {tier && (
+            <div
+              className={`avatar-dot ${tier}`}
+              style={{ width: 20, height: 20, bottom: 4, right: 4, borderWidth: 3 }}
+              aria-hidden="true"
+            />
+          )}
         </div>
-        <div
-          className="avatar-dot active"
-          style={{ width: 18, height: 18 }}
-          title="Live in Metro"
-        />
+
+        <h2
+          id={titleId}
+          className="display"
+          style={{ fontSize: 24, lineHeight: 1.2, margin: 0, color: 'var(--text-primary)', overflowWrap: 'anywhere' }}
+        >
+          {name}
+        </h2>
+        <div style={{ fontSize: 14, color: 'var(--text-muted)', marginTop: 4 }}>
+          {handle}
+          {tier && <span> · {TIER_LABEL[tier]}</span>}
+        </div>
+
+        {/* Context chips — how you're connected right now, and trust */}
+        {(commuteRel.type !== 'none' || trustBadge) && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 8, marginTop: 14 }}>
+            {commuteRel.type !== 'none' && (
+              <span
+                title={commuteRel.description}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  minHeight: 32, padding: '6px 12px', borderRadius: 'var(--radius-full)',
+                  background: commuteRel.bgColor, border: `1px solid ${commuteRel.borderColor}`,
+                  color: 'var(--text-primary)', fontSize: 13, fontWeight: 700
+                }}
+              >
+                <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: '50%', background: commuteRel.dotColor }} />
+                {commuteRel.label}
+              </span>
+            )}
+            {trustBadge && (
+              <span
+                style={{
+                  display: 'inline-flex', alignItems: 'center',
+                  minHeight: 32, padding: '6px 12px', borderRadius: 'var(--radius-full)',
+                  background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)',
+                  color: trustTier === 'verified' || trustTier === 'trusted' ? 'var(--accent-purple-text)' : 'var(--text-secondary)',
+                  fontSize: 13, fontWeight: 700
+                }}
+              >
+                {trustBadge}
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
-      <h2
-        id={titleId}
-        className="display"
-        style={{ fontSize: 22, margin: 0, color: 'var(--text-primary)' }}
-      >
-        {name}
-      </h2>
-      <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 2 }}>
-        {traveler.username.startsWith('@') ? traveler.username : `@${traveler.username}`}
-      </div>
-
-      {/* Commute Relationship Banner */}
-      {commuteRel.type !== 'none' && (
-        <div style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: 6,
-          padding: '6px 14px',
-          borderRadius: 999,
-          background: commuteRel.bgColor,
-          border: `1px solid ${commuteRel.borderColor}`,
-          color: commuteRel.textColor,
-          fontSize: 12,
-          fontWeight: 700,
-          marginTop: 12,
-          maxWidth: '90%'
-        }}>
-          <span style={{ fontSize: 14 }}>{commuteRel.emoji}</span>
-          <span>{commuteRel.label}</span>
-          <span style={{ opacity: 0.8, fontWeight: 500, fontSize: 11 }}>• {commuteRel.description}</span>
-        </div>
-      )}
-
-      {/* Trust tier badge */}
-      {trustBadge && (
-        <div style={{ marginTop: 8 }}>
-          <span style={{
-            fontSize: 11,
-            padding: '3px 8px',
-            borderRadius: 999,
-            background: trustTier === 'verified' ? 'rgba(168,85,247,0.14)' : 'rgba(16,185,129,0.10)',
-            border: '1px solid var(--border-subtle)',
-            color: trustTier === 'verified' ? 'var(--accent-purple-text)' : 'var(--accent-emerald)',
-            fontWeight: 700
-          }}>
-            {trustBadge}
-          </span>
-        </div>
-      )}
-
-      {/* Bio / About */}
-      {traveler.bio && (
-        <p
-          style={{
-            fontSize: 14,
-            lineHeight: 1.5,
-            color: 'var(--text-secondary)',
-            margin: '14px auto 0',
-            maxWidth: 340
-          }}
-        >
-          {traveler.bio}
+      {vibeTagline && (
+        <p style={{ fontSize: 15, lineHeight: 1.45, color: 'var(--text-primary)', fontStyle: 'italic', textAlign: 'center', margin: '16px auto 0', maxWidth: 360 }}>
+          “{vibeTagline}”
         </p>
       )}
 
-      {/* Interest Tags */}
-      {traveler.interestTags && traveler.interestTags.length > 0 && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'center', marginTop: 16 }}>
-          {traveler.interestTags.map(tid => {
-            const meta = INTEREST_TAXONOMY.find(t => t.id === tid) || { emoji: '•', label: tid };
-            return (
-              <span key={tid} className="tag-pill" style={{ fontSize: 12, padding: '5px 10px' }}>
-                <span>{meta.emoji}</span> {meta.label}
-              </span>
-            );
-          })}
-        </div>
+      {traveler.bio && (
+        <section style={{ marginTop: 20 }} aria-label="About">
+          <h3 style={sectionLabel}>About</h3>
+          <p style={{ fontSize: 15, lineHeight: 1.5, color: 'var(--text-secondary)', margin: 0, overflowWrap: 'anywhere' }}>
+            {traveler.bio}
+          </p>
+        </section>
       )}
 
-      {actualJoined !== undefined && (
-        <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 16 }}>
-          Joined {joinedLabel(actualJoined)}
+      {orderedTags.length > 0 && (
+        <section style={{ marginTop: 20 }} aria-label="Interests">
+          <h3 style={{ ...sectionLabel, display: 'flex', alignItems: 'baseline', gap: 8 }}>
+            Interests
+            {shared.size > 0 && (
+              <span style={{ textTransform: 'none', letterSpacing: 0, color: 'var(--accent-purple-text)', fontWeight: 700 }}>
+                {shared.size} in common
+              </span>
+            )}
+          </h3>
+          <ul style={{ display: 'flex', flexWrap: 'wrap', gap: 8, listStyle: 'none', margin: 0, padding: 0 }}>
+            {orderedTags.map(tid => {
+              const meta = tagMeta(tid);
+              const isShared = shared.has(tid);
+              return (
+                <li
+                  key={tid}
+                  className={`tag-pill${isShared ? ' active' : ''}`}
+                  style={{ fontSize: 13, padding: '6px 12px', minHeight: 32 }}
+                >
+                  {meta.emoji && <span aria-hidden="true">{meta.emoji}</span>}
+                  {meta.label}
+                  {isShared && <span className="sr-only" style={srOnly}> (you share this)</span>}
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
+
+      {languages.length > 0 && (
+        <section style={{ marginTop: 20 }} aria-label="Languages">
+          <h3 style={sectionLabel}>Speaks</h3>
+          <p style={{ fontSize: 15, color: 'var(--text-secondary)', margin: 0 }}>{languages.join(', ')}</p>
+        </section>
+      )}
+
+      {actualJoined !== undefined && actualJoined > 0 && (
+        <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 20 }}>
+          On CoRide since {joinedLabel(actualJoined)}
         </div>
       )}
     </div>
   );
 }
+
+/** Visually hidden, still announced. Inline so it doesn't depend on a global class. */
+const srOnly: React.CSSProperties = {
+  position: 'absolute', width: 1, height: 1, padding: 0, margin: -1,
+  overflow: 'hidden', clip: 'rect(0 0 0 0)', whiteSpace: 'nowrap', border: 0
+};

@@ -52,6 +52,15 @@ export class ConnectionManager {
     this.hydrateFromDisk();
   }
 
+  /** Re-read state after persistence.init() swapped in the real store (DB mode). */
+  public rehydrate(): void {
+    this.requests.clear();
+    this.friendships.clear();
+    this.blocks.clear();
+    this.reports = [];
+    this.hydrateFromDisk();
+  }
+
   private hydrateFromDisk(): void {
     try {
       const store = this.persistence.load();

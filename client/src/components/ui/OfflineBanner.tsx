@@ -2,91 +2,54 @@ import React from 'react';
 import { WifiOff, RefreshCw } from 'lucide-react';
 import { triggerHaptic } from '../../utils/nativeBridge';
 
+/**
+ * OfflineBanner — shown while the live connection is down (e.g. in a tunnel).
+ * Keep it honest: say what still works. App.tsx renders the app-wide one; don't
+ * stack another on the same screen.
+ *
+ *   <OfflineBanner onRetry={reconnect} isReconnecting={status === 'connecting'} />
+ */
 interface OfflineBannerProps {
+  /** When the app last had live data. Omit if unknown — never fake it. */
   lastSyncTime?: Date;
   onRetry?: () => void;
   isReconnecting?: boolean;
+  /** Override the default explanatory line. */
+  detail?: string;
 }
 
 export const OfflineBanner: React.FC<OfflineBannerProps> = ({
   lastSyncTime,
   onRetry,
-  isReconnecting = false
+  isReconnecting = false,
+  detail,
 }) => {
-  const formattedTime = lastSyncTime
-    ? lastSyncTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    : 'recently';
+  const since = lastSyncTime
+    ? ` Last updated ${lastSyncTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.`
+    : '';
 
   return (
-    <div
-      role="status"
-      aria-live="polite"
-      className="offline-banner"
-      style={{
-        margin: '8px 0 12px',
-        background: 'rgba(22, 25, 31, 0.95)',
-        border: '1px solid var(--amber-500)',
-        borderRadius: 'var(--radius-lg)',
-        padding: '10px 14px',
-        display: 'flex',
-        alignItems: 'center',
-        gap: 12
-      }}
-    >
-      <div
-        style={{
-          width: 32,
-          height: 32,
-          borderRadius: '50%',
-          background: 'rgba(217, 119, 6, 0.15)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          color: 'var(--amber-500)',
-          flexShrink: 0
-        }}
-      >
-        <WifiOff size={16} />
-      </div>
-
+    <div role="status" aria-live="polite" className="offline-banner">
+      <WifiOff size={18} aria-hidden="true" style={{ color: 'var(--warning-text)', flexShrink: 0 }} />
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>
-          Subway Tunnel Mode
+        <div className="type-label" style={{ fontWeight: 700, color: 'var(--text-primary)' }}>
+          {isReconnecting ? 'Reconnecting…' : "You're offline"}
         </div>
-        <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>
-          Showing cached co-riders ({formattedTime}) • Messages queue locally until next station
+        <div className="type-caption" style={{ color: 'var(--text-secondary)', marginTop: 2 }}>
+          {detail ?? `Live updates are paused. Direct messages you send are saved and delivered when you reconnect.${since}`}
         </div>
       </div>
-
       {onRetry && (
         <button
-          onClick={() => {
-            triggerHaptic('light');
-            onRetry();
-          }}
+          type="button"
+          onClick={() => { void triggerHaptic('light'); onRetry(); }}
           disabled={isReconnecting}
-          className="press"
-          style={{
-            background: 'var(--bg-canvas)',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: 'var(--radius-pill)',
-            padding: '6px 10px',
-            color: 'var(--text-primary)',
-            fontSize: 11,
-            fontWeight: 700,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 4,
-            cursor: 'pointer'
-          }}
+          className="link-btn"
+          aria-label="Retry connection"
+          style={{ flexShrink: 0 }}
         >
-          <RefreshCw
-            size={12}
-            style={{
-              animation: isReconnecting ? 'spin 1s linear infinite' : 'none'
-            }}
-          />
-          {isReconnecting ? 'Syncing…' : 'Sync'}
+          <RefreshCw size={16} aria-hidden="true" style={{ animation: isReconnecting ? 'spin 1s linear infinite' : 'none' }} />
+          Retry
         </button>
       )}
     </div>

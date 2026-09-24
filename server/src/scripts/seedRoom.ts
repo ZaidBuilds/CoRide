@@ -20,6 +20,7 @@ dotenv.config({ path: require('path').join(__dirname, '..', '..', '.env') });
 dotenv.config();
 import { AVATAR_PALETTE } from '../data/metroData';
 import { Persistence } from '../services/persistence';
+import { pool } from '../db/pool';
 import { RedisPresence, buildRoomId } from '../services/redisPresence';
 
 const ROOMS = [
@@ -88,6 +89,9 @@ function buildProfile(seed: (typeof SEEDS)[number], i: number) {
 async function main() {
   const clear = process.argv.includes('--clear');
   const persistence = Persistence.getInstance();
+  // Postgres mode loads state asynchronously; seeding before that would be
+  // refused (and could otherwise overwrite real data).
+  await persistence.init();
 
   // The service's own client sets enableOfflineQueue:false so a down Redis fails
   // in ms instead of ~96s. That suits the long-lived server, which connects during
@@ -118,7 +122,9 @@ async function main() {
     }
   }
 
+  await persistence.flushNow();
   await presence.disconnect();
+  if (pool) await pool.end();
 }
 
 main().catch(err => {

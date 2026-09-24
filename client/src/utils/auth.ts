@@ -22,3 +22,8 @@ export function getToken(): string | null {
 export function authHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
+
+/** Headers for an authenticated JSON request. */
+export function jsonAuthHeaders(): Record<string, string> {
+  return { 'Content-Type': 'application/json', ...authHeaders() };
+}

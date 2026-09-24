@@ -26,9 +26,13 @@ export function useSocket(token: string | null): {
   // so a dead server can't spin the CPU). token can arrive later (profile
   // loads after mount) — the signed token is attached on every (re)connect
   // and verified server-side.
+  // autoConnect only with a token: a socket that handshakes anonymously first
+  // stays anonymous (connect() is a no-op once connected), and the server
+  // rejects identity-bearing events from it.
   const [socket] = useState<Socket>(() =>
     io(API, {
-      auth: { token: token ?? undefined },
+      auth: token ? { token } : {},
+      autoConnect: !!token,
       reconnection: true,
       reconnectionDelay: 500,
       reconnectionDelayMax: 4000,
@@ -72,17 +76,27 @@ export function useSocket(token: string | null): {
     };
   }, [socket]);
 
-  // Re-apply identity when it resolves or changes; (.auth is re-read by
-  // socket.io on every connect attempt, so a stale auth can't linger.)
+  // Re-apply identity when it resolves or changes. .auth is only sent during
+  // the handshake, so a live socket must reconnect to present a new token.
   useEffect(() => {
+    const prev = (socket.auth as { token?: string } | undefined)?.token;
     socket.auth = token ? { token } : {};
-    if (token) {
-      authBlockedRef.current = false;
+    if (!token) {
+      // Signed out / account deleted: don't keep an identity-less socket open.
+      if (socket.connected || socket.active) socket.disconnect();
+      return;
+    }
+    authBlockedRef.current = false;
+    if (socket.connected && prev !== token) {
+      socket.disconnect();
+      socket.connect();
+    } else if (!socket.connected) {
       socket.connect();
     }
   }, [socket, token]);
 
   const attemptReconnect = useCallback(() => {
+    if (!(socket.auth as { token?: string } | undefined)?.token) return;
     authBlockedRef.current = false;
     setStatus('connecting');
     socket.connect();

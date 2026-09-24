@@ -19,65 +19,61 @@ export interface CommuteBadgeInfo {
   description: string;
 }
 
+/**
+ * Tinted-chip colours derived from one semantic colour, so a badge reads in
+ * both light and dark themes: the fill/border are translucent washes of the
+ * colour and the label mixes it toward --text-primary for contrast.
+ */
+function tint(color: string) {
+  return {
+    bgColor: `color-mix(in srgb, ${color} 14%, transparent)`,
+    borderColor: `color-mix(in srgb, ${color} 34%, transparent)`,
+    textColor: `color-mix(in srgb, ${color} 55%, var(--text-primary))`,
+    dotColor: color
+  };
+}
+
 export const COMMUTE_BADGES: Record<CommuteRelationshipType, CommuteBadgeInfo> = {
   same_train: {
     type: 'same_train',
-    label: 'Same Train',
+    label: 'Same train',
     emoji: '🚇',
-    bgColor: 'rgba(56, 189, 248, 0.14)',
-    textColor: 'var(--presence-sameTrain, #38bdf8)',
-    borderColor: 'rgba(56, 189, 248, 0.32)',
-    dotColor: 'var(--presence-sameTrain, #38bdf8)',
-    description: 'Onboard the same train coach service right now'
+    ...tint('var(--presence-sameTrain, #38bdf8)'),
+    description: 'On the same train as you right now'
   },
   same_direction: {
     type: 'same_direction',
-    label: 'Same Line & Dir',
+    label: 'Same line & direction',
     emoji: '🔀',
-    bgColor: 'rgba(16, 185, 129, 0.14)',
-    textColor: 'var(--accent-emerald, #10b981)',
-    borderColor: 'rgba(16, 185, 129, 0.32)',
-    dotColor: '#10b981',
-    description: 'Traveling on this line in the same direction'
+    ...tint('var(--accent-emerald, #10b981)'),
+    description: 'Riding this line in the same direction'
   },
   same_station: {
     type: 'same_station',
-    label: 'At Station',
+    label: 'Same station',
     emoji: '🏛️',
-    bgColor: 'rgba(249, 115, 22, 0.14)',
-    textColor: '#fb923c',
-    borderColor: 'rgba(249, 115, 22, 0.32)',
-    dotColor: '#fb923c',
-    description: 'Waiting or transferring at the same station hub'
+    ...tint('var(--line-airport, #f97316)'),
+    description: 'At the same station as you'
   },
   nearby: {
     type: 'nearby',
     label: 'Nearby',
     emoji: '🟡',
-    bgColor: 'rgba(234, 179, 8, 0.14)',
-    textColor: 'var(--accent-amber, #eab308)',
-    borderColor: 'rgba(234, 179, 8, 0.32)',
-    dotColor: 'var(--presence-nearby, #eab308)',
-    description: 'In close proximity within the metro network'
+    ...tint('var(--presence-nearby, #d97706)'),
+    description: 'Close by on the metro network'
   },
   metro_friend: {
     type: 'metro_friend',
-    label: 'Metro Friend',
+    label: 'Friend',
     emoji: '👥',
-    bgColor: 'rgba(168, 85, 247, 0.14)',
-    textColor: 'var(--accent-purple-text, #a855f7)',
-    borderColor: 'rgba(168, 85, 247, 0.32)',
-    dotColor: '#a855f7',
-    description: 'Connected commuter friend in your network'
+    ...tint('var(--accent-purple, #7b5dff)'),
+    description: 'Someone you are connected with'
   },
   none: {
     type: 'none',
     label: 'Commuter',
     emoji: '🚆',
-    bgColor: 'rgba(255, 255, 255, 0.06)',
-    textColor: 'var(--text-secondary, #94a3b8)',
-    borderColor: 'rgba(255, 255, 255, 0.10)',
-    dotColor: '#94a3b8',
+    ...tint('var(--text-muted, #6b7382)'),
     description: 'Fellow Delhi Metro commuter'
   }
 };

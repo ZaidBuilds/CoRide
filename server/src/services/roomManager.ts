@@ -45,6 +45,21 @@ export class RoomManager {
     setInterval(() => this.cleanup(), 60_000);
   }
 
+  /** Re-read profiles after persistence.init() swapped in the real store (DB mode). */
+  public rehydrate(): void {
+    this.hydrateProfiles();
+  }
+
+  /** Account deletion: forget the in-memory profile copy. */
+  public forgetProfile(userId: string): void {
+    this.userProfiles.delete(userId);
+  }
+
+  /** Keep the in-memory profile copy in sync after an edit. */
+  public setProfile(profile: UserProfile): void {
+    this.userProfiles.set(profile.id, profile);
+  }
+
   private hydrateProfiles(): void {
     try {
       const store = this.persistence.load();

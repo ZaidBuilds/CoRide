@@ -1,16 +1,21 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { DELHI_METRO_LINES } from '../../data/metroData';
 import { triggerHaptic } from '../../utils/nativeBridge';
-import { ArrowLeftRight, CheckCircle2, ChevronRight, MapPin, Sparkles, X } from 'lucide-react';
+import { ArrowLeftRight, CheckCircle2, ChevronRight, MapPin, Search, Users, X } from 'lucide-react';
 import type { MetroLine } from '../../types';
+import { textOnLineColor } from './lineSegments';
 
 interface CheckInScreenProps {
+  /** direction is passed as "Towards <terminal>", the server's format. */
   onCheckIn: (lineId: string, stationId: string, direction: string) => Promise<void> | void;
   onCancel?: () => void;
   initialLineId?: string;
   initialStationId?: string;
+  /** Context direction, e.g. "Towards Dwarka Sector 21". */
   initialDirection?: string;
 }
+
+const baseName = (name: string) => name.split(' (')[0].trim().toLowerCase();
 
 export const CheckInScreen: React.FC<CheckInScreenProps> = ({
   onCheckIn,
@@ -27,66 +32,100 @@ export const CheckInScreen: React.FC<CheckInScreenProps> = ({
       ? initialStationId
       : selectedLine.stations[0]?.id || 'rajiv_chowk'
   );
-
   const selectedStation = selectedLine.stations.find(s => s.id === selectedStationId) || selectedLine.stations[0];
 
-  // Direction: terminalA -> terminalB or terminalB -> terminalA
-  const [directionIndex, setDirectionIndex] = useState<0 | 1>(
-    initialDirection === selectedLine.terminalB ? 1 : 0
+  // 0 = towards terminal B, 1 = towards terminal A. The server sends
+  // "Towards <terminal>", so match on the terminal name.
+  const [directionIndex, setDirectionIndex] = useState<0 | 1>(() =>
+    initialDirection && initialDirection.toLowerCase().includes(selectedLine.terminalA.toLowerCase()) ? 1 : 0
   );
-
   const activeDestination = directionIndex === 0 ? selectedLine.terminalB : selectedLine.terminalA;
   const activeOrigin = directionIndex === 0 ? selectedLine.terminalA : selectedLine.terminalB;
 
-  // Search filter for stations
-  const [isStationPickerOpen, setIsStationPickerOpen] = useState<boolean>(false);
-  const [stationSearchQuery, setStationSearchQuery] = useState<string>('');
+  const [isStationPickerOpen, setIsStationPickerOpen] = useState(false);
+  const [stationSearchQuery, setStationSearchQuery] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isConfirmed, setIsConfirmed] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // Status & The One Orchestrated 600ms Moment
-  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
-  const [isConfirmed, setIsConfirmed] = useState<boolean>(false);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const stationButtonRef = useRef<HTMLButtonElement>(null);
+  const onCancelRef = useRef(onCancel);
+  useEffect(() => { onCancelRef.current = onCancel; });
 
-  // Direction toggle with physical 48dp tactile feel
+  // Escape closes the picker first, then the screen.
+  const pickerOpenRef = useRef(isStationPickerOpen);
+  useEffect(() => { pickerOpenRef.current = isStationPickerOpen; });
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (pickerOpenRef.current) setIsStationPickerOpen(false);
+      else onCancelRef.current?.();
+    };
+    window.addEventListener('keydown', onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (isStationPickerOpen) searchRef.current?.focus();
+  }, [isStationPickerOpen]);
+
   const handleToggleDirection = () => {
     triggerHaptic('medium');
     setDirectionIndex(prev => (prev === 0 ? 1 : 0));
   };
 
-  // Line selection change
   const handleLineSelect = (line: MetroLine) => {
     triggerHaptic('light');
     setSelectedLineId(line.id);
-    setSelectedStationId(line.stations[0]?.id || '');
+    // Keep the station when it's an interchange on the new line.
+    const same = line.stations.find(s => baseName(s.name) === baseName(selectedStation.name));
+    setSelectedStationId(same?.id || line.stations[0]?.id || '');
     setDirectionIndex(0);
+    setError(null);
   };
 
-  // Check in confirmation — Strictly non-optimistic, server-backed, with 600ms orchestrated celebration
+  const closePicker = () => {
+    setIsStationPickerOpen(false);
+    setStationSearchQuery('');
+    stationButtonRef.current?.focus();
+  };
+
+  // Non-optimistic: the confirmed state only shows after onCheckIn resolves.
   const handleConfirmCheckIn = async () => {
     if (isSubmitting || isConfirmed) return;
     setIsSubmitting(true);
+    setError(null);
     triggerHaptic('medium');
-
     try {
-      await onCheckIn(selectedLine.id, selectedStation.id, activeDestination);
-      // Trigger the single orchestrated 600ms moment
+      await onCheckIn(selectedLine.id, selectedStation.id, `Towards ${activeDestination}`);
       setIsConfirmed(true);
-      triggerHaptic('heavy');
-      setTimeout(() => {
-        triggerHaptic('light');
-      }, 300);
-    } catch (err) {
-      console.error('Check-in failed:', err);
+      triggerHaptic('success');
+    } catch {
+      setError('Couldn’t check you in. Check your connection and try again.');
+      triggerHaptic('error');
+    } finally {
       setIsSubmitting(false);
     }
   };
 
-  const filteredStations = selectedLine.stations.filter(s =>
-    s.name.toLowerCase().includes(stationSearchQuery.toLowerCase()) ||
-    (s.hindiName && s.hindiName.includes(stationSearchQuery))
-  );
+  const q = stationSearchQuery.trim().toLowerCase();
+  const filteredStations = q
+    ? selectedLine.stations.filter(s => s.name.toLowerCase().includes(q) || (s.hindiName && s.hindiName.includes(stationSearchQuery.trim())))
+    : selectedLine.stations;
+
+  const onLine = textOnLineColor(selectedLine.color);
 
   return (
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="checkin-title"
       style={{
         position: 'fixed',
         inset: 0,
@@ -98,119 +137,66 @@ export const CheckInScreen: React.FC<CheckInScreenProps> = ({
         overflow: 'hidden'
       }}
     >
-      {/* ── ZONE 1 & 2: Top Transit Chromatic Band & Header ── */}
-      <div
-        style={{
-          width: '100%',
-          height: 6,
-          backgroundColor: selectedLine.color,
-          boxShadow: `0 0 16px ${selectedLine.color}`,
-          transition: 'background-color var(--motion-fast) var(--ease-standard)'
-        }}
-      />
-
       <header
         style={{
-          paddingTop: 'calc(12px + env(safe-area-inset-top))',
-          paddingBottom: 12,
-          paddingLeft: 'var(--space-3)',
-          paddingRight: 'var(--space-3)',
+          paddingTop: 'calc(8px + var(--safe-top))',
+          paddingBottom: 8,
+          paddingLeft: 16,
+          paddingRight: 8,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
+          gap: 8,
+          borderTop: `4px solid ${selectedLine.color}`,
           borderBottom: '1px solid var(--border-subtle)',
           backgroundColor: 'var(--bg-surface)'
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div
-            style={{
-              width: 14,
-              height: 14,
-              borderRadius: '50%',
-              backgroundColor: selectedLine.color,
-              boxShadow: `0 0 8px ${selectedLine.color}`
-            }}
-          />
-          <span className="type-label" style={{ color: 'var(--text-primary)', fontWeight: 700 }}>
-            {selectedLine.name}
-          </span>
-        </div>
-
+        <h1 id="checkin-title" style={{ fontSize: 20, lineHeight: '28px', fontWeight: 700, margin: 0 }}>
+          Check in
+        </h1>
         {onCancel && !isConfirmed && (
-          <button
-            onClick={onCancel}
-            className="touch-target-48 press"
-            style={{
-              background: 'transparent',
-              border: 'none',
-              color: 'var(--text-muted)',
-              cursor: 'pointer'
-            }}
-            aria-label="Close check-in"
-          >
+          <button type="button" onClick={onCancel} className="icon-btn" style={{ background: 'transparent', border: 'none' }} aria-label="Close check-in">
             <X size={22} />
           </button>
         )}
       </header>
 
-      {/* ── ZONE 3: Scrolling Content ── */}
-      <div
-        style={{
-          flex: 1,
-          overflowY: 'auto',
-          padding: 'var(--space-4) var(--space-3)',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 'var(--space-4)'
-        }}
-      >
-        {/* Line Selector Pills (Horizontal Scroll, 48dp touch targets) */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 20 }}>
+        {/* Line */}
         <div>
-          <div className="type-caption" style={{ color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-            Select Metro Line
+          <div id="checkin-line-label" style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 8 }}>
+            Line
           </div>
-          <div
-            style={{
-              display: 'flex',
-              gap: 8,
-              overflowX: 'auto',
-              paddingBottom: 4,
-              scrollbarWidth: 'none'
-            }}
-          >
+          <div role="radiogroup" aria-labelledby="checkin-line-label" style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4, scrollbarWidth: 'none' }}>
             {DELHI_METRO_LINES.map(line => {
               const isSelected = line.id === selectedLineId;
               return (
                 <button
                   key={line.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={isSelected}
                   onClick={() => handleLineSelect(line)}
-                  className="touch-target-48 press"
+                  className="press"
                   style={{
-                    padding: '8px 16px',
+                    minHeight: 48,
+                    padding: '0 16px',
                     borderRadius: 'var(--radius-pill)',
                     backgroundColor: isSelected ? line.color : 'var(--bg-surface)',
-                    color: isSelected ? '#FFFFFF' : 'var(--text-secondary)',
-                    border: isSelected ? 'none' : '1px solid var(--border-subtle)',
+                    color: isSelected ? textOnLineColor(line.color) : 'var(--text-secondary)',
+                    border: `1px solid ${isSelected ? line.color : 'var(--border-subtle)'}`,
                     cursor: 'pointer',
                     fontWeight: 700,
-                    fontSize: 13,
-                    lineHeight: '20px',
+                    fontSize: 14,
                     whiteSpace: 'nowrap',
-                    boxShadow: isSelected ? `0 4px 12px ${line.color}40` : 'none',
-                    transition: 'all var(--motion-fast) var(--ease-standard)'
+                    flexShrink: 0,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 8
                   }}
                 >
-                  <span
-                    style={{
-                      display: 'inline-block',
-                      width: 8,
-                      height: 8,
-                      borderRadius: '50%',
-                      backgroundColor: isSelected ? '#FFFFFF' : line.color,
-                      marginRight: 6
-                    }}
-                  />
+                  {!isSelected && <span aria-hidden="true" style={{ width: 10, height: 10, borderRadius: '50%', backgroundColor: line.color }} />}
                   {line.name.replace(' Line', '')}
                 </button>
               );
@@ -218,169 +204,117 @@ export const CheckInScreen: React.FC<CheckInScreenProps> = ({
           </div>
         </div>
 
-        {/* ══ THE BOLD ELEMENT: 34pt Display Station Title ══ */}
-        <div
-          onClick={() => setIsStationPickerOpen(true)}
-          role="button"
-          tabIndex={0}
-          className="press"
-          style={{
-            backgroundColor: 'var(--bg-surface)',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: 'var(--radius-card)',
-            padding: 'var(--space-4)',
-            cursor: 'pointer',
-            position: 'relative',
-            overflow: 'hidden',
-            boxShadow: 'var(--shadow-md)'
-          }}
-        >
-          {/* Subtle line ambient tint behind the hero card */}
-          <div
-            style={{
-              position: 'absolute',
-              top: 0,
-              right: 0,
-              width: 140,
-              height: 140,
-              background: `radial-gradient(circle at top right, ${selectedLine.color}22 0%, transparent 70%)`,
-              pointerEvents: 'none'
-            }}
-          />
-
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-            <div className="type-caption" style={{ color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
-              <MapPin size={14} color={selectedLine.color} />
-              BOARDING STATION (TAP TO CHANGE)
-            </div>
-            <ChevronRight size={18} color="var(--text-muted)" />
-          </div>
-
-          {/* 34pt display station name (The ONLY 34pt display in the app) */}
-          <div
-            className="type-display"
-            style={{
-              color: 'var(--text-primary)',
-              marginBottom: 4,
-              wordBreak: 'break-word'
-            }}
-          >
-            {selectedStation.name}
-          </div>
-
-          {/* Bilingual Hindi station name for authenticity & DMRC fidelity */}
-          {selectedStation.hindiName && (
-            <div
-              className="type-body"
-              style={{
-                color: 'var(--text-secondary)',
-                fontWeight: 500
-              }}
-            >
-              {selectedStation.hindiName}
-            </div>
-          )}
-
-          {selectedStation.isInterchange && (
-            <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span
-                style={{
-                  fontSize: 11,
-                  lineHeight: '16px',
-                  fontWeight: 700,
-                  padding: '2px 8px',
-                  borderRadius: 'var(--radius-chip)',
-                  backgroundColor: 'rgba(255, 255, 255, 0.08)',
-                  color: 'var(--text-secondary)'
-                }}
-              >
-                🔄 Interchange Station
-              </span>
-            </div>
-          )}
-        </div>
-
-        {/* ══ Physical Direction Switch (48dp tactile feel) ══ */}
-        <div
-          style={{
-            backgroundColor: 'var(--bg-surface)',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: 'var(--radius-card)',
-            padding: 'var(--space-3) var(--space-4)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 12
-          }}
-        >
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div className="type-caption" style={{ color: 'var(--text-muted)', marginBottom: 2 }}>
-              TRAIN DIRECTION
-            </div>
-            <div className="type-heading" style={{ color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              Towards {activeDestination}
-            </div>
-            <div className="type-caption" style={{ color: 'var(--text-secondary)' }}>
-              Origin: {activeOrigin}
-            </div>
-          </div>
-
+        {/* Station */}
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 8 }}>Station</div>
           <button
-            onClick={handleToggleDirection}
-            className="touch-target-48 press"
+            ref={stationButtonRef}
+            type="button"
+            onClick={() => setIsStationPickerOpen(true)}
+            aria-haspopup="dialog"
+            aria-label={`Station: ${selectedStation.name}. Change station`}
+            className="press"
             style={{
-              borderRadius: 'var(--radius-chip)',
-              backgroundColor: 'var(--ink-700)',
+              width: '100%',
+              textAlign: 'left',
+              backgroundColor: 'var(--bg-surface)',
               border: '1px solid var(--border-subtle)',
-              color: 'var(--text-primary)',
+              borderRadius: 'var(--radius-lg)',
+              padding: 16,
               cursor: 'pointer',
-              boxShadow: 'var(--shadow-sm)'
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+              color: 'var(--text-primary)'
             }}
-            aria-label="Switch train direction"
-            title="Switch train direction"
           >
-            <ArrowLeftRight size={20} color={selectedLine.color} />
+            <MapPin size={22} aria-hidden="true" color={selectedLine.color} style={{ flexShrink: 0 }} />
+            <span style={{ flex: 1, minWidth: 0 }}>
+              <span className="type-heading" style={{ display: 'block', wordBreak: 'break-word' }}>{selectedStation.name}</span>
+              {selectedStation.hindiName && (
+                <span lang="hi" style={{ display: 'block', fontSize: 14, color: 'var(--text-secondary)' }}>{selectedStation.hindiName}</span>
+              )}
+              {selectedStation.isInterchange && (
+                <span style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>Interchange station</span>
+              )}
+            </span>
+            <ChevronRight size={20} aria-hidden="true" color="var(--text-muted)" />
           </button>
         </div>
 
-        {/* Social Presence Notice (Low-pressure social discovery) */}
+        {/* Direction */}
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 8 }}>Direction</div>
+          <div
+            style={{
+              backgroundColor: 'var(--bg-surface)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: 'var(--radius-lg)',
+              padding: '12px 12px 12px 16px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12
+            }}
+          >
+            <div style={{ flex: 1, minWidth: 0 }} aria-live="polite">
+              <div style={{ fontSize: 17, lineHeight: '24px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                Towards {activeDestination}
+              </div>
+              <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>From {activeOrigin}</div>
+            </div>
+            <button
+              type="button"
+              onClick={handleToggleDirection}
+              className="icon-btn"
+              aria-label={`Switch direction to towards ${activeOrigin}`}
+            >
+              <ArrowLeftRight size={20} color={selectedLine.color} />
+            </button>
+          </div>
+        </div>
+
+        {/* What checking in shares — matches the privacy policy */}
         <div
           style={{
-            padding: 'var(--space-3) var(--space-4)',
-            borderRadius: 'var(--radius-card)',
-            backgroundColor: 'var(--ink-850)',
-            border: '1px solid var(--border-subtle)',
+            padding: 16,
+            borderRadius: 'var(--radius-lg)',
+            backgroundColor: 'var(--bg-card)',
+            border: '1px solid var(--border-card)',
             display: 'flex',
             alignItems: 'flex-start',
             gap: 12
           }}
         >
-          <Sparkles size={18} color="var(--accent)" style={{ flexShrink: 0, marginTop: 2 }} />
-          <div className="type-caption" style={{ color: 'var(--text-secondary)' }}>
-            Checking in makes your transit presence visible only to fellow commuters boarded in your carriage window. Private, safe, and expires on trip exit.
-          </div>
+          <Users size={20} aria-hidden="true" color="var(--text-secondary)" style={{ flexShrink: 0, marginTop: 1 }} />
+          <p style={{ fontSize: 13, lineHeight: '18px', color: 'var(--text-secondary)', margin: 0 }}>
+            You’ll join the live room for this station and direction. Riders there can see your display name, avatar, bio and interests. You leave the room about a minute after you close the app.
+          </p>
         </div>
       </div>
 
-      {/* ── ZONE 4: Action / The One Orchestrated 600ms Confirmation Moment ── */}
       <div
         style={{
-          padding: 'var(--space-3) var(--space-3) calc(var(--space-3) + env(safe-area-inset-bottom))',
+          padding: '12px 16px calc(12px + var(--safe-bottom))',
           borderTop: '1px solid var(--border-subtle)',
           backgroundColor: 'var(--bg-surface)'
         }}
       >
+        {error && (
+          <div role="alert" style={{ fontSize: 13, lineHeight: '18px', color: 'var(--accent-rose-text)', marginBottom: 8 }}>{error}</div>
+        )}
         <button
+          type="button"
           disabled={isSubmitting || isConfirmed}
           onClick={handleConfirmCheckIn}
+          aria-busy={isSubmitting}
           className="press"
           style={{
             width: '100%',
-            minHeight: 48,
+            minHeight: 52,
             padding: '12px 24px',
             borderRadius: 'var(--radius-pill)',
             backgroundColor: isConfirmed ? 'var(--status-success)' : selectedLine.color,
-            color: '#FFFFFF',
+            color: isConfirmed ? '#FFFFFF' : onLine,
             border: 'none',
             fontSize: 16,
             lineHeight: '24px',
@@ -390,57 +324,50 @@ export const CheckInScreen: React.FC<CheckInScreenProps> = ({
             justifyContent: 'center',
             gap: 10,
             cursor: isSubmitting || isConfirmed ? 'default' : 'pointer',
-            boxShadow: `0 6px 20px ${isConfirmed ? 'rgba(5,150,105,0.45)' : selectedLine.color + '45'}`,
-            transition: 'all 600ms cubic-bezier(0, 0, 0, 1)' // 600ms orchestrated decelerate moment
+            transition: 'background-color var(--motion-slow) var(--ease-decelerate)'
           }}
         >
           {isConfirmed ? (
             <>
-              <CheckCircle2 size={22} />
-              <span>Checked In • Active on {selectedLine.name}</span>
+              <CheckCircle2 size={22} aria-hidden="true" />
+              <span role="status">Checked in at {selectedStation.name.split(' (')[0]}</span>
             </>
           ) : isSubmitting ? (
             <>
               <span
+                aria-hidden="true"
                 style={{
                   display: 'inline-block',
                   width: 18,
                   height: 18,
-                  border: '2px solid #FFFFFF',
+                  border: `2px solid ${onLine}`,
                   borderTopColor: 'transparent',
                   borderRadius: '50%',
                   animation: 'spin 0.8s linear infinite'
                 }}
               />
-              <span>Connecting to Carriage...</span>
+              <span>Checking in…</span>
             </>
           ) : (
-            <>
-              <span>Check In at {selectedStation.name.split(' (')[0]}</span>
-            </>
+            <span>Check in at {selectedStation.name.split(' (')[0]}</span>
           )}
         </button>
       </div>
 
-      {/* ── Modal Station Picker ── */}
+      {/* Station picker */}
       {isStationPickerOpen && (
         <div
-          style={{
-            position: 'absolute',
-            inset: 0,
-            zIndex: 150,
-            backgroundColor: 'var(--bg-canvas)',
-            display: 'flex',
-            flexDirection: 'column'
-          }}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="station-picker-title"
+          style={{ position: 'absolute', inset: 0, zIndex: 150, backgroundColor: 'var(--bg-canvas)', display: 'flex', flexDirection: 'column' }}
         >
-          {/* Header */}
           <div
             style={{
-              paddingTop: 'calc(12px + env(safe-area-inset-top))',
-              paddingBottom: 12,
-              paddingLeft: 'var(--space-3)',
-              paddingRight: 'var(--space-3)',
+              paddingTop: 'calc(8px + var(--safe-top))',
+              paddingBottom: 8,
+              paddingLeft: 16,
+              paddingRight: 8,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
@@ -448,79 +375,84 @@ export const CheckInScreen: React.FC<CheckInScreenProps> = ({
               backgroundColor: 'var(--bg-surface)'
             }}
           >
-            <div className="type-heading" style={{ color: 'var(--text-primary)' }}>
-              Select Station
-            </div>
-            <button
-              onClick={() => setIsStationPickerOpen(false)}
-              className="touch-target-48 press"
-              style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
-              aria-label="Close station picker"
-            >
+            <h2 id="station-picker-title" style={{ fontSize: 20, lineHeight: '28px', fontWeight: 700, margin: 0 }}>
+              {selectedLine.name} stations
+            </h2>
+            <button type="button" onClick={closePicker} className="icon-btn" style={{ background: 'transparent', border: 'none' }} aria-label="Close station list">
               <X size={22} />
             </button>
           </div>
 
-          {/* Search Bar */}
-          <div style={{ padding: 'var(--space-3)', borderBottom: '1px solid var(--border-subtle)' }}>
+          <div style={{ padding: 16, borderBottom: '1px solid var(--border-subtle)', position: 'relative' }}>
+            <Search size={18} aria-hidden="true" color="var(--text-muted)" style={{ position: 'absolute', left: 30, top: '50%', transform: 'translateY(-50%)' }} />
             <input
-              type="text"
-              placeholder="Search station or स्टेशन..."
+              ref={searchRef}
+              type="search"
+              aria-label="Search stations"
+              placeholder="Search station or स्टेशन"
               value={stationSearchQuery}
               onChange={e => setStationSearchQuery(e.target.value)}
               style={{
                 width: '100%',
                 minHeight: 48,
-                padding: '0 16px',
-                borderRadius: 'var(--radius-card)',
-                backgroundColor: 'var(--ink-800)',
+                padding: '0 16px 0 44px',
+                borderRadius: 'var(--radius-pill)',
+                backgroundColor: 'var(--bg-input)',
                 border: '1px solid var(--border-subtle)',
                 color: 'var(--text-primary)',
-                outline: 'none',
                 fontSize: 16
               }}
             />
           </div>
 
-          {/* Station List */}
-          <div style={{ flex: 1, overflowY: 'auto', padding: 'var(--space-2)' }}>
+          <ul style={{ flex: 1, overflowY: 'auto', listStyle: 'none', margin: 0, padding: '8px 8px calc(8px + var(--safe-bottom))' }}>
+            {filteredStations.length === 0 && (
+              <li style={{ padding: 24, textAlign: 'center', fontSize: 14, color: 'var(--text-muted)' }}>
+                No {selectedLine.name} station matches “{stationSearchQuery.trim()}”. Try another line?
+              </li>
+            )}
             {filteredStations.map(st => {
               const isSelected = st.id === selectedStationId;
               return (
-                <div
-                  key={st.id}
-                  onClick={() => {
-                    triggerHaptic('light');
-                    setSelectedStationId(st.id);
-                    setIsStationPickerOpen(false);
-                  }}
-                  className="touch-target-48 press"
-                  style={{
-                    width: '100%',
-                    padding: '12px 16px',
-                    borderRadius: 'var(--radius-card)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    backgroundColor: isSelected ? 'var(--ink-750)' : 'transparent',
-                    cursor: 'pointer'
-                  }}
-                >
-                  <div>
-                    <div className="type-body" style={{ color: isSelected ? 'var(--accent)' : 'var(--text-primary)', fontWeight: isSelected ? 700 : 500 }}>
-                      {st.name}
-                    </div>
-                    {st.hindiName && (
-                      <div className="type-caption" style={{ color: 'var(--text-secondary)' }}>
-                        {st.hindiName}
-                      </div>
-                    )}
-                  </div>
-                  {isSelected && <CheckCircle2 size={18} color="var(--accent)" />}
-                </div>
+                <li key={st.id}>
+                  <button
+                    type="button"
+                    aria-pressed={isSelected}
+                    onClick={() => {
+                      triggerHaptic('light');
+                      setSelectedStationId(st.id);
+                      setError(null);
+                      closePicker();
+                    }}
+                    className="press"
+                    style={{
+                      width: '100%',
+                      minHeight: 56,
+                      padding: '8px 16px',
+                      borderRadius: 'var(--radius-md)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: 12,
+                      textAlign: 'left',
+                      border: 'none',
+                      backgroundColor: isSelected ? 'var(--bg-surface-raised)' : 'transparent',
+                      color: 'var(--text-primary)',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <span style={{ minWidth: 0 }}>
+                      <span style={{ display: 'block', fontSize: 16, lineHeight: '22px', fontWeight: isSelected ? 700 : 500 }}>{st.name}</span>
+                      {st.hindiName && (
+                        <span lang="hi" style={{ display: 'block', fontSize: 13, color: 'var(--text-secondary)' }}>{st.hindiName}</span>
+                      )}
+                    </span>
+                    {isSelected && <CheckCircle2 size={20} aria-hidden="true" color={selectedLine.color} style={{ flexShrink: 0 }} />}
+                  </button>
+                </li>
               );
             })}
-          </div>
+          </ul>
         </div>
       )}
     </div>

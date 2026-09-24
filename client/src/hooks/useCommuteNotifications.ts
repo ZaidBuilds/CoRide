@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { API } from '../config';
+import { jsonAuthHeaders } from '../utils/auth';
 
 const LS_KEY = 'coride_push_prompted';
 const LS_LAST_PUSH = 'coride_last_push_day';
@@ -68,10 +69,11 @@ export function useCommuteNotifications(enabled: boolean) {
           const stored = localStorage.getItem('coride_profile');
           const uid = stored ? JSON.parse(stored).id : 'anon';
           const dummySub = { endpoint: `local:${uid}`, keys: {} };
+          // The server takes the user from the signed token, not the body.
           await fetch(`${API}/api/push/subscribe`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ userId: uid, subscription: dummySub, commutePrefs: { morning: true, evening: true } })
+            headers: jsonAuthHeaders(),
+            body: JSON.stringify({ subscription: dummySub, commutePrefs: { morning: true, evening: true } })
           });
         } catch {}
         new Notification('CoRide notifications on ✅', { body: 'We’ll ping you when your commute window is live and travelers are nearby.' });

@@ -1,252 +1,421 @@
-import { useEffect, useState } from 'react';
-import { X, Check } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { X, Check, MessageCircle, UserPlus, Inbox, Send, Users, WifiOff, ShieldCheck } from 'lucide-react';
 import type { UserProfile } from '../types';
+import { INTEREST_TAXONOMY } from '../types';
 import type { Socket } from 'socket.io-client';
 import { API } from '../config';
+import { authHeaders } from '../utils/auth';
+import { triggerHaptic } from '../utils/nativeBridge';
 
 
 interface Props {
   currentUser: UserProfile;
   socket: Socket | null;
-  onSelectFriend?: (friend: any) => void;
+  /** Opens a 1:1 chat with an accepted friend. The Message button is hidden until wired. */
+  onOpenChat?: (friendId: string) => void;
+  /** Shows the "Safety Centre" shortcut when provided. */
+  onOpenSafetyCenter?: () => void;
+  /** @deprecated kept for older call sites; use onOpenChat. */
+  onSelectFriend?: (friend: unknown) => void;
 }
 
 type Tab = 'received' | 'sent' | 'friends';
 
-export const ConnectScreen: React.FC<Props> = ({ currentUser, socket }) => {
+interface RequestRow {
+  id: string;
+  fromUserId: string;
+  toUserId: string;
+  status: string;
+  createdAt: number;
+  contextLine?: string;
+  contextStation?: string;
+  fromProfile?: Partial<UserProfile> | null;
+  toProfile?: Partial<UserProfile> | null;
+}
+
+interface FriendRow {
+  id: string;
+  profile: Partial<UserProfile> | null;
+}
+
+const displayName = (p: Partial<UserProfile> | null | undefined, fallbackId: string) =>
+  p?.pseudonym || p?.username?.replace(/^@/, '') || `Commuter ${fallbackId.slice(-4)}`;
+
+const tagLine = (p: Partial<UserProfile> | null | undefined) =>
+  (p?.interestTags || [])
+    .map(id => INTEREST_TAXONOMY.find(t => t.id === id)?.label)
+    .filter(Boolean)
+    .slice(0, 3)
+    .join(' · ');
+
+async function requestConnections(): Promise<{ incoming: RequestRow[]; outgoing: RequestRow[]; friends: FriendRow[] }> {
+  const res = await fetch(`${API}/api/connections`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(String(res.status));
+  const d = await res.json();
+  return { incoming: d.pending?.incoming || [], outgoing: d.pending?.outgoing || [], friends: d.friends || [] };
+}
+
+function timeAgo(ts: number): string {
+  const s = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+  if (s < 60) return 'just now';
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m} min ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h} h ago`;
+  const d = Math.floor(h / 24);
+  return d === 1 ? 'yesterday' : `${d} days ago`;
+}
+
+/**
+ * Friends & requests. Reads GET /api/connections (authenticated) and acts via
+ * the REST accept/decline routes. Accept/decline are optimistic: the row moves
+ * immediately and is put back, with a message, if the server refuses.
+ */
+export const ConnectScreen: React.FC<Props> = ({ currentUser, socket, onOpenChat, onOpenSafetyCenter }) => {
   const [tab, setTab] = useState<Tab>('received');
-  const [received, setReceived] = useState<any[]>([]);
-  const [sent, setSent] = useState<any[]>([]);
-  const [friends, setFriends] = useState<any[]>([]);
+  const [received, setReceived] = useState<RequestRow[]>([]);
+  const [sent, setSent] = useState<RequestRow[]>([]);
+  const [friends, setFriends] = useState<FriendRow[]>([]);
   // Without this, a pending or failed fetch renders the empty state — "no requests"
   // is indistinguishable from "server is down".
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
+  const [notice, setNotice] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
+  const noticeTimer = useRef<number | undefined>(undefined);
 
-  const load = async () => {
+  const flash = (kind: 'ok' | 'error', text: string) => {
+    setNotice({ kind, text });
+    window.clearTimeout(noticeTimer.current);
+    noticeTimer.current = window.setTimeout(() => setNotice(null), 4000);
+  };
+  useEffect(() => () => window.clearTimeout(noticeTimer.current), []);
+
+  // State is only set once the request settles. A failed background refresh
+  // keeps the list the user is looking at.
+  const load = useCallback((quiet = false) => {
+    requestConnections().then(
+      d => {
+        setReceived(d.incoming);
+        setSent(d.outgoing);
+        setFriends(d.friends);
+        setStatus('ready');
+      },
+      () => { if (!quiet) setStatus('error'); }
+    );
+  }, []);
+
+  useEffect(() => { load(); }, [load, currentUser.id]);
+
+  const retry = () => {
     setStatus('loading');
+    load();
+  };
+
+  // Socket events (new mutual connection, results of socket-sent requests) → quiet refresh.
+  useEffect(() => {
+    if (!socket) return;
+    const refresh = () => load(true);
+    socket.on('connection_result', refresh);
+    socket.on('connection_accepted', refresh);
+    return () => { socket.off('connection_result', refresh); socket.off('connection_accepted', refresh); };
+  }, [socket, load]);
+
+  const setBusy = (id: string, on: boolean) =>
+    setBusyIds(prev => {
+      const next = new Set(prev);
+      if (on) next.add(id); else next.delete(id);
+      return next;
+    });
+
+  const respond = async (req: RequestRow, action: 'accept' | 'decline') => {
+    if (busyIds.has(req.id)) return;
+    triggerHaptic(action === 'accept' ? 'success' : 'light');
+    const name = displayName(req.fromProfile, req.fromUserId);
+
+    // Optimistic: remove from Received, and add to Friends on accept.
+    const prevReceived = received;
+    const prevFriends = friends;
+    setReceived(list => list.filter(r => r.id !== req.id));
+    if (action === 'accept') {
+      setFriends(list => list.some(f => f.id === req.fromUserId)
+        ? list
+        : [{ id: req.fromUserId, profile: req.fromProfile || null }, ...list]);
+    }
+    setBusy(req.id, true);
+
     try {
-      const [rRecv, rSent, rFriends] = await Promise.all([
-        fetch(`${API}/api/connections/pending/${currentUser.id}`).then(r=>r.json()),
-        fetch(`${API}/api/connections/sent/${currentUser.id}`).then(r=>r.json()),
-        fetch(`${API}/api/friends/${currentUser.id}`).then(r=>r.json()),
-      ]);
-      setReceived(rRecv.pending || []);
-      setSent(rSent.sent || []);
-      setFriends(rFriends.friends || []);
-      setStatus('ready');
-    } catch {
-      setStatus('error');
+      const res = await fetch(`${API}/api/connections/${encodeURIComponent(req.id)}/${action}`, {
+        method: 'POST',
+        headers: authHeaders()
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || `error ${res.status}`);
+      }
+      flash('ok', action === 'accept' ? `You and ${name} are now Metro friends.` : `Request from ${name} declined. They won’t be notified.`);
+    } catch (err) {
+      // Roll back to exactly what the user saw before tapping.
+      setReceived(prevReceived);
+      setFriends(prevFriends);
+      flash('error', err instanceof TypeError
+        ? 'No connection — nothing changed. Try again when you’re back online.'
+        : `Couldn’t ${action} (${err instanceof Error ? err.message : 'unknown error'}).`);
+    } finally {
+      setBusy(req.id, false);
     }
   };
 
-  useEffect(()=>{ load(); }, [currentUser.id]);
-  useEffect(()=>{
-    if (!socket) return;
-    const onResult = () => load();
-    const onAccept = () => load();
-    socket.on('connection_result', onResult);
-    socket.on('connection_accepted', onAccept);
-    return ()=> { socket.off('connection_result', onResult); socket.off('connection_accepted', onAccept); };
-  }, [socket]);
-
-  const accept = (id: string) => {
-    if (!socket) return;
-    socket.emit('accept_connection', { requestId: id, userId: currentUser.id });
-  };
-  const decline = (id: string) => {
-    if (!socket) return;
-    socket.emit('decline_connection', { requestId: id, userId: currentUser.id });
-  };
+  const tabs: { id: Tab; label: string; count: number }[] = [
+    { id: 'received', label: 'Requests', count: received.length },
+    { id: 'sent', label: 'Sent', count: sent.length },
+    { id: 'friends', label: 'Friends', count: friends.length }
+  ];
 
   return (
-    <div className="animate-fade-in" style={{ paddingBottom: 86 }}>
-      {/* Header */}
-      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:14 }}>
-        <h2 style={{ fontSize:20, fontWeight:900, display:'flex', alignItems:'center', gap:10 }}>
-          Connect
+    <div className="animate-fade-in" style={{ maxWidth: 520, margin: '0 auto', paddingBottom: 16 }}>
+
+      <div
+        role="tablist"
+        aria-label="Connections"
+        style={{ display: 'flex', gap: 4, padding: 4, background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-full)', marginBottom: 16 }}
+      >
+        {tabs.map(t => {
+          const selected = tab === t.id;
+          return (
+            <button
+              key={t.id}
+              type="button"
+              role="tab"
+              id={`connect-tab-${t.id}`}
+              aria-selected={selected}
+              aria-controls="connect-panel"
+              onClick={() => setTab(t.id)}
+              style={{
+                flex: 1, minHeight: 44, borderRadius: 'var(--radius-full)', border: 'none',
+                background: selected ? 'var(--accent)' : 'transparent',
+                color: selected ? 'var(--text-on-accent)' : 'var(--text-secondary)',
+                fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, cursor: 'pointer'
+              }}
+            >
+              {t.label}
+              {status === 'ready' && t.count > 0 && (
+                <span
+                  aria-label={`${t.count}`}
+                  style={{
+                    minWidth: 20, height: 20, padding: '0 6px', borderRadius: 999,
+                    background: selected ? 'rgba(255,255,255,0.25)' : t.id === 'received' ? 'var(--status-danger)' : 'var(--bg-surface-raised)',
+                    color: selected || t.id === 'received' ? '#FFFFFF' : 'var(--text-secondary)',
+                    fontSize: 11, fontWeight: 800, display: 'inline-flex', alignItems: 'center', justifyContent: 'center'
+                  }}
+                >
+                  {t.count}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {notice && (
+        <div
+          role={notice.kind === 'error' ? 'alert' : 'status'}
+          aria-live="polite"
+          style={{
+            marginBottom: 12, padding: '10px 14px', borderRadius: 'var(--radius-md)', fontSize: 13, lineHeight: '18px',
+            background: 'var(--bg-card)', border: '1px solid var(--border-card)',
+            borderLeft: `4px solid ${notice.kind === 'error' ? 'var(--status-danger)' : 'var(--status-success)'}`,
+            color: 'var(--text-primary)'
+          }}
+        >
+          {notice.text}
+        </div>
+      )}
+
+      <div id="connect-panel" role="tabpanel" aria-labelledby={`connect-tab-${tab}`}>
+        {status === 'loading' && (
+          <div aria-busy="true" aria-label="Loading connections" className="list-group">
+            {[0, 1, 2].map(i => (
+              <div key={i} className="list-row" style={{ minHeight: 72 }}>
+                <div className="skeleton" style={{ width: 48, height: 48, borderRadius: '50%' }} />
+                <div style={{ flex: 1 }}>
+                  <div className="skeleton" style={{ width: '45%', height: 12 }} />
+                  <div className="skeleton" style={{ width: '70%', height: 10, marginTop: 8 }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {status === 'error' && (
+          <div role="alert" className="empty-state-card">
+            <WifiOff size={28} aria-hidden="true" style={{ color: 'var(--text-muted)' }} />
+            <h2 style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>Couldn’t load your connections</h2>
+            <p style={{ fontSize: 13, lineHeight: '18px', color: 'var(--text-secondary)', margin: 0, maxWidth: 280 }}>
+              The CoRide server didn’t respond. Check your internet and try again.
+            </p>
+            <button type="button" onClick={retry} className="pill-button primary">Try again</button>
+          </div>
+        )}
+
+        {status === 'ready' && tab === 'received' && (
+          received.length === 0 ? (
+            <Empty icon={<Inbox size={32} />} title="No requests right now" body="When someone on your line sends you a request, it shows up here." />
+          ) : (
+            <ul className="list-group" style={{ listStyle: 'none', padding: 0 }}>
+              {received.map(req => {
+                const p = req.fromProfile;
+                const name = displayName(p, req.fromUserId);
+                const tags = tagLine(p);
+                const busy = busyIds.has(req.id);
+                return (
+                  <li key={req.id} className="list-row" style={{ minHeight: 72 }}>
+                    <Avatar name={name} bg={p?.avatarBg} />
+                    <span className="row-text">
+                      <span className="row-title">{name}</span>
+                      {p?.bio ? <span className="row-sub">{p.bio}</span> : tags && <span className="row-sub">{tags}</span>}
+                      <span className="row-sub">
+                        {[req.contextStation, timeAgo(req.createdAt)].filter(Boolean).join(' · ')}
+                      </span>
+                    </span>
+                    <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+                      <button
+                        type="button"
+                        className="icon-btn"
+                        onClick={() => respond(req, 'decline')}
+                        disabled={busy}
+                        aria-label={`Decline request from ${name}`}
+                      >
+                        <X size={18} />
+                      </button>
+                      <button
+                        type="button"
+                        className="icon-btn"
+                        onClick={() => respond(req, 'accept')}
+                        disabled={busy}
+                        aria-label={`Accept request from ${name}`}
+                        style={{ background: 'var(--accent)', borderColor: 'var(--accent)', color: 'var(--text-on-accent)' }}
+                      >
+                        <Check size={18} />
+                      </button>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )
+        )}
+
+        {status === 'ready' && tab === 'sent' && (
+          sent.length === 0 ? (
+            <Empty icon={<Send size={32} />} title="No pending requests" body="Tap someone in a station room and choose Send request. It stays here until they respond." />
+          ) : (
+            <ul className="list-group" style={{ listStyle: 'none', padding: 0 }}>
+              {sent.map(req => {
+                const p = req.toProfile;
+                const name = displayName(p, req.toUserId);
+                return (
+                  <li key={req.id} className="list-row" style={{ minHeight: 72 }}>
+                    <Avatar name={name} bg={p?.avatarBg} />
+                    <span className="row-text">
+                      <span className="row-title">{name}</span>
+                      <span className="row-sub">Sent {timeAgo(req.createdAt)}</span>
+                    </span>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--status-warning)', flexShrink: 0 }}>Waiting</span>
+                  </li>
+                );
+              })}
+            </ul>
+          )
+        )}
+
+        {status === 'ready' && tab === 'friends' && (
+          friends.length === 0 ? (
+            <Empty icon={<Users size={32} />} title="No Metro friends yet" body="Accept a request, or send one to someone in your station room. Friends can chat after your ride." />
+          ) : (
+            <ul className="list-group" style={{ listStyle: 'none', padding: 0 }}>
+              {friends.map(f => {
+                const name = displayName(f.profile, f.id);
+                const tags = tagLine(f.profile);
+                return (
+                  <li key={f.id} className="list-row" style={{ minHeight: 72 }}>
+                    <Avatar name={name} bg={f.profile?.avatarBg} />
+                    <span className="row-text">
+                      <span className="row-title">{name}</span>
+                      {tags && <span className="row-sub">{tags}</span>}
+                    </span>
+                    {onOpenChat && (
+                      <button
+                        type="button"
+                        className="icon-btn"
+                        onClick={() => { triggerHaptic('light'); onOpenChat(f.id); }}
+                        aria-label={`Message ${name}`}
+                      >
+                        <MessageCircle size={18} />
+                      </button>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )
+        )}
+      </div>
+
+      {/* How connecting works — explains the consent model */}
+      <section aria-labelledby="connect-how" style={{ marginTop: 8 }}>
+        <h2 id="connect-how" style={{ fontSize: 13, fontWeight: 700, color: 'var(--accent-purple-text)', margin: '0 4px 8px' }}>
+          How connecting works
         </h2>
-        <button style={{ background:'none', border:'none', color:'var(--accent-purple-text)', fontSize:12, fontWeight:700 }}>History</button>
-      </div>
-
-      {/* Tabs Received / Sent / Friends — Figma pill */}
-      <div style={{ display:'flex', gap:6, padding:4, background:'var(--bg-surface)', border:'1px solid var(--border-subtle)', borderRadius:'var(--radius-full)', marginBottom:14 }}>
-        {[
-          { id:'received', label:'Received', count: received.length },
-          { id:'sent', label:'Sent', count: sent.length },
-          { id:'friends', label:'Friends', count: friends.length },
-        ].map(t=>(
-          <button
-            key={t.id}
-            onClick={()=> setTab(t.id as Tab)}
-            style={{
-              flex:1, padding:'9px 0', borderRadius:'var(--radius-full)', border:'none',
-              background: tab===t.id ? 'var(--accent-purple)' : 'transparent',
-              color: tab===t.id ? 'white' : 'var(--text-muted)',
-              fontSize:12, fontWeight:800, display:'flex', alignItems:'center', justifyContent:'center', gap:6, cursor:'pointer'
-            }}
-          >
-            {t.label}
-            <span style={{
-              minWidth:18, height:18, padding:'0 5px', borderRadius:999,
-              background: tab===t.id ? 'rgba(255,255,255,0.22)' : t.id==='received' ? '#EF4444' : t.id==='sent' ? '#F59E0B' : '#10B981',
-              color: 'white', fontSize:10, fontWeight:800, display:'inline-flex', alignItems:'center', justifyContent:'center'
-            }}>
-              {t.count}
-            </span>
-          </button>
-        ))}
-      </div>
-
-      {status==='loading' && (
-        <div aria-busy="true" aria-label="Loading connections" style={{ display:'flex', flexDirection:'column', gap:10 }}>
-          {[0,1,2].map(i=> <div key={i} className="skeleton" style={{ height:76, borderRadius:'var(--radius-xl)' }} />)}
-        </div>
-      )}
-
-      {status==='error' && (
-        <div role="alert" style={{ textAlign:'center', padding:24, borderRadius:'var(--radius-xl)', background:'var(--bg-card)', border:'1px solid rgba(244,63,94,0.22)' }}>
-          <div style={{ fontSize:14, fontWeight:800, color:'var(--accent-rose-text)' }}>Couldn't load your connections</div>
-          <div style={{ fontSize:13, color:'var(--text-secondary)', marginTop:6, lineHeight:1.5 }}>
-            The CoRide server didn't respond. Check your internet and try again.
-          </div>
-          <button onClick={load} className="btn-primary" style={{ marginTop:14 }}>Try again</button>
-        </div>
-      )}
-
-      {status==='ready' && tab==='received' && (
-        <>
-          <h3 style={{ fontSize:13, fontWeight:800, marginBottom:10 }}>New Requests</h3>
-          <div style={{ display:'flex', flexDirection:'column', gap:10, marginBottom:16 }}>
-            {received.length===0 ? (
-              <div style={{ textAlign:'center', padding:24, color:'var(--text-muted)', fontSize:12, border:'1px dashed var(--border-subtle)', borderRadius:'var(--radius-lg)' }}>No new requests — check back after your next ride</div>
-            ) : received.map((req:any)=>{
-              const p = req.fromProfile as UserProfile | undefined;
-              const name = p?.pseudonym || req.fromUserId.slice(0,8);
-              const tags = p?.interestTags?.slice(0,3).join(' • ') || 'Art • Design • Travel';
-              return (
-                <div key={req.id} style={{ display:'flex', alignItems:'center', gap:12, padding:'14px', borderRadius:'var(--radius-xl)', background:'var(--bg-card)', border:'1px solid var(--border-card)' }}>
-                  <div style={{ position:'relative' }}>
-                    <div style={{ width:48,height:48, borderRadius:'50%', background: p?.avatarBg || 'var(--accent-purple)', display:'flex', alignItems:'center', justifyContent:'center', color:'white', fontWeight:800 }}>
-                      {name[0]}
-                    </div>
-                    <div style={{ position:'absolute', bottom:0, right:0, width:12,height:12, borderRadius:'50%', background:'var(--presence-active)', border:'2px solid var(--bg-card)' }} />
-                  </div>
-                  <div style={{ flex:1, minWidth:0 }}>
-                    <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-                      <span style={{ fontSize:13, fontWeight:800, color:'var(--text-primary)' }}>{name}</span>
-                      <span style={{ fontSize:11, padding:'2px 6px', borderRadius:999, background:'rgba(234,179,8,0.14)', color:'var(--accent-amber)', border:'1px solid rgba(234,179,8,0.22)' }}>Nearby</span>
-                    </div>
-                    <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:2 }}>{tags}</div>
-                    <div style={{ fontSize:11, color:'var(--text-muted)', display:'flex', alignItems:'center', gap:4, marginTop:2 }}>
-                      <TrainMini /> {req.contextLine || 'Blue Line'} • {req.contextStation || 'Rajiv Chowk'} → 9:07 AM
-                    </div>
-                  </div>
-                  <div style={{ display:'flex', gap:8 }}>
-                    <button onClick={()=> decline(req.id)} aria-label={`Decline request from ${name}`} style={{ width:44,height:44, borderRadius:'50%', background:'var(--bg-overlay)', border:'1px solid var(--border-subtle)', color:'var(--text-muted)', display:'flex', alignItems:'center', justifyContent:'center' }}>
-                      <X size={16}/>
-                    </button>
-                    <button onClick={()=> accept(req.id)} aria-label={`Accept request from ${name}`} style={{ width:44,height:44, borderRadius:'50%', background:'var(--accent-purple)', border:'none', color:'white', display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'0 4px 12px rgba(123,93,255,0.35)' }}>
-                      <Check size={16}/>
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          <h3 style={{ fontSize:13, fontWeight:800, marginBottom:10 }}>Sent Requests</h3>
-          <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
-            {sent.length===0 ? <div style={{ fontSize:12, color:'var(--text-muted)', textAlign:'center', padding:12 }}>No sent requests</div> : sent.slice(0,2).map((req:any)=>{
-              const p = req.toProfile as UserProfile | undefined;
-              const name = p?.pseudonym || req.toUserId.slice(0,8);
-              return (
-                <div key={req.id} style={{ display:'flex', alignItems:'center', gap:12, padding:'14px', borderRadius:'var(--radius-xl)', background:'var(--bg-card)', border:'1px solid var(--border-card)' }}>
-                  <div style={{ width:48,height:48, borderRadius:'50%', background: p?.avatarBg || '#6366F1', display:'flex', alignItems:'center', justifyContent:'center', color:'white', fontWeight:800 }}>{name[0]}</div>
-                  <div style={{ flex:1 }}>
-                    <div style={{ fontSize:13, fontWeight:800, color:'var(--text-primary)' }}>{name}</div>
-                    <div style={{ fontSize:11, color:'var(--text-muted)' }}>{p?.interestTags?.join(' • ') || 'Music • Coding • Meme'}</div>
-                    <div style={{ fontSize:11, color:'var(--text-muted)', display:'flex', alignItems:'center', gap:4 }}><TrainMini/> Blue Line • Rajiv Chowk → Noida</div>
-                  </div>
-                  <div style={{ textAlign:'right' }}>
-                    <div style={{ fontSize:11, padding:'4px 8px', borderRadius:999, background:'rgba(245,158,11,0.14)', color:'var(--accent-amber)', border:'1px solid rgba(245,158,11,0.22)', fontWeight:700 }}>Pending</div>
-                    <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:4 }}>{new Date(req.createdAt).toLocaleTimeString([],{hour:'2-digit', minute:'2-digit'})}</div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </>
-      )}
-
-      {status==='ready' && tab==='sent' && (
-        <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
-          {sent.length===0 ? <div style={{ textAlign:'center', padding:24, color:'var(--text-muted)', fontSize:12 }}>No sent requests yet — tap a traveler to send one</div> : sent.map((req:any)=>{
-            const p = req.toProfile as UserProfile | undefined;
-            const name = p?.pseudonym || req.toUserId.slice(0,8);
-            return (
-              <div key={req.id} style={{ display:'flex', alignItems:'center', gap:12, padding:'14px', borderRadius:'var(--radius-xl)', background:'var(--bg-card)', border:'1px solid var(--border-card)' }}>
-                <div style={{ width:48,height:48, borderRadius:'50%', background: p?.avatarBg || '#6366F1', display:'flex', alignItems:'center', justifyContent:'center', color:'white', fontWeight:800 }}>{name[0]}</div>
-                <div style={{ flex:1 }}>
-                  <div style={{ fontSize:13, fontWeight:800, color:'var(--text-primary)' }}>{name}</div>
-                  <div style={{ fontSize:11, color:'var(--text-muted)' }}>{p?.interestTags?.join(' • ') || 'Music • Coding'}</div>
-                </div>
-                <span style={{ fontSize:11, padding:'4px 8px', borderRadius:999, background:'rgba(245,158,11,0.14)', color:'var(--accent-amber)', border:'1px solid rgba(245,158,11,0.22)', fontWeight:700 }}>Pending</span>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {status==='ready' && tab==='friends' && (
-        <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
-          {friends.length===0 ? <div style={{ textAlign:'center', padding:24, color:'var(--text-muted)', fontSize:12 }}>No Metro Friends yet — accept a request to start chatting</div> : friends.map((f:any)=>(
-            <div key={f.id} style={{ display:'flex', alignItems:'center', gap:12, padding:'14px', borderRadius:'var(--radius-xl)', background:'var(--bg-card)', border:'1px solid var(--border-card)' }}>
-              <div style={{ width:48,height:48, borderRadius:'50%', background: f.profile.avatarBg, display:'flex', alignItems:'center', justifyContent:'center', color:'white', fontWeight:800 }}>{f.profile.pseudonym[0]}</div>
-              <div style={{ flex:1 }}>
-                <div style={{ fontSize:13, fontWeight:800, color:'var(--text-primary)', display:'flex', alignItems:'center', gap:6 }}>{f.profile.pseudonym} <ShieldCheck size={12} style={{ color:'var(--accent-emerald)' }} /></div>
-                <div style={{ fontSize:11, color:'var(--text-muted)' }}>{f.profile.interestTags?.join(' • ')}</div>
-              </div>
-              <div style={{ width:36,height:36, borderRadius:'50%', background:'rgba(123,93,255,0.14)', border:'1px solid rgba(123,93,255,0.22)', display:'flex', alignItems:'center', justifyContent:'center', color:'var(--accent-purple-text)' }}>
-                <Heart size={16}/>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Safe Connections */}
-      <div style={{ marginTop:16, background:'linear-gradient(135deg, var(--bg-accent-wash), var(--bg-accent-wash-2))', border:'1px solid rgba(123,93,255,0.22)', borderRadius:'var(--radius-lg)', padding:14, display:'flex', gap:10, alignItems:'center' }}>
-        <div style={{ width:36,height:36, borderRadius:'50%', background:'var(--bg-accent-wash)', border:'1px solid rgba(123,93,255,0.28)', display:'flex', alignItems:'center', justifyContent:'center', color:'var(--accent-purple-text)' }}>
-          <ShieldCheck size={18}/>
-        </div>
-        <div style={{ flex:1 }}>
-          <div style={{ fontSize:12, fontWeight:800, color:'var(--text-primary)' }}>Safe Connections</div>
-          <div style={{ fontSize:11, color:'var(--text-muted)' }}>We keep CoRide safe for everyone. Report or block if something feels off.</div>
-        </div>
-        <span style={{ color:'var(--text-muted)' }}>›</span>
-      </div>
-
-      {/* How it works */}
-      <div style={{ marginTop:16 }}>
-        <h3 style={{ fontSize:13, fontWeight:800, marginBottom:10 }}>How it works</h3>
-        <div style={{ display:'flex', gap:10 }}>
-          {[
-            { title:'1. Send Request', desc:'Tap on a traveler you’d like to connect with.', icon:'➕' },
-            { title:'2. Mutual Accept', desc:'They accept your request and you accept theirs.', icon:'💜' },
-            { title:'3. You’re Connected', desc:'Start chatting and become Metro Friends!', icon:'👥' },
-          ].map(s=>(
-            <div key={s.title} style={{ flex:1, background:'var(--bg-card)', border:'1px solid var(--border-card)', borderRadius:'var(--radius-lg)', padding:12, textAlign:'center' }}>
-              <div style={{ width:36,height:36, borderRadius:'50%', background:'rgba(123,93,255,0.14)', border:'1px solid rgba(123,93,255,0.22)', display:'flex', alignItems:'center', justifyContent:'center', margin:'0 auto 8px', color:'var(--accent-purple-text)' }}>{s.icon}</div>
-              <div style={{ fontSize:11, fontWeight:800, color:'var(--text-primary)' }}>{s.title}</div>
-              <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:4, lineHeight:1.3 }}>{s.desc}</div>
-            </div>
-          ))}
-        </div>
-      </div>
+        <ol className="list-group" style={{ listStyle: 'none', padding: 0 }}>
+          <li className="list-row" style={{ cursor: 'default' }}>
+            <span aria-hidden="true" style={{ color: 'var(--text-secondary)', display: 'flex' }}><UserPlus size={20} /></span>
+            <span style={{ fontSize: 13, lineHeight: '18px', color: 'var(--text-secondary)' }}>Send a request to someone in your station room.</span>
+          </li>
+          <li className="list-row" style={{ cursor: 'default' }}>
+            <span aria-hidden="true" style={{ color: 'var(--text-secondary)', display: 'flex' }}><Check size={20} /></span>
+            <span style={{ fontSize: 13, lineHeight: '18px', color: 'var(--text-secondary)' }}>If they accept, you’re Metro friends. Declines are silent.</span>
+          </li>
+          <li className="list-row" style={{ cursor: 'default' }}>
+            <span aria-hidden="true" style={{ color: 'var(--text-secondary)', display: 'flex' }}><MessageCircle size={20} /></span>
+            <span style={{ fontSize: 13, lineHeight: '18px', color: 'var(--text-secondary)' }}>Only friends can message each other — strangers can’t.</span>
+          </li>
+          {onOpenSafetyCenter && (
+            <li style={{ listStyle: 'none' }}>
+              <button type="button" className="list-row navigable" onClick={() => { triggerHaptic('light'); onOpenSafetyCenter(); }} style={{ borderTop: '1px solid var(--border-subtle)' }}>
+                <span aria-hidden="true" style={{ color: 'var(--text-secondary)', display: 'flex' }}><ShieldCheck size={20} /></span>
+                <span className="row-text">
+                  <span className="row-title">Safety Centre</span>
+                  <span className="row-sub">Report, block and helplines</span>
+                </span>
+              </button>
+            </li>
+          )}
+        </ol>
+      </section>
     </div>
   );
 };
 
-function TrainMini(){ return <span style={{ display:'inline-flex', alignItems:'center' }}>🚇</span>; }
-function ShieldCheck(props:any){ return <span {...props}>✓</span>; }
-function Heart(props:any){ return <span {...props}>♡</span>; }
+function Avatar({ name, bg }: { name: string; bg?: string }) {
+  return (
+    <div
+      aria-hidden="true"
+      style={{
+        width: 48, height: 48, flexShrink: 0, borderRadius: '50%', background: bg || 'var(--accent)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#FFFFFF', fontWeight: 800, fontSize: 18
+      }}
+    >
+      {name.charAt(0).toUpperCase()}
+    </div>
+  );
+}
+
+function Empty({ icon, title, body }: { icon: React.ReactNode; title: string; body: string }) {
+  return (
+    <div className="empty-state-card" style={{ marginBottom: 20 }}>
+      <span aria-hidden="true" style={{ color: 'var(--text-muted)', display: 'flex' }}>{icon}</span>
+      <h2 style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>{title}</h2>
+      <p style={{ fontSize: 13, lineHeight: '18px', color: 'var(--text-secondary)', margin: 0, maxWidth: 300 }}>{body}</p>
+    </div>
+  );
+}

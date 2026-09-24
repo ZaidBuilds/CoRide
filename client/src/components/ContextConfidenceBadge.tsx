@@ -5,34 +5,38 @@ interface Props {
   context: ContextResult | null;
 }
 
+/**
+ * Shows the detected line/direction and how sure the detector is. The
+ * percentage is the server's real confidence score; the words next to it say
+ * what that means so nobody has to interpret a bare number.
+ */
 export const ContextConfidenceBadge: React.FC<Props> = ({ context }) => {
   if (!context) return null;
 
-  const pct = Math.round(context.confidence * 100);
-  const isHigh = pct >= 70;
-  const isMid = pct >= 40 && pct < 70;
+  const pct = Math.round(Math.max(0, Math.min(1, context.confidence)) * 100);
+  const level = pct >= 70 ? 'high' : pct >= 40 ? 'mid' : 'low';
+  const tone = {
+    high: { color: 'var(--success-text)', bg: 'var(--success-container)', word: 'Likely' },
+    mid: { color: 'var(--warning-text)', bg: 'var(--warning-container)', word: 'Unsure' },
+    low: { color: 'var(--danger-text)', bg: 'var(--danger-container)', word: 'Guess' },
+  }[level];
 
-  const color = isHigh ? '#6EE7B7' : isMid ? '#FDE68A' : '#FDA4AF';
-  const bg = isHigh ? 'rgba(16,185,129,0.12)' : isMid ? 'rgba(234,179,8,0.10)' : 'rgba(244,63,94,0.10)';
-  const border = isHigh ? 'rgba(16,185,129,0.22)' : isMid ? 'rgba(234,179,8,0.18)' : 'rgba(244,63,94,0.18)';
+  const towards = (context.direction || '').replace(/^Towards\s+/i, '');
+  const summary = [context.lineName, towards && `towards ${towards}`].filter(Boolean).join(' ');
 
   return (
     <div
       className="confidence-badge"
-      style={{ background: bg, color, border: `1px solid ${border}`, backdropFilter:'blur(8px)' }}
+      style={{ background: tone.bg, color: tone.color, maxWidth: '100%' }}
       title={context.reason}
+      aria-label={`Detected ${summary || 'your line'}, ${pct}% confidence`}
     >
-      <Radio size={11} />
-      <span style={{ fontWeight:800 }}>{context.lineName} → {context.direction.replace('Towards ', '').split(' ')[0]}</span>
-      <span style={{
-        padding:'2px 6px',
-        borderRadius:999,
-        background:'rgba(0,0,0,0.24)',
-        fontWeight:800,
-        fontSize:11,
-        border:'1px solid rgba(255,255,255,0.06)'
-      }}>
-        {pct}%
+      <Radio size={12} aria-hidden="true" style={{ flexShrink: 0 }} />
+      <span style={{ fontWeight: 700, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {summary || 'Detecting line…'}
+      </span>
+      <span style={{ fontWeight: 700, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+        {tone.word} · {pct}%
       </span>
     </div>
   );

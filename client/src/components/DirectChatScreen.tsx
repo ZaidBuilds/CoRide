@@ -1,14 +1,13 @@
-import { useState, useEffect, type FormEvent } from 'react';
-import { ArrowLeft, Send, ShieldAlert, UserX, Clock, MoreVertical } from 'lucide-react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { ArrowLeft, ShieldAlert, UserX, MoreVertical, WifiOff, RefreshCw } from 'lucide-react';
+import type { Socket } from 'socket.io-client';
 import type { UserProfile, RoomPresenceTraveler } from '../types';
-import { useChatMessages } from '../hooks/useChatMessages';
-import { MessageList } from './MessageList';
+import { useChatMessages, useKeyboardSafeHeight, MAX_MESSAGE_LENGTH } from '../hooks/useChatMessages';
+import { MessageList, ChatComposer, type ChatListItem } from './MessageList';
 import { ReportSheet } from './ReportSheet';
-import { enqueueMessage, getQueuedMessages } from '../utils/offlineQueue';
 import { triggerHaptic } from '../utils/nativeBridge';
 import { authHeaders } from '../utils/auth';
 import { API } from '../config';
-
 
 interface Peer {
   id: string;
@@ -22,299 +21,274 @@ interface Props {
   peer: Peer;
   onBack?: () => void;
   onBlocked?: (peerId: string) => void;
+  /** Live socket — when given, new messages arrive instantly via new_dm. */
+  socket?: Socket | null;
 }
 
-export function DirectChatScreen({ currentUser, peer, onBack, onBlocked }: Props) {
-  const { messages, error, send } = useChatMessages(currentUser?.id, peer.id);
+export function DirectChatScreen({ currentUser, peer, onBack, onBlocked, socket = null }: Props) {
+  const { messages, outbox, loading, error, send, retry, discard, refresh } = useChatMessages(currentUser?.id, peer.id, socket);
   const [input, setInput] = useState('');
-  const [sendError, setSendError] = useState<string | null>(null);
   const [showMenu, setShowMenu] = useState(false);
   const [showReportSheet, setShowReportSheet] = useState(false);
   const [showBlockConfirm, setShowBlockConfirm] = useState(false);
+  const [blocking, setBlocking] = useState(false);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
-  const [localQueued, setLocalQueued] = useState<{ id: string; content: string; timestamp: number }[]>([]);
+  const [online, setOnline] = useState(() => typeof navigator === 'undefined' ? true : navigator.onLine);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const menuBtnRef = useRef<HTMLButtonElement>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const blockedViaReport = useRef(false);
+  const keyboardHeight = useKeyboardSafeHeight();
 
-  const name = peer.pseudonym || peer.username?.replace(/^@/, '') || 'Metro Friend';
+  const name = peer.pseudonym || peer.username?.replace(/^@/, '') || 'Friend';
   const initials = name.slice(0, 2).toUpperCase();
 
-  // Load any existing queued messages for this peer
-  useEffect(() => {
-    const all = getQueuedMessages();
-    const peerQueued = all
-      .filter(m => m.type === 'direct' && m.targetId === peer.id)
-      .map(m => ({ id: m.id, content: m.content, timestamp: m.timestamp }));
-    setLocalQueued(peerQueued);
-  }, [peer.id]);
-
-  const showToast = (msg: string) => {
+  const showToast = useCallback((msg: string) => {
     setToastMsg(msg);
-    setTimeout(() => setToastMsg(null), 3000);
-  };
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToastMsg(null), 3000);
+  }, []);
+  useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []);
 
-  const handleSend = async (e: FormEvent) => {
-    e.preventDefault();
-    const body = input.trim();
-    if (!body || !currentUser) return;
+  useEffect(() => {
+    const on = () => setOnline(true);
+    const off = () => setOnline(false);
+    window.addEventListener('online', on);
+    window.addEventListener('offline', off);
+    return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off); };
+  }, []);
 
-    triggerHaptic('light');
-    setInput('');
-    setSendError(null);
+  // Close the overflow menu on outside tap / Escape, and return focus.
+  useEffect(() => {
+    if (!showMenu) return;
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as Node;
+      if (menuRef.current?.contains(t) || menuBtnRef.current?.contains(t)) return;
+      setShowMenu(false);
+    };
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key === 'Escape') { setShowMenu(false); menuBtnRef.current?.focus(); }
+    };
+    document.addEventListener('pointerdown', onDown);
+    document.addEventListener('keydown', onKey);
+    menuRef.current?.querySelector<HTMLButtonElement>('button')?.focus();
+    return () => { document.removeEventListener('pointerdown', onDown); document.removeEventListener('keydown', onKey); };
+  }, [showMenu]);
 
-    // If offline, enqueue locally
-    if (!navigator.onLine) {
-      const qMsg = enqueueMessage({
-        id: `q_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-        type: 'direct',
-        targetId: peer.id,
-        senderId: currentUser.id,
-        content: body,
-        timestamp: Date.now()
-      });
-      setLocalQueued(prev => [...prev, { id: qMsg.id, content: qMsg.content, timestamp: qMsg.timestamp }]);
-      showToast('Subway tunnel mode: message queued');
-      return;
-    }
+  // Escape closes the block dialog.
+  useEffect(() => {
+    if (!showBlockConfirm) return;
+    const onKey = (e: globalThis.KeyboardEvent) => { if (e.key === 'Escape') setShowBlockConfirm(false); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [showBlockConfirm]);
 
-    try {
-      await send(body);
-    } catch (err) {
-      // Buffer in offline queue on network drop
-      const qMsg = enqueueMessage({
-        id: `q_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-        type: 'direct',
-        targetId: peer.id,
-        senderId: currentUser.id,
-        content: body,
-        timestamp: Date.now()
-      });
-      setLocalQueued(prev => [...prev, { id: qMsg.id, content: qMsg.content, timestamp: qMsg.timestamp }]);
-      setSendError('Connection drop — message queued for auto-send');
-    }
-  };
+  const items: ChatListItem[] = useMemo(() => [
+    ...messages.map(m => ({
+      key: m.id,
+      senderId: m.senderId,
+      content: m.content,
+      timestamp: m.timestamp,
+      status: m.senderId === currentUser?.id ? 'sent' as const : undefined
+    })),
+    ...outbox.map(o => ({
+      key: o.clientId,
+      senderId: currentUser?.id || 'me',
+      content: o.content,
+      timestamp: o.timestamp,
+      status: o.status,
+      error: o.error
+    }))
+  ], [messages, outbox, currentUser?.id]);
 
   const handleBlockConfirm = async () => {
     triggerHaptic('medium');
+    setBlocking(true);
     try {
       const res = await fetch(`${API}/api/blocks`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ targetId: peer.id })
       });
-      const data = await res.json();
-      showToast(data.message || 'User blocked.');
+      if (!res.ok) throw new Error();
       setShowBlockConfirm(false);
       onBlocked?.(peer.id);
       onBack?.();
     } catch {
-      showToast('Could not block user.');
+      showToast(`Couldn't block ${name}. Try again.`);
+    } finally {
+      setBlocking(false);
     }
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100dvh', background: 'var(--bg-canvas)' }}>
-      {/* Header with UGC Action Controls */}
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        height: keyboardHeight ? `${keyboardHeight}px` : '100%',
+        minHeight: 0,
+        background: 'var(--bg-canvas)'
+      }}
+    >
+      {/* Header */}
       <div
         className="glass"
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 10,
-          padding: '10px 12px',
+          gap: 8,
+          padding: '8px 8px 8px 4px',
+          paddingTop: 'calc(8px + env(safe-area-inset-top))',
           borderRadius: 0,
+          borderLeft: 'none',
+          borderRight: 'none',
+          borderTop: 'none',
           borderBottom: '1px solid var(--border-card)',
           position: 'relative',
-          zIndex: 10
+          zIndex: 10,
+          flexShrink: 0
         }}
       >
         {onBack && (
-          <button onClick={onBack} className="icon-btn touch-target-48" aria-label="Back">
-            <ArrowLeft size={20} />
+          <button onClick={onBack} className="icon-btn" aria-label="Back to chats" style={{ background: 'transparent', border: 'none' }}>
+            <ArrowLeft size={22} />
           </button>
         )}
 
         <div
           className="avatar"
+          aria-hidden="true"
           style={{
             width: 40,
             height: 40,
             fontSize: 14,
-            fontWeight: 800,
+            boxShadow: 'none',
             background: peer.avatarBg || 'linear-gradient(135deg, var(--signal-500), var(--signal-600))'
           }}
         >
           {initials}
         </div>
 
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>{name}</div>
-          <div style={{ fontSize: 11, color: 'var(--mint-500)', display: 'flex', alignItems: 'center', gap: 4 }}>
-            <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--mint-500)' }} /> Connected Friend
-          </div>
-        </div>
+        <h1 style={{ flex: 1, minWidth: 0, margin: 0, fontSize: 17, fontWeight: 700, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {name}
+        </h1>
 
-        {/* UGC Safety Menu Toggle */}
         <button
-          onClick={() => setShowMenu(!showMenu)}
-          className="icon-btn touch-target-48"
-          aria-label="More safety actions"
-          style={{ color: 'var(--text-secondary)' }}
+          ref={menuBtnRef}
+          onClick={() => setShowMenu(v => !v)}
+          className="icon-btn"
+          aria-label={`More options for ${name}`}
+          aria-haspopup="menu"
+          aria-expanded={showMenu}
+          style={{ background: 'transparent', border: 'none' }}
         >
-          <MoreVertical size={20} />
+          <MoreVertical size={22} />
         </button>
 
-        {/* Safety Popover Menu */}
         {showMenu && (
           <div
+            ref={menuRef}
+            role="menu"
+            aria-label="Chat options"
             className="animate-fade-in"
             style={{
               position: 'absolute',
-              top: 56,
-              right: 12,
+              top: 'calc(100% - 4px)',
+              right: 8,
               background: 'var(--bg-surface-raised)',
               border: '1px solid var(--border-subtle)',
               borderRadius: 'var(--radius-md)',
               boxShadow: 'var(--shadow-lg)',
-              padding: '6px 0',
+              padding: '4px 0',
               zIndex: 30,
-              minWidth: 160
+              minWidth: 200
             }}
           >
             <button
-              onClick={() => {
-                setShowMenu(false);
-                setShowReportSheet(true);
-              }}
-              style={{
-                width: '100%',
-                padding: '10px 14px',
-                background: 'none',
-                border: 'none',
-                color: 'var(--text-primary)',
-                fontSize: 13,
-                fontWeight: 600,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                cursor: 'pointer',
-                textAlign: 'left'
-              }}
+              role="menuitem"
+              onClick={() => { setShowMenu(false); setShowReportSheet(true); }}
+              style={menuItem}
             >
-              <ShieldAlert size={16} style={{ color: 'var(--amber-500)' }} /> Report User
+              <ShieldAlert size={18} style={{ color: 'var(--status-warning)' }} /> Report {name}
             </button>
             <button
-              onClick={() => {
-                setShowMenu(false);
-                setShowBlockConfirm(true);
-              }}
-              style={{
-                width: '100%',
-                padding: '10px 14px',
-                background: 'none',
-                border: 'none',
-                color: 'var(--rose-500)',
-                fontSize: 13,
-                fontWeight: 600,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                cursor: 'pointer',
-                textAlign: 'left'
-              }}
+              role="menuitem"
+              onClick={() => { setShowMenu(false); setShowBlockConfirm(true); }}
+              style={{ ...menuItem, color: 'var(--status-danger)' }}
             >
-              <UserX size={16} /> Block Commuter
+              <UserX size={18} /> Block {name}
             </button>
           </div>
         )}
       </div>
 
-      {/* Message List */}
-      <div style={{ flex: 1, overflowY: 'auto' }}>
-        <MessageList messages={messages} currentUserId={currentUser?.id} />
-
-        {/* Local Queued Messages (Subway Tunnel Buffer) */}
-        {localQueued.length > 0 && (
-          <div style={{ padding: '0 12px 10px', display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-end' }}>
-            {localQueued.map(q => (
-              <div
-                key={q.id}
-                style={{
-                  background: 'var(--bg-surface-raised)',
-                  border: '1px dashed var(--amber-500)',
-                  borderRadius: '16px 16px 4px 16px',
-                  padding: '8px 12px',
-                  maxWidth: '78%',
-                  color: 'var(--text-primary)',
-                  fontSize: 16
-                }}
-              >
-                <div>{q.content}</div>
-                <div style={{ fontSize: 10, color: 'var(--amber-500)', display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'flex-end', marginTop: 4 }}>
-                  <Clock size={11} /> Queued in tunnel…
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {(error || sendError) && (
-        <div role="alert" style={{ fontSize: 12, color: 'var(--amber-500)', textAlign: 'center', padding: '6px 12px', background: 'rgba(217, 119, 6, 0.1)' }}>
-          {sendError || error}
+      {/* Connection / load problems — one honest line, never a wall. */}
+      {(!online || (error && !loading)) && (
+        <div
+          role="status"
+          style={{
+            display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0,
+            padding: '4px 8px 4px 14px', fontSize: 13, color: 'var(--text-secondary)',
+            background: 'var(--bg-surface)', borderBottom: '1px solid var(--border-subtle)'
+          }}
+        >
+          <WifiOff size={15} style={{ color: 'var(--status-warning)', flexShrink: 0 }} />
+          <span style={{ flex: 1 }}>
+            {!online ? "You're offline — messages will send when you reconnect." : error}
+          </span>
+          {online && (
+            <button onClick={refresh} className="press" aria-label="Retry loading messages" style={{ ...menuItem, width: 'auto', padding: '0 12px', color: 'var(--accent-purple-text)' }}>
+              <RefreshCw size={15} /> Retry
+            </button>
+          )}
         </div>
       )}
 
+      {/* Messages */}
+      <MessageList
+        items={items}
+        currentUserId={currentUser?.id}
+        loading={loading}
+        ariaLabel={`Messages with ${name}`}
+        onRetry={retry}
+        onDiscard={discard}
+        empty={
+          error ? (
+            <p style={{ fontSize: 14, color: 'var(--text-muted)', textAlign: 'center', margin: 0 }}>
+              Couldn't load this conversation.
+            </p>
+          ) : (
+            <div style={{ textAlign: 'center', maxWidth: 260 }}>
+              <div
+                className="avatar"
+                aria-hidden="true"
+                style={{ width: 64, height: 64, fontSize: 22, margin: '0 auto 12px', background: peer.avatarBg || 'var(--accent-purple)' }}
+              >
+                {initials}
+              </div>
+              <p style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)', margin: '0 0 4px' }}>
+                You and {name} are connected
+              </p>
+              <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0, lineHeight: 1.45 }}>
+                Say hello — maybe ask which coach they usually board.
+              </p>
+            </div>
+          )
+        }
+      />
+
       {/* Composer */}
-      <form
-        onSubmit={handleSend}
-        className="glass"
-        style={{
-          display: 'flex',
-          gap: 8,
-          alignItems: 'center',
-          padding: '10px 12px calc(10px + env(safe-area-inset-bottom))',
-          borderRadius: 0,
-          borderTop: '1px solid var(--border-card)'
-        }}
-      >
-        <input
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          aria-label={`Message ${name}`}
-          placeholder="Message… (works in tunnels)"
-          style={{
-            flex: 1,
-            minHeight: 48,
-            padding: '12px 16px',
-            borderRadius: 'var(--radius-pill)',
-            background: 'var(--bg-surface)',
-            border: '1px solid var(--border-subtle)',
-            color: 'var(--text-primary)',
-            fontSize: 16
-          }}
-        />
-        <button
-          type="submit"
-          aria-label="Send message"
-          className="press touch-target-48"
-          disabled={!input.trim()}
-          style={{
-            width: 48,
-            height: 48,
-            borderRadius: '50%',
-            background: 'linear-gradient(135deg, var(--signal-500), var(--signal-600))',
-            border: 'none',
-            color: '#fff',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            flexShrink: 0,
-            cursor: !input.trim() ? 'not-allowed' : 'pointer',
-            opacity: !input.trim() ? 0.45 : 1
-          }}
-        >
-          <Send size={18} />
-        </button>
-      </form>
+      <ChatComposer
+        id="dm-composer"
+        value={input}
+        onChange={setInput}
+        onSend={text => { triggerHaptic('light'); send(text); setInput(''); }}
+        ariaLabel={`Message ${name}`}
+        maxLength={MAX_MESSAGE_LENGTH}
+        safeAreaBottom={!keyboardHeight}
+        sendDisabled={!currentUser}
+      />
 
       {/* Report Modal */}
       <ReportSheet
@@ -327,22 +301,27 @@ export function DirectChatScreen({ currentUser, peer, onBack, onBlocked }: Props
         } as unknown as RoomPresenceTraveler}
         currentUserId={currentUser?.id}
         onClose={() => setShowReportSheet(false)}
-        onReported={(msg) => {
+        // The sheet shows its own confirmation; if they also blocked, leave
+        // the (now frozen) thread once they dismiss it.
+        onBlocked={() => { blockedViaReport.current = true; }}
+        onReported={() => {
           setShowReportSheet(false);
-          showToast(msg);
+          if (blockedViaReport.current) {
+            onBlocked?.(peer.id);
+            onBack?.();
+          }
         }}
       />
 
       {/* Block Confirmation Dialog */}
       {showBlockConfirm && (
         <div
-          role="dialog"
-          aria-modal="true"
           className="animate-fade-in"
+          onClick={() => !blocking && setShowBlockConfirm(false)}
           style={{
             position: 'fixed',
             inset: 0,
-            background: 'rgba(8, 9, 12, 0.75)',
+            background: 'var(--scrim, rgba(8, 9, 12, 0.75))',
             zIndex: 100,
             display: 'flex',
             alignItems: 'center',
@@ -351,6 +330,11 @@ export function DirectChatScreen({ currentUser, peer, onBack, onBlocked }: Props
           }}
         >
           <div
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="dm-block-title"
+            aria-describedby="dm-block-desc"
+            onClick={e => e.stopPropagation()}
             style={{
               background: 'var(--bg-surface-raised)',
               border: '1px solid var(--border-subtle)',
@@ -358,16 +342,18 @@ export function DirectChatScreen({ currentUser, peer, onBack, onBlocked }: Props
               padding: 20,
               maxWidth: 360,
               width: '100%',
-              textAlign: 'center'
+              textAlign: 'center',
+              boxShadow: 'var(--shadow-lg)'
             }}
           >
             <div
+              aria-hidden="true"
               style={{
                 width: 48,
                 height: 48,
                 borderRadius: '50%',
-                background: 'rgba(220, 38, 38, 0.15)',
-                color: 'var(--rose-500)',
+                background: 'var(--bg-surface)',
+                color: 'var(--status-danger)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -376,25 +362,27 @@ export function DirectChatScreen({ currentUser, peer, onBack, onBlocked }: Props
             >
               <UserX size={24} />
             </div>
-            <h3 style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-primary)', margin: '0 0 6px' }}>
+            <h3 id="dm-block-title" style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-primary)', margin: '0 0 6px' }}>
               Block {name}?
             </h3>
-            <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '0 0 18px', lineHeight: 1.4 }}>
-              This will immediately remove {name} from your feeds, cancel any mutual connection, and permanently freeze this chat thread.
+            <p id="dm-block-desc" style={{ fontSize: 14, color: 'var(--text-secondary)', margin: '0 0 18px', lineHeight: 1.45 }}>
+              They'll disappear from your rooms, your connection ends, and neither of you can message the other.
             </p>
             <div style={{ display: 'flex', gap: 10 }}>
               <button
+                autoFocus
                 onClick={() => setShowBlockConfirm(false)}
+                disabled={blocking}
                 className="press"
                 style={{
                   flex: 1,
-                  padding: '12px',
+                  minHeight: 48,
                   borderRadius: 'var(--radius-pill)',
-                  background: 'var(--bg-canvas)',
+                  background: 'var(--bg-surface)',
                   border: '1px solid var(--border-subtle)',
                   color: 'var(--text-primary)',
                   fontWeight: 700,
-                  fontSize: 14,
+                  fontSize: 15,
                   cursor: 'pointer'
                 }}
               >
@@ -402,17 +390,18 @@ export function DirectChatScreen({ currentUser, peer, onBack, onBlocked }: Props
               </button>
               <button
                 onClick={handleBlockConfirm}
+                disabled={blocking}
                 className="press btn-danger"
                 style={{
                   flex: 1,
-                  padding: '12px',
+                  minHeight: 48,
                   borderRadius: 'var(--radius-pill)',
                   fontWeight: 700,
-                  fontSize: 14,
-                  cursor: 'pointer'
+                  fontSize: 15,
+                  cursor: blocking ? 'progress' : 'pointer'
                 }}
               >
-                Confirm Block
+                {blocking ? 'Blocking…' : 'Block'}
               </button>
             </div>
           </div>
@@ -427,16 +416,17 @@ export function DirectChatScreen({ currentUser, peer, onBack, onBlocked }: Props
           className="glass animate-fade-in"
           style={{
             position: 'fixed',
-            bottom: 'calc(80px + env(safe-area-inset-bottom))',
+            bottom: 'calc(88px + env(safe-area-inset-bottom))',
             left: '50%',
             transform: 'translateX(-50%)',
             padding: '10px 18px',
-            borderRadius: 999,
+            borderRadius: 'var(--radius-full)',
             color: 'var(--text-primary)',
-            fontSize: 13,
+            fontSize: 14,
             fontWeight: 700,
             zIndex: 110,
-            boxShadow: 'var(--shadow-lg)'
+            boxShadow: 'var(--shadow-lg)',
+            maxWidth: 'calc(100vw - 32px)'
           }}
         >
           {toastMsg}
@@ -445,3 +435,19 @@ export function DirectChatScreen({ currentUser, peer, onBack, onBlocked }: Props
     </div>
   );
 }
+
+const menuItem: React.CSSProperties = {
+  width: '100%',
+  minHeight: 48,
+  padding: '0 16px',
+  background: 'none',
+  border: 'none',
+  color: 'var(--text-primary)',
+  fontSize: 15,
+  fontWeight: 600,
+  display: 'flex',
+  alignItems: 'center',
+  gap: 10,
+  cursor: 'pointer',
+  textAlign: 'left'
+};

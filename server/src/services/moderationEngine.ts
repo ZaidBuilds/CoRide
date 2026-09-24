@@ -41,7 +41,20 @@ export class ModerationEngine {
   private static readonly MUTE_THRESHOLD = 30;
   private static readonly SHADOW_BAN_THRESHOLD = 10;
 
-  private constructor() {}
+  private constructor() {
+    // Drop rate-limit windows that have fully expired so the map stays bounded.
+    const sweep = setInterval(() => {
+      const now = Date.now();
+      const maxWindow = Math.max(...Object.values(ModerationEngine.LIMITS).map(l => l.windowMs));
+      for (const [uid, buckets] of this.rateBuckets) {
+        for (const [action, b] of buckets) {
+          if (now - b.windowStart > maxWindow) buckets.delete(action);
+        }
+        if (buckets.size === 0) this.rateBuckets.delete(uid);
+      }
+    }, 10 * 60 * 1000);
+    sweep.unref();
+  }
 
   public static getInstance(): ModerationEngine {
     if (!ModerationEngine.instance) {
@@ -87,29 +100,48 @@ export class ModerationEngine {
 
   // ─── Reputation ───
 
+  /**
+   * Read-only view. Unknown users get a fresh default that is NOT stored —
+   * previously any GET /api/reputation/<random> inserted an entry, letting a
+   * caller grow this map without bound.
+   */
   public getReputation(userId: string): ReputationEntry {
-    if (!this.reputations.has(userId)) {
-      this.reputations.set(userId, {
-        userId,
-        score: 100,
-        totalReports: 0,
-        totalBlocks: 0,
-        positiveInteractions: 0,
-        createdAt: Date.now()
-      });
+    return this.reputations.get(userId) || {
+      userId,
+      score: 100,
+      totalReports: 0,
+      totalBlocks: 0,
+      positiveInteractions: 0,
+      createdAt: Date.now()
+    };
+  }
+
+  /** Stored entry for mutation. */
+  private ensureReputation(userId: string): ReputationEntry {
+    let rep = this.reputations.get(userId);
+    if (!rep) {
+      rep = this.getReputation(userId);
+      this.reputations.set(userId, rep);
     }
-    return this.reputations.get(userId)!;
+    return rep;
+  }
+
+  /** Account deletion: drop per-user moderation state. */
+  public forgetUser(userId: string): void {
+    this.reputations.delete(userId);
+    this.rateBuckets.delete(userId);
+    this.recentMessages.delete(userId);
   }
 
   public decrementReputation(userId: string, amount: number, reason: 'report' | 'block'): void {
-    const rep = this.getReputation(userId);
+    const rep = this.ensureReputation(userId);
     rep.score = Math.max(0, rep.score - amount);
     if (reason === 'report') rep.totalReports++;
     if (reason === 'block') rep.totalBlocks++;
   }
 
   public incrementReputation(userId: string, amount: number): void {
-    const rep = this.getReputation(userId);
+    const rep = this.ensureReputation(userId);
     rep.score = Math.min(200, rep.score + amount);
     rep.positiveInteractions++;
   }

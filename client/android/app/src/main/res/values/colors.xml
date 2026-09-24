@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Brand + surfaces. Keep in sync with --brand-fill / --bg-base in client/src/index.css. -->
+    <color name="colorPrimary">#5646E6</color>
+    <color name="colorPrimaryDark">#0B0D12</color>
+    <color name="colorAccent">#6655F2</color>
+    <!-- Shown behind the WebView before first paint and behind the system bars
+         on devices that pad instead of drawing edge-to-edge. The app is
+         dark-first, so this matches the dark --bg-base. -->
+    <color name="coride_window_bg">#0B0D12</color>
+</resources>
