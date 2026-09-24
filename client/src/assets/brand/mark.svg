@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <title>CoRide</title>
+  <!-- Two riders on one route: parallel track arcs forming a C, ending at a station. -->
+  <rect width="64" height="64" rx="18" fill="#C8F031"/>
+  <path d="M44 17.6A18 18 0 1 0 44 46.4" fill="none" stroke="#111418" stroke-width="5.5" stroke-linecap="round"/>
+  <path d="M40.6 24.5A10.5 10.5 0 1 0 40.6 39.5" fill="none" stroke="#111418" stroke-width="5.5" stroke-linecap="round"/>
+  <circle cx="47" cy="32" r="5" fill="#111418"/>
+</svg>
