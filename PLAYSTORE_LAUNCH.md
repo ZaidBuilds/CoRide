@@ -108,14 +108,8 @@ Say in the description that it's for Delhi Metro and that users are pseudonymous
 
 - Identity is an anonymous device token. Reinstalling the app loses the account,
   with no way to recover it. Add Google Sign-In or phone OTP before scaling.
-- **Android Back button** closes the app from every screen until you run
-  `cd client && npm i @capacitor/app && npx cap sync android`. The back handling
-  is already written; the plugin switches it on.
-- **Launcher icon and splash** are still Capacitor defaults. Generate them with
-  `npx @capacitor/assets generate` before the store listing.
 - There is no moderator screen. Reports are stored, and you resolve them with `curl -H "x-admin-token: …"`.
 - Room chat in a live room isn't stored, so people who join late see an empty chat.
   DMs load the last 50 messages, with no paging yet.
 - No "seen" receipts in DMs yet.
 - One server instance only (both storage modes).
-- Check the Safety Centre helpline numbers (112, 1091, DMRC 155370, CISF 155655) before launch.
