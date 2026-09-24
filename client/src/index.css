@@ -974,7 +974,7 @@ details[open] > summary .onb-chevron { transform: rotate(180deg) }
 @media (hover: hover) and (pointer: fine) {
   .btn-primary:hover { background: var(--signal-press) }
   .btn-tonal:hover, .pill-button.secondary:hover { background: var(--bg-press) }
-  .icon-btn:hover, .list-row:hover { background: var(--bg-tonal) }
+  .icon-btn:hover, button.list-row:hover, a.list-row:hover { background: var(--bg-tonal) }
   .traveler-card:hover { background: var(--bg-elevated) }
   .section-head .link:hover, .link-btn:hover { text-decoration-color: currentColor }
   .bottom-nav-item:hover { color: var(--text-primary) }

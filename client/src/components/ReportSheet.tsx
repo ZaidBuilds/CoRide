@@ -1,11 +1,11 @@
 import { useState } from 'react';
-import { Check, CheckCircle2 } from 'lucide-react';
-import { ProfileSheet } from './ProfileSheet';
+import { CheckIcon, CheckCircleIcon } from '@phosphor-icons/react';
 import type { RoomPresenceTraveler } from '../types';
 import { authHeaders } from '../utils/auth';
 import { triggerHaptic } from '../utils/nativeBridge';
 import { API } from '../config';
-
+import { Sheet } from './ui/Sheet';
+import { Button } from './ui/Button';
 
 // Values must match the server's REPORT_CATEGORIES exactly.
 const CATEGORIES: { value: string; label: string; hint: string }[] = [
@@ -13,7 +13,7 @@ const CATEGORIES: { value: string; label: string; hint: string }[] = [
   { value: 'inappropriate', label: 'Inappropriate content', hint: 'Sexual, hateful or violent messages' },
   { value: 'spam', label: 'Spam or scam', hint: 'Selling, promotions, suspicious links' },
   { value: 'impersonation', label: 'Pretending to be someone', hint: 'Fake identity or someone you know' },
-  { value: 'other', label: 'Something else', hint: 'Tell us in the note below' }
+  { value: 'other', label: 'Something else', hint: 'Tell us in the note below' },
 ];
 
 const NOTE_MAX = 280;
@@ -25,14 +25,14 @@ interface Props {
   onClose: () => void;
   /** Called with the server's confirmation message once the user dismisses the confirmation. */
   onReported: (message: string) => void;
-  /** Called if the reporter also chose to block — lets the parent hide that person immediately. */
+  /** Called if the reporter also chose to block: lets the parent hide that person immediately. */
   onBlocked?: (targetId: string) => void;
 }
 
 type Step = 'form' | 'done';
 
 /**
- * Report flow in a bottom sheet: reason → optional note → optional block →
+ * Report flow in a bottom sheet: reason, optional note, optional block, then a
  * confirmation. POSTs /api/reports (and /api/blocks when asked) itself.
  */
 export function ReportSheet({ open, traveler, currentUserId, onClose, onReported, onBlocked }: Props) {
@@ -89,10 +89,10 @@ export function ReportSheet({ open, traveler, currentUserId, onClose, onReported
       const res = await fetch(`${API}/api/reports`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
-        body: JSON.stringify({ targetId: traveler.id, category, note: note.trim() || undefined })
+        body: JSON.stringify({ targetId: traveler.id, category, note: note.trim() || undefined }),
       });
       const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body.error || `Couldn’t send your report (error ${res.status}).`);
+      if (!res.ok) throw new Error(body.error || `Couldn't send your report (error ${res.status}).`);
 
       let blocked: 'none' | 'blocked' | 'failed' = 'none';
       if (alsoBlock) {
@@ -100,7 +100,7 @@ export function ReportSheet({ open, traveler, currentUserId, onClose, onReported
           const b = await fetch(`${API}/api/blocks`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', ...authHeaders() },
-            body: JSON.stringify({ targetId: traveler.id })
+            body: JSON.stringify({ targetId: traveler.id }),
           });
           blocked = b.ok ? 'blocked' : 'failed';
         } catch {
@@ -116,148 +116,130 @@ export function ReportSheet({ open, traveler, currentUserId, onClose, onReported
     } catch (err) {
       setError(
         err instanceof TypeError
-          ? 'No connection. Your report wasn’t sent — try again when you’re back online.'
-          : err instanceof Error ? err.message : 'Couldn’t send your report.'
+          ? "No connection. Your report wasn't sent. Try again when you're back online."
+          : err instanceof Error ? err.message : "Couldn't send your report."
       );
     } finally {
       setSubmitting(false);
     }
   };
 
-  return (
-    <ProfileSheet open={open} onClose={close} labelledBy="report-sheet-title">
-      {step === 'done' ? (
-        <div role="status" aria-live="polite" style={{ textAlign: 'center', padding: '8px 0 4px' }}>
-          <CheckCircle2 size={40} aria-hidden="true" style={{ color: 'var(--status-success)' }} />
-          <h2 id="report-sheet-title" className="display" style={{ fontSize: 20, margin: '12px 0 4px', color: 'var(--text-primary)' }}>
-            Thanks for telling us
-          </h2>
-          <p style={{ fontSize: 14, lineHeight: '20px', color: 'var(--text-secondary)', margin: '0 0 12px' }}>
-            The CoRide team reviews every report. {name} won’t know it was you.
+  if (step === 'done') {
+    return (
+      <Sheet open={open} onClose={close} ariaLabel="Report sent" key="report-sheet">
+        <div role="status" aria-live="polite">
+          <span
+            aria-hidden="true"
+            style={{ width: 48, height: 48, borderRadius: 'var(--radius-squircle)', background: 'var(--success-container)', color: 'var(--success-text)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          >
+            <CheckCircleIcon size={26} weight="fill" />
+          </span>
+          <h2 className="sheet-title" style={{ marginTop: 16 }}>Thanks for telling us</h2>
+          <p className="type-body" style={{ color: 'var(--text-secondary)' }}>
+            The CoRide team reviews every report. {name} won't know it was you.
           </p>
           {blockResult === 'blocked' && (
-            <p style={{ fontSize: 14, lineHeight: '20px', color: 'var(--text-secondary)', margin: '0 0 12px' }}>
-              You’ve also blocked {name}. You won’t see each other in rooms and they can’t message you.
+            <p className="type-body" style={{ color: 'var(--text-secondary)', marginTop: 8 }}>
+              You've also blocked {name}. You won't see each other in rooms and they can't message you.
             </p>
           )}
           {blockResult === 'failed' && (
-            <p role="alert" style={{ fontSize: 14, lineHeight: '20px', color: 'var(--accent-rose-text)', margin: '0 0 12px' }}>
-              We couldn’t block {name} just now. Open their profile and choose Block to try again.
+            <p role="alert" className="type-body" style={{ color: 'var(--danger-text)', marginTop: 8 }}>
+              We couldn't block {name} just now. Open their profile and choose Block to try again.
             </p>
           )}
-          <p style={{ fontSize: 13, lineHeight: '18px', color: 'var(--text-muted)', margin: '0 0 16px' }}>
+          <p className="type-meta" style={{ color: 'var(--text-muted)', margin: '12px 0 20px' }}>
             If you feel unsafe right now, call 112 or tell metro staff.
           </p>
-          <button type="button" className="pill-button primary" style={{ width: '100%' }} onClick={close}>
-            Done
-          </button>
+          <Button type="button" variant="secondary" fullWidth onClick={close}>Done</Button>
         </div>
-      ) : (
-        <>
-          <h2 id="report-sheet-title" className="display" style={{ fontSize: 20, margin: '0 0 4px', color: 'var(--text-primary)' }}>
-            Report {name}
-          </h2>
-          <p style={{ fontSize: 13, lineHeight: '18px', color: 'var(--text-muted)', margin: '0 0 16px' }}>
-            Your report is private — {name} won’t be told who sent it.
-          </p>
+      </Sheet>
+    );
+  }
 
-          <div id="report-reason-label" style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-secondary)', margin: '0 0 6px' }}>
-            What’s going on?
-          </div>
-          <div className="list-group" role="radiogroup" aria-labelledby="report-reason-label" style={{ marginBottom: 16 }}>
-            {CATEGORIES.map(c => {
-              const selected = c.value === category;
-              return (
-                <button
-                  key={c.value}
-                  type="button"
-                  role="radio"
-                  aria-checked={selected}
-                  className="list-row"
-                  onClick={() => { triggerHaptic('light'); setCategory(c.value); setError(null); }}
-                  style={{ cursor: 'pointer' }}
-                >
-                  <span className="row-text">
-                    <span className="row-title">{c.label}</span>
-                    <span className="row-sub">{c.hint}</span>
-                  </span>
-                  <span
-                    aria-hidden="true"
-                    style={{
-                      width: 22, height: 22, flexShrink: 0, borderRadius: '50%',
-                      border: `2px solid ${selected ? 'var(--accent)' : 'var(--border-strong)'}`,
-                      background: selected ? 'var(--accent)' : 'transparent',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-on-accent)'
-                    }}
-                  >
-                    {selected && <Check size={14} strokeWidth={3} />}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
+  return (
+    <Sheet open={open} onClose={close} title={`Report ${name}`} key="report-sheet">
+      <p className="type-meta" style={{ color: 'var(--text-muted)', marginBottom: 20 }}>
+        Your report is private. {name} won't be told who sent it.
+      </p>
 
-          <label htmlFor="report-note" style={{ display: 'block', fontSize: 13, fontWeight: 700, color: 'var(--text-secondary)', margin: '0 0 6px' }}>
-            Add details <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>({category === 'other' ? 'recommended' : 'optional'})</span>
-          </label>
-          <textarea
-            id="report-note"
-            value={note}
-            onChange={e => setNote(e.target.value)}
-            rows={3}
-            maxLength={NOTE_MAX}
-            placeholder="What happened? Where and when?"
-            aria-describedby="report-note-count"
-            style={{
-              width: '100%', resize: 'none', padding: '10px 14px', borderRadius: 'var(--radius-md)',
-              background: 'var(--bg-input)', border: '1px solid var(--border-subtle)',
-              color: 'var(--text-primary)', fontSize: 16, fontFamily: 'inherit'
-            }}
-          />
-          <div id="report-note-count" style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'right', marginTop: 2 }}>
-            {note.length}/{NOTE_MAX}
-          </div>
-
-          <label
-            style={{
-              display: 'flex', alignItems: 'center', gap: 12, minHeight: 48, marginTop: 8,
-              padding: '8px 12px', borderRadius: 'var(--radius-md)', background: 'var(--bg-card)',
-              border: '1px solid var(--border-card)', cursor: 'pointer'
-            }}
-          >
-            <input
-              type="checkbox"
-              checked={alsoBlock}
-              onChange={e => setAlsoBlock(e.target.checked)}
-              style={{ width: 20, height: 20, accentColor: 'var(--status-danger)', flexShrink: 0 }}
-            />
-            <span style={{ flex: 1, minWidth: 0 }}>
-              <span style={{ display: 'block', fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>Also block {name}</span>
-              <span style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)' }}>You’ll stop seeing each other and they can’t message you</span>
-            </span>
-          </label>
-
-          {error && (
-            <div role="alert" style={{ fontSize: 13, lineHeight: '18px', color: 'var(--accent-rose-text)', marginTop: 12 }}>{error}</div>
-          )}
-
-          <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
-            <button type="button" className="pill-button secondary" style={{ flex: 1 }} onClick={close} disabled={submitting}>
-              Cancel
-            </button>
+      <div id="report-reason-label" className="field-label">What's going on?</div>
+      <div className="list-group" role="radiogroup" aria-labelledby="report-reason-label" style={{ background: 'var(--bg-sunken)' }}>
+        {CATEGORIES.map(c => {
+          const selected = c.value === category;
+          return (
             <button
+              key={c.value}
               type="button"
-              className="pill-button danger"
-              style={{ flex: 1, opacity: !category || submitting ? 0.5 : 1 }}
-              disabled={!category || submitting}
-              aria-busy={submitting}
-              onClick={submit}
+              role="radio"
+              aria-checked={selected}
+              className="list-row"
+              onClick={() => { triggerHaptic('light'); setCategory(c.value); setError(null); }}
+              style={{ cursor: 'pointer' }}
             >
-              {submitting ? 'Sending…' : 'Send report'}
+              <span className="row-text">
+                <span className="row-title">{c.label}</span>
+                <span className="row-sub">{c.hint}</span>
+              </span>
+              <span
+                aria-hidden="true"
+                style={{
+                  width: 24, height: 24, flexShrink: 0, borderRadius: '50%',
+                  border: `2px solid ${selected ? 'var(--ink)' : 'var(--border-strong)'}`,
+                  background: selected ? 'var(--ink)' : 'transparent',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-inverse)',
+                }}
+              >
+                {selected && <CheckIcon size={14} weight="bold" />}
+              </span>
             </button>
-          </div>
-        </>
+          );
+        })}
+      </div>
+
+      <label htmlFor="report-note" className="field-label">
+        Add details <span style={{ fontWeight: 480, color: 'var(--text-muted)' }}>({category === 'other' ? 'recommended' : 'optional'})</span>
+      </label>
+      <textarea
+        id="report-note"
+        className="input"
+        value={note}
+        onChange={e => setNote(e.target.value)}
+        rows={3}
+        maxLength={NOTE_MAX}
+        placeholder="What happened? Where and when?"
+        aria-describedby="report-note-count"
+        style={{ resize: 'none', fontFamily: 'inherit' }}
+      />
+      <div id="report-note-count" className="type-meta tnum" style={{ color: 'var(--text-muted)', textAlign: 'right', marginTop: 4 }}>
+        {note.length}/{NOTE_MAX}
+      </div>
+
+      <label className="list-group" style={{ display: 'flex', alignItems: 'center', gap: 12, minHeight: 56, padding: '12px 16px', margin: '12px 0 0', cursor: 'pointer', background: 'var(--bg-sunken)' }}>
+        <input
+          type="checkbox"
+          checked={alsoBlock}
+          onChange={e => setAlsoBlock(e.target.checked)}
+          style={{ width: 22, height: 22, accentColor: 'var(--danger-fill)', flexShrink: 0 }}
+        />
+        <span style={{ flex: 1, minWidth: 0 }}>
+          <span className="type-label" style={{ display: 'block', color: 'var(--text-primary)' }}>Also block {name}</span>
+          <span className="type-meta" style={{ display: 'block', color: 'var(--text-muted)' }}>You'll stop seeing each other and they can't message you</span>
+        </span>
+      </label>
+
+      {error && (
+        <p role="alert" className="type-meta" style={{ color: 'var(--danger-text)', marginTop: 12 }}>{error}</p>
       )}
-    </ProfileSheet>
+
+      <div style={{ display: 'flex', gap: 8, marginTop: 20 }}>
+        <Button type="button" variant="tonal" style={{ flex: 1 }} onClick={close} disabled={submitting}>
+          Cancel
+        </Button>
+        <Button type="button" variant="danger" style={{ flex: 1 }} disabled={!category} isLoading={submitting} onClick={submit}>
+          Send report
+        </Button>
+      </div>
+    </Sheet>
   );
 }

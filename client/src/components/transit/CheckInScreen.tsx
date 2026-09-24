@@ -1,9 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { DELHI_METRO_LINES } from '../../data/metroData';
+import { CaretRightIcon, CheckCircleIcon, CheckIcon, MagnifyingGlassIcon, ArrowRightIcon, UsersThreeIcon, XIcon } from '@phosphor-icons/react';
+import { DELHI_METRO_LINES, getLineById } from '../../data/metroData';
 import { triggerHaptic } from '../../utils/nativeBridge';
-import { ArrowLeftRight, CheckCircle2, ChevronRight, MapPin, Search, Users, X } from 'lucide-react';
-import type { MetroLine } from '../../types';
-import { textOnLineColor } from './lineSegments';
+import { lineStyle } from '../../utils/lineStyle';
+import type { MetroLine, MetroStation } from '../../types';
+import { terminalsAt, shortLineName } from './lineSegments';
+import { Button } from '../ui/Button';
+import { IconButton } from '../ui/IconButton';
+import { LinePill } from '../ui/LinePill';
+import { StationSign } from '../ui/StationSign';
 
 interface CheckInScreenProps {
   /** direction is passed as "Towards <terminal>", the server's format. */
@@ -16,13 +21,26 @@ interface CheckInScreenProps {
 }
 
 const baseName = (name: string) => name.split(' (')[0].trim().toLowerCase();
+const short = (name: string) => name.split(' (')[0].trim();
 
+/** Other lines at this station, for interchange pills. */
+function interchanges(line: MetroLine, st: MetroStation): MetroLine[] {
+  return (st.interchangeLines || [])
+    .map(id => getLineById(id))
+    .filter((l): l is MetroLine => !!l && l.id !== line.id);
+}
+
+/**
+ * Check in: a three-step ticket-machine flow. Line, station, direction, then
+ * one lime "Check in". The confirmed state is a station sign, and only shows
+ * after the server accepted the check-in.
+ */
 export const CheckInScreen: React.FC<CheckInScreenProps> = ({
   onCheckIn,
   onCancel,
   initialLineId = 'blue',
   initialStationId = 'rajiv_chowk',
-  initialDirection
+  initialDirection,
 }) => {
   const [selectedLineId, setSelectedLineId] = useState<string>(initialLineId);
   const selectedLine = DELHI_METRO_LINES.find(l => l.id === selectedLineId) || DELHI_METRO_LINES[0];
@@ -34,13 +52,13 @@ export const CheckInScreen: React.FC<CheckInScreenProps> = ({
   );
   const selectedStation = selectedLine.stations.find(s => s.id === selectedStationId) || selectedLine.stations[0];
 
-  // 0 = towards terminal B, 1 = towards terminal A. The server sends
-  // "Towards <terminal>", so match on the terminal name.
-  const [directionIndex, setDirectionIndex] = useState<0 | 1>(() =>
-    initialDirection && initialDirection.toLowerCase().includes(selectedLine.terminalA.toLowerCase()) ? 1 : 0
+  // 'b' = towards terminal B, 'a' = towards terminal A. The server sends
+  // "Towards <terminal>", so match on terminal A's name.
+  const [direction, setDirection] = useState<'a' | 'b'>(() =>
+    initialDirection && initialDirection.toLowerCase().includes(selectedLine.terminalA.toLowerCase()) ? 'a' : 'b'
   );
-  const activeDestination = directionIndex === 0 ? selectedLine.terminalB : selectedLine.terminalA;
-  const activeOrigin = directionIndex === 0 ? selectedLine.terminalA : selectedLine.terminalB;
+  const terminals = terminalsAt(selectedLine, selectedStation.id);
+  const destination = direction === 'a' ? terminals.a : terminals.b;
 
   const [isStationPickerOpen, setIsStationPickerOpen] = useState(false);
   const [stationSearchQuery, setStationSearchQuery] = useState('');
@@ -75,18 +93,20 @@ export const CheckInScreen: React.FC<CheckInScreenProps> = ({
     if (isStationPickerOpen) searchRef.current?.focus();
   }, [isStationPickerOpen]);
 
-  const handleToggleDirection = () => {
-    triggerHaptic('medium');
-    setDirectionIndex(prev => (prev === 0 ? 1 : 0));
-  };
-
   const handleLineSelect = (line: MetroLine) => {
+    if (line.id === selectedLineId) return;
     triggerHaptic('light');
     setSelectedLineId(line.id);
     // Keep the station when it's an interchange on the new line.
     const same = line.stations.find(s => baseName(s.name) === baseName(selectedStation.name));
     setSelectedStationId(same?.id || line.stations[0]?.id || '');
-    setDirectionIndex(0);
+    setDirection('b');
+    setError(null);
+  };
+
+  const chooseDirection = (d: 'a' | 'b') => {
+    triggerHaptic('light');
+    setDirection(d);
     setError(null);
   };
 
@@ -103,11 +123,11 @@ export const CheckInScreen: React.FC<CheckInScreenProps> = ({
     setError(null);
     triggerHaptic('medium');
     try {
-      await onCheckIn(selectedLine.id, selectedStation.id, `Towards ${activeDestination}`);
+      await onCheckIn(selectedLine.id, selectedStation.id, `Towards ${destination}`);
       setIsConfirmed(true);
       triggerHaptic('success');
     } catch {
-      setError('Couldn’t check you in. Check your connection and try again.');
+      setError("Couldn't check you in. Check your connection and try again.");
       triggerHaptic('error');
     } finally {
       setIsSubmitting(false);
@@ -119,7 +139,7 @@ export const CheckInScreen: React.FC<CheckInScreenProps> = ({
     ? selectedLine.stations.filter(s => s.name.toLowerCase().includes(q) || (s.hindiName && s.hindiName.includes(stationSearchQuery.trim())))
     : selectedLine.stations;
 
-  const onLine = textOnLineColor(selectedLine.color);
+  const stationLines = [selectedLine, ...interchanges(selectedLine, selectedStation)];
 
   return (
     <div
@@ -127,334 +147,298 @@ export const CheckInScreen: React.FC<CheckInScreenProps> = ({
       aria-modal="true"
       aria-labelledby="checkin-title"
       style={{
+        ...lineStyle(selectedLine),
         position: 'fixed',
         inset: 0,
         zIndex: 100,
-        backgroundColor: 'var(--bg-canvas)',
+        background: 'var(--bg-base)',
         color: 'var(--text-primary)',
         display: 'flex',
         flexDirection: 'column',
-        overflow: 'hidden'
+        overflow: 'hidden',
       }}
     >
-      <header
-        style={{
-          paddingTop: 'calc(8px + var(--safe-top))',
-          paddingBottom: 8,
-          paddingLeft: 16,
-          paddingRight: 8,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 8,
-          borderTop: `4px solid ${selectedLine.color}`,
-          borderBottom: '1px solid var(--border-subtle)',
-          backgroundColor: 'var(--bg-surface)'
-        }}
-      >
-        <h1 id="checkin-title" style={{ fontSize: 20, lineHeight: '28px', fontWeight: 700, margin: 0 }}>
-          Check in
-        </h1>
-        {onCancel && !isConfirmed && (
-          <button type="button" onClick={onCancel} className="icon-btn" style={{ background: 'transparent', border: 'none' }} aria-label="Close check-in">
-            <X size={22} />
-          </button>
-        )}
-      </header>
-
-      <div style={{ flex: 1, overflowY: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 20 }}>
-        {/* Line */}
-        <div>
-          <div id="checkin-line-label" style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 8 }}>
-            Line
-          </div>
-          <div role="radiogroup" aria-labelledby="checkin-line-label" style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4, scrollbarWidth: 'none' }}>
-            {DELHI_METRO_LINES.map(line => {
-              const isSelected = line.id === selectedLineId;
-              return (
-                <button
-                  key={line.id}
-                  type="button"
-                  role="radio"
-                  aria-checked={isSelected}
-                  onClick={() => handleLineSelect(line)}
-                  className="press"
-                  style={{
-                    minHeight: 48,
-                    padding: '0 16px',
-                    borderRadius: 'var(--radius-pill)',
-                    backgroundColor: isSelected ? line.color : 'var(--bg-surface)',
-                    color: isSelected ? textOnLineColor(line.color) : 'var(--text-secondary)',
-                    border: `1px solid ${isSelected ? line.color : 'var(--border-subtle)'}`,
-                    cursor: 'pointer',
-                    fontWeight: 700,
-                    fontSize: 14,
-                    whiteSpace: 'nowrap',
-                    flexShrink: 0,
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 8
-                  }}
-                >
-                  {!isSelected && <span aria-hidden="true" style={{ width: 10, height: 10, borderRadius: '50%', backgroundColor: line.color }} />}
-                  {line.name.replace(' Line', '')}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Station */}
-        <div>
-          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 8 }}>Station</div>
-          <button
-            ref={stationButtonRef}
-            type="button"
-            onClick={() => setIsStationPickerOpen(true)}
-            aria-haspopup="dialog"
-            aria-label={`Station: ${selectedStation.name}. Change station`}
-            className="press"
-            style={{
-              width: '100%',
-              textAlign: 'left',
-              backgroundColor: 'var(--bg-surface)',
-              border: '1px solid var(--border-subtle)',
-              borderRadius: 'var(--radius-lg)',
-              padding: 16,
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 12,
-              color: 'var(--text-primary)'
-            }}
-          >
-            <MapPin size={22} aria-hidden="true" color={selectedLine.color} style={{ flexShrink: 0 }} />
-            <span style={{ flex: 1, minWidth: 0 }}>
-              <span className="type-heading" style={{ display: 'block', wordBreak: 'break-word' }}>{selectedStation.name}</span>
-              {selectedStation.hindiName && (
-                <span lang="hi" style={{ display: 'block', fontSize: 14, color: 'var(--text-secondary)' }}>{selectedStation.hindiName}</span>
-              )}
-              {selectedStation.isInterchange && (
-                <span style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>Interchange station</span>
-              )}
-            </span>
-            <ChevronRight size={20} aria-hidden="true" color="var(--text-muted)" />
-          </button>
-        </div>
-
-        {/* Direction */}
-        <div>
-          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 8 }}>Direction</div>
-          <div
-            style={{
-              backgroundColor: 'var(--bg-surface)',
-              border: '1px solid var(--border-subtle)',
-              borderRadius: 'var(--radius-lg)',
-              padding: '12px 12px 12px 16px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 12
-            }}
-          >
-            <div style={{ flex: 1, minWidth: 0 }} aria-live="polite">
-              <div style={{ fontSize: 17, lineHeight: '24px', fontWeight: 700, color: 'var(--text-primary)' }}>
-                Towards {activeDestination}
-              </div>
-              <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>From {activeOrigin}</div>
-            </div>
-            <button
-              type="button"
-              onClick={handleToggleDirection}
-              className="icon-btn"
-              aria-label={`Switch direction to towards ${activeOrigin}`}
-            >
-              <ArrowLeftRight size={20} color={selectedLine.color} />
-            </button>
-          </div>
-        </div>
-
-        {/* What checking in shares — matches the privacy policy */}
-        <div
+      <div style={{ width: '100%', maxWidth: 'var(--shell-max)', margin: '0 auto', flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+        <header
           style={{
-            padding: 16,
-            borderRadius: 'var(--radius-lg)',
-            backgroundColor: 'var(--bg-card)',
-            border: '1px solid var(--border-card)',
-            display: 'flex',
-            alignItems: 'flex-start',
-            gap: 12
-          }}
-        >
-          <Users size={20} aria-hidden="true" color="var(--text-secondary)" style={{ flexShrink: 0, marginTop: 1 }} />
-          <p style={{ fontSize: 13, lineHeight: '18px', color: 'var(--text-secondary)', margin: 0 }}>
-            You’ll join the live room for this station and direction. Riders there can see your display name, avatar, bio and interests. You leave the room about a minute after you close the app.
-          </p>
-        </div>
-      </div>
-
-      <div
-        style={{
-          padding: '12px 16px calc(12px + var(--safe-bottom))',
-          borderTop: '1px solid var(--border-subtle)',
-          backgroundColor: 'var(--bg-surface)'
-        }}
-      >
-        {error && (
-          <div role="alert" style={{ fontSize: 13, lineHeight: '18px', color: 'var(--accent-rose-text)', marginBottom: 8 }}>{error}</div>
-        )}
-        <button
-          type="button"
-          disabled={isSubmitting || isConfirmed}
-          onClick={handleConfirmCheckIn}
-          aria-busy={isSubmitting}
-          className="press"
-          style={{
-            width: '100%',
-            minHeight: 52,
-            padding: '12px 24px',
-            borderRadius: 'var(--radius-pill)',
-            backgroundColor: isConfirmed ? 'var(--status-success)' : selectedLine.color,
-            color: isConfirmed ? '#FFFFFF' : onLine,
-            border: 'none',
-            fontSize: 16,
-            lineHeight: '24px',
-            fontWeight: 800,
+            padding: 'calc(8px + var(--safe-top)) 4px 8px var(--gutter)',
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'center',
-            gap: 10,
-            cursor: isSubmitting || isConfirmed ? 'default' : 'pointer',
-            transition: 'background-color var(--motion-slow) var(--ease-decelerate)'
+            justifyContent: 'space-between',
+            gap: 8,
+            minHeight: 'calc(64px + var(--safe-top))',
+            boxShadow: 'inset 0 4px 0 var(--line)',
           }}
         >
-          {isConfirmed ? (
-            <>
-              <CheckCircle2 size={22} aria-hidden="true" />
-              <span role="status">Checked in at {selectedStation.name.split(' (')[0]}</span>
-            </>
-          ) : isSubmitting ? (
-            <>
-              <span
-                aria-hidden="true"
-                style={{
-                  display: 'inline-block',
-                  width: 18,
-                  height: 18,
-                  border: `2px solid ${onLine}`,
-                  borderTopColor: 'transparent',
-                  borderRadius: '50%',
-                  animation: 'spin 0.8s linear infinite'
-                }}
-              />
-              <span>Checking in…</span>
-            </>
-          ) : (
-            <span>Check in at {selectedStation.name.split(' (')[0]}</span>
+          <h1 id="checkin-title" className="type-title">
+            {isConfirmed ? 'Checked in' : 'Check in'}
+          </h1>
+          {onCancel && !isConfirmed && (
+            <IconButton label="Close check-in" variant="plain" onClick={onCancel}>
+              <XIcon size={24} aria-hidden="true" />
+            </IconButton>
           )}
-        </button>
+        </header>
+
+        {isConfirmed ? (
+          <div role="status" aria-live="polite" style={{ flex: 1, padding: '24px var(--gutter)', display: 'flex', flexDirection: 'column', gap: 24 }}>
+            <div className="card" style={{ padding: 20, boxShadow: 'inset 4px 0 0 var(--line)' }}>
+              <StationSign station={selectedStation} lines={stationLines} towards={destination} as="h2" />
+            </div>
+            <p className="type-body" style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-secondary)' }}>
+              <CheckCircleIcon size={22} weight="fill" aria-hidden="true" style={{ color: 'var(--status-ok)', flexShrink: 0 }} />
+              You're in the room for this station and direction.
+            </p>
+          </div>
+        ) : (
+          <div style={{ flex: 1, overflowY: 'auto', padding: '16px var(--gutter) 24px', display: 'flex', flexDirection: 'column', gap: 28 }}>
+            {/* 1 Line */}
+            <section aria-labelledby="checkin-line-label">
+              <StepLabel n={1} id="checkin-line-label">Line</StepLabel>
+              <div role="radiogroup" aria-labelledby="checkin-line-label" style={{ display: 'flex', flexWrap: 'wrap', gap: 4, margin: '0 -3px' }}>
+                {DELHI_METRO_LINES.map(line => {
+                  const isSelected = line.id === selectedLineId;
+                  return (
+                    <button
+                      key={line.id}
+                      type="button"
+                      role="radio"
+                      aria-checked={isSelected}
+                      onClick={() => handleLineSelect(line)}
+                      className="press"
+                      style={{ minHeight: 48, padding: '0 3px', border: 'none', background: 'none', cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }}
+                    >
+                      <LinePill
+                        line={line}
+                        label={line.name.replace(/\s*\(.*\)/, '')}
+                        style={{
+                          height: 32, padding: '0 12px',
+                          ...(isSelected
+                            ? { outline: '2px solid var(--text-primary)', outlineOffset: 2 }
+                            : { background: 'transparent', color: 'var(--text-secondary)', boxShadow: 'inset 0 0 0 2px var(--line)' }),
+                        }}
+                      />
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+
+            {/* 2 Station */}
+            <section aria-labelledby="checkin-station-label">
+              <StepLabel n={2} id="checkin-station-label">Station</StepLabel>
+              <button
+                ref={stationButtonRef}
+                type="button"
+                onClick={() => setIsStationPickerOpen(true)}
+                aria-haspopup="dialog"
+                aria-label={`Station: ${selectedStation.name}. Change station`}
+                className="press"
+                style={{
+                  width: '100%', textAlign: 'left', cursor: 'pointer',
+                  background: 'var(--bg-surface)', border: 'none', borderRadius: 'var(--radius-card)',
+                  padding: '14px 12px 14px 20px', boxShadow: 'inset 4px 0 0 var(--line)',
+                  display: 'flex', alignItems: 'center', gap: 12, color: 'var(--text-primary)',
+                }}
+              >
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <span className="type-headline" style={{ display: 'block', overflowWrap: 'anywhere' }}>{selectedStation.name}</span>
+                  {selectedStation.hindiName && (
+                    <span lang="hi" className="type-hi type-meta" style={{ display: 'block', color: 'var(--text-muted)' }}>{selectedStation.hindiName}</span>
+                  )}
+                  {stationLines.length > 1 && (
+                    <span style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 8 }}>
+                      {stationLines.slice(1).map(l => <LinePill key={l.id} line={l} size="sm" />)}
+                    </span>
+                  )}
+                </span>
+                <span className="type-label" style={{ color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+                  Change <CaretRightIcon size={18} aria-hidden="true" />
+                </span>
+              </button>
+            </section>
+
+            {/* 3 Direction */}
+            <section aria-labelledby="checkin-direction-label">
+              <StepLabel n={3} id="checkin-direction-label">Direction</StepLabel>
+              <div role="radiogroup" aria-labelledby="checkin-direction-label" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                {(['b', 'a'] as const).map(d => {
+                  const isSelected = direction === d;
+                  const term = d === 'a' ? terminals.a : terminals.b;
+                  return (
+                    <button
+                      key={d}
+                      type="button"
+                      role="radio"
+                      aria-checked={isSelected}
+                      aria-label={`Towards ${term}`}
+                      onClick={() => chooseDirection(d)}
+                      className="press"
+                      style={{
+                        minHeight: 104, padding: 16, textAlign: 'left', cursor: 'pointer',
+                        border: 'none', borderRadius: 'var(--radius-card)',
+                        background: isSelected ? 'var(--ink)' : 'var(--bg-tonal)',
+                        color: isSelected ? 'var(--ink-inverse)' : 'var(--text-primary)',
+                        display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: 12,
+                      }}
+                    >
+                      <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                        <span className="type-meta" style={{ opacity: 0.8 }}>Towards</span>
+                        <ArrowRightIcon size={20} aria-hidden="true" />
+                      </span>
+                      <span className="type-headline" style={{ overflowWrap: 'anywhere' }}>{short(term)}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="type-meta" style={{ color: 'var(--text-muted)', marginTop: 8 }}>
+                Pick the terminal on the platform sign for your train.
+              </p>
+            </section>
+
+            {/* What checking in shares: matches the privacy policy */}
+            <p className="type-meta" style={{ display: 'flex', alignItems: 'flex-start', gap: 10, color: 'var(--text-secondary)' }}>
+              <UsersThreeIcon size={20} aria-hidden="true" style={{ flexShrink: 0, color: 'var(--text-muted)' }} />
+              You'll join the live room for this station and direction. Riders there see your display name, avatar, bio and interests. You leave the room about a minute after you close the app.
+            </p>
+          </div>
+        )}
+
+        {!isConfirmed && (
+          <div style={{ padding: '12px var(--gutter) calc(12px + var(--safe-bottom))', borderTop: '1px solid var(--border-subtle)', background: 'var(--bg-base)' }}>
+            {error && (
+              <p role="alert" className="type-meta" style={{ color: 'var(--danger-text)', marginBottom: 8 }}>{error}</p>
+            )}
+            <Button type="button" size="lg" fullWidth isLoading={isSubmitting} onClick={handleConfirmCheckIn} style={{ whiteSpace: 'normal' }}>
+              Check in at {short(selectedStation.name)}
+            </Button>
+          </div>
+        )}
       </div>
 
-      {/* Station picker */}
+      {/* Station picker: searchable list on a rail stripe */}
       {isStationPickerOpen && (
         <div
           role="dialog"
           aria-modal="true"
           aria-labelledby="station-picker-title"
-          style={{ position: 'absolute', inset: 0, zIndex: 150, backgroundColor: 'var(--bg-canvas)', display: 'flex', flexDirection: 'column' }}
+          style={{ position: 'absolute', inset: 0, zIndex: 1, background: 'var(--bg-base)', display: 'flex', flexDirection: 'column' }}
         >
-          <div
-            style={{
-              paddingTop: 'calc(8px + var(--safe-top))',
-              paddingBottom: 8,
-              paddingLeft: 16,
-              paddingRight: 8,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              borderBottom: '1px solid var(--border-subtle)',
-              backgroundColor: 'var(--bg-surface)'
-            }}
-          >
-            <h2 id="station-picker-title" style={{ fontSize: 20, lineHeight: '28px', fontWeight: 700, margin: 0 }}>
-              {selectedLine.name} stations
-            </h2>
-            <button type="button" onClick={closePicker} className="icon-btn" style={{ background: 'transparent', border: 'none' }} aria-label="Close station list">
-              <X size={22} />
-            </button>
-          </div>
-
-          <div style={{ padding: 16, borderBottom: '1px solid var(--border-subtle)', position: 'relative' }}>
-            <Search size={18} aria-hidden="true" color="var(--text-muted)" style={{ position: 'absolute', left: 30, top: '50%', transform: 'translateY(-50%)' }} />
-            <input
-              ref={searchRef}
-              type="search"
-              aria-label="Search stations"
-              placeholder="Search station or स्टेशन"
-              value={stationSearchQuery}
-              onChange={e => setStationSearchQuery(e.target.value)}
+          <div style={{ width: '100%', maxWidth: 'var(--shell-max)', margin: '0 auto', flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+            <div
               style={{
-                width: '100%',
-                minHeight: 48,
-                padding: '0 16px 0 44px',
-                borderRadius: 'var(--radius-pill)',
-                backgroundColor: 'var(--bg-input)',
-                border: '1px solid var(--border-subtle)',
-                color: 'var(--text-primary)',
-                fontSize: 16
+                padding: 'calc(8px + var(--safe-top)) 4px 8px var(--gutter)',
+                minHeight: 'calc(64px + var(--safe-top))',
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
               }}
-            />
-          </div>
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                <h2 id="station-picker-title" className="type-title">Station</h2>
+                <LinePill line={selectedLine} />
+              </div>
+              <IconButton label="Close station list" variant="plain" onClick={closePicker}>
+                <XIcon size={24} aria-hidden="true" />
+              </IconButton>
+            </div>
 
-          <ul style={{ flex: 1, overflowY: 'auto', listStyle: 'none', margin: 0, padding: '8px 8px calc(8px + var(--safe-bottom))' }}>
-            {filteredStations.length === 0 && (
-              <li style={{ padding: 24, textAlign: 'center', fontSize: 14, color: 'var(--text-muted)' }}>
-                No {selectedLine.name} station matches “{stationSearchQuery.trim()}”. Try another line?
-              </li>
-            )}
-            {filteredStations.map(st => {
-              const isSelected = st.id === selectedStationId;
-              return (
-                <li key={st.id}>
-                  <button
-                    type="button"
-                    aria-pressed={isSelected}
-                    onClick={() => {
-                      triggerHaptic('light');
-                      setSelectedStationId(st.id);
-                      setError(null);
-                      closePicker();
-                    }}
-                    className="press"
-                    style={{
-                      width: '100%',
-                      minHeight: 56,
-                      padding: '8px 16px',
-                      borderRadius: 'var(--radius-md)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      gap: 12,
-                      textAlign: 'left',
-                      border: 'none',
-                      backgroundColor: isSelected ? 'var(--bg-surface-raised)' : 'transparent',
-                      color: 'var(--text-primary)',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    <span style={{ minWidth: 0 }}>
-                      <span style={{ display: 'block', fontSize: 16, lineHeight: '22px', fontWeight: isSelected ? 700 : 500 }}>{st.name}</span>
-                      {st.hindiName && (
-                        <span lang="hi" style={{ display: 'block', fontSize: 13, color: 'var(--text-secondary)' }}>{st.hindiName}</span>
-                      )}
-                    </span>
-                    {isSelected && <CheckCircle2 size={20} aria-hidden="true" color={selectedLine.color} style={{ flexShrink: 0 }} />}
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
+            <div style={{ padding: '0 var(--gutter) 12px', position: 'relative' }}>
+              <MagnifyingGlassIcon size={20} aria-hidden="true" style={{ position: 'absolute', left: 30, top: 14, color: 'var(--text-muted)' }} />
+              <input
+                ref={searchRef}
+                type="search"
+                className="input"
+                aria-label="Search stations"
+                placeholder="Search in English or हिन्दी"
+                value={stationSearchQuery}
+                onChange={e => setStationSearchQuery(e.target.value)}
+                style={{ paddingLeft: 44 }}
+              />
+            </div>
+
+            <div style={{ flex: 1, overflowY: 'auto', padding: '0 var(--gutter) calc(16px + var(--safe-bottom))' }}>
+              {filteredStations.length === 0 ? (
+                <p className="type-body" style={{ padding: '24px 4px', color: 'var(--text-secondary)' }}>
+                  No {selectedLine.name} station matches "{stationSearchQuery.trim()}". It may be on another line.
+                </p>
+              ) : (
+                <ul className="card" style={{ listStyle: 'none', padding: '4px 0' }}>
+                  {filteredStations.map((st, i) => {
+                    const isSelected = st.id === selectedStationId;
+                    const others = interchanges(selectedLine, st);
+                    const first = i === 0, last = i === filteredStations.length - 1;
+                    return (
+                      <li key={st.id}>
+                        <button
+                          type="button"
+                          aria-pressed={isSelected}
+                          onClick={() => {
+                            triggerHaptic('light');
+                            setSelectedStationId(st.id);
+                            setError(null);
+                            closePicker();
+                          }}
+                          style={{
+                            width: '100%', minHeight: 56, padding: '0 16px 0 12px',
+                            display: 'flex', alignItems: 'stretch', gap: 12, textAlign: 'left',
+                            border: 'none', background: isSelected ? 'var(--bg-press)' : 'transparent',
+                            color: 'var(--text-primary)', cursor: 'pointer',
+                          }}
+                        >
+                          {/* Rail stripe with the stop's node */}
+                          <span aria-hidden="true" style={{ position: 'relative', width: 20, flexShrink: 0 }}>
+                            <span style={{ position: 'absolute', left: 8, width: 4, top: first && !q ? '50%' : 0, bottom: last && !q ? '50%' : 0, background: 'var(--line)', opacity: q ? 0.4 : 1 }} />
+                            <span
+                              style={{
+                                position: 'absolute', left: isSelected ? 2 : 4, top: '50%', marginTop: isSelected ? -8 : -6,
+                                width: isSelected ? 16 : 12, height: isSelected ? 16 : 12, borderRadius: '50%',
+                                background: isSelected ? 'var(--line)' : 'var(--bg-surface)',
+                                border: `3px solid ${isSelected ? 'var(--bg-surface)' : others.length ? 'var(--text-primary)' : 'var(--line)'}`,
+                                boxShadow: isSelected ? '0 0 0 2px var(--line)' : undefined,
+                              }}
+                            />
+                          </span>
+                          <span style={{ flex: 1, minWidth: 0, alignSelf: 'center', padding: '8px 0' }}>
+                            <span className="type-body" style={{ display: 'block', lineHeight: '20px', fontWeight: isSelected ? 650 : 480 }}>{st.name}</span>
+                            {st.hindiName && (
+                              <span lang="hi" className="type-hi type-meta" style={{ display: 'block', color: 'var(--text-muted)' }}>{st.hindiName}</span>
+                            )}
+                          </span>
+                          {others.length > 0 && (
+                            <span style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 4, alignSelf: 'center', maxWidth: 120 }}>
+                              {others.map(l => <LinePill key={l.id} line={l} label={shortLineName(l)} size="sm" />)}
+                            </span>
+                          )}
+                          {isSelected && <CheckIcon size={20} weight="bold" aria-hidden="true" style={{ alignSelf: 'center', flexShrink: 0 }} />}
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>
   );
 };
+
+function StepLabel({ n, id, children }: { n: number; id: string; children: React.ReactNode }) {
+  return (
+    <h2 id={id} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+      <span
+        aria-hidden="true"
+        className="tnum"
+        style={{
+          width: 24, height: 24, borderRadius: 'var(--radius-squircle)', flexShrink: 0,
+          background: 'var(--ink)', color: 'var(--ink-inverse)',
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: 13, fontWeight: 650,
+        }}
+      >
+        {n}
+      </span>
+      <span className="type-label" style={{ color: 'var(--text-primary)' }}>{children}</span>
+    </h2>
+  );
+}

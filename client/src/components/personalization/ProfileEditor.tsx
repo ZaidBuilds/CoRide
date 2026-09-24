@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import { X, Check } from 'lucide-react';
+import { XIcon, CheckIcon } from '@phosphor-icons/react';
 import type { UserProfile } from '../../types';
 import { INTEREST_TAXONOMY } from '../../types';
 import { authHeaders } from '../../utils/auth';
 import { triggerHaptic } from '../../utils/nativeBridge';
 import { API } from '../../config';
+import { Button } from '../ui/Button';
+import { IconButton } from '../ui/IconButton';
+import { Chip } from '../ui/Chip';
 
 
 interface Props {
@@ -36,21 +39,6 @@ const LANGUAGES: { code: string; label: string }[] = [
   { code: 'or', label: 'Odia' }
 ];
 
-const inputStyle: React.CSSProperties = {
-  marginTop: 6,
-  width: '100%',
-  minHeight: 48,
-  padding: '10px 14px',
-  borderRadius: 'var(--radius-md)',
-  background: 'var(--bg-input)',
-  border: '1px solid var(--border-subtle)',
-  color: 'var(--text-primary)',
-  fontSize: 16,
-  fontFamily: 'inherit'
-};
-
-const labelStyle: React.CSSProperties = { display: 'block', fontSize: 13, fontWeight: 700, color: 'var(--text-secondary)' };
-const helpStyle: React.CSSProperties = { display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 12, color: 'var(--text-muted)', marginTop: 4, fontWeight: 400 };
 
 export const ProfileEditor: React.FC<Props> = ({ user, onClose, onSaved }) => {
   const [pseudonym, setPseudonym] = useState(user.pseudonym || '');
@@ -130,8 +118,8 @@ export const ProfileEditor: React.FC<Props> = ({ user, onClose, onSaved }) => {
       if (!r.ok || !j.profile) {
         setError(
           r.status === 401 || r.status === 403
-            ? 'We couldn’t confirm this is your profile. Restart CoRide and try again.'
-            : j.error || `Couldn’t save (error ${r.status}). Your changes are still here.`
+            ? "We couldn't confirm this is your profile. Restart CoRide and try again."
+            : j.error || `Couldn't save (error ${r.status}). Your changes are still here.`
         );
         setSaving(false);
         return;
@@ -146,7 +134,7 @@ export const ProfileEditor: React.FC<Props> = ({ user, onClose, onSaved }) => {
       onSaved(j.profile);
       onClose();
     } catch {
-      setError('No connection. Your changes weren’t saved — try again when you’re back online.');
+      setError("No connection. Your changes weren't saved. Try again when you're back online.");
       setSaving(false);
     }
   };
@@ -159,102 +147,108 @@ export const ProfileEditor: React.FC<Props> = ({ user, onClose, onSaved }) => {
         aria-modal="true"
         aria-labelledby="profile-editor-title"
         tabIndex={-1}
-        className="drawer-panel animate-slide-up"
+        className="drawer-panel"
         onClick={e => e.stopPropagation()}
-        style={{ maxWidth: 520, maxHeight: '92dvh', overflowY: 'auto', padding: 0, position: 'relative', outline: 'none' }}
+        style={{ maxWidth: 'var(--shell-max)', maxHeight: '92dvh', overflowY: 'auto', padding: 0, position: 'relative', outline: 'none' }}
       >
         {/* Header */}
         <div
           style={{
             position: 'sticky', top: 0, zIndex: 1, display: 'flex', alignItems: 'center', gap: 8,
-            padding: '8px 8px 8px 20px', background: 'var(--bg-surface-raised)', borderBottom: '1px solid var(--border-subtle)'
+            padding: '8px 8px 8px 20px', background: 'var(--bg-surface)', borderBottom: '1px solid var(--border-subtle)',
           }}
         >
-          <h2 id="profile-editor-title" style={{ flex: 1, fontSize: 18, fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>
+          <h2 id="profile-editor-title" className="type-title" style={{ flex: 1, color: 'var(--text-primary)' }}>
             Edit profile
           </h2>
-          <button type="button" onClick={onClose} aria-label="Close without saving" className="icon-btn" style={{ background: 'transparent', border: 'none' }}>
-            <X size={20} />
-          </button>
+          <IconButton label="Close without saving" variant="plain" onClick={onClose}>
+            <XIcon size={24} aria-hidden="true" />
+          </IconButton>
         </div>
 
-        <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 20 }}>
-          <p style={{ fontSize: 13, lineHeight: '18px', color: 'var(--text-muted)', margin: 0 }}>
-            Riders in your station room can see everything on this page. Don’t add your real name, phone number or social handles.
+        <div style={{ padding: '16px 20px 24px', display: 'flex', flexDirection: 'column', gap: 24 }}>
+          <p className="type-meta" style={{ color: 'var(--text-secondary)' }}>
+            Riders in your station room see everything here. Leave out your real name, phone number and social handles.
           </p>
 
-          <label style={labelStyle}>
-            Display name
+          <Field id="pe-name" label="Display name" count={`${pseudonym.length}/${NAME_MAX}`} error={nameError} help="Your pseudonym on CoRide">
             <input
+              id="pe-name"
+              className="input"
               value={pseudonym}
               onChange={e => setPseudonym(e.target.value)}
               maxLength={NAME_MAX}
               autoComplete="off"
               aria-invalid={Boolean(nameError)}
               aria-describedby="pe-name-help"
-              style={{ ...inputStyle, borderColor: nameError ? 'var(--status-danger)' : 'var(--border-subtle)' }}
+              style={nameError ? { borderColor: 'var(--status-danger)' } : undefined}
             />
-            <span id="pe-name-help" style={helpStyle}>
-              <span style={{ color: nameError ? 'var(--accent-rose-text)' : undefined }}>{nameError || 'Your pseudonym on CoRide'}</span>
-              <span>{pseudonym.length}/{NAME_MAX}</span>
-            </span>
-          </label>
+          </Field>
 
-          <label style={labelStyle}>
-            Tagline <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>(optional)</span>
-            <input value={vibe} onChange={e => setVibe(e.target.value)} maxLength={30} placeholder="e.g. Chai, code and cricket" style={inputStyle} />
-            <span style={helpStyle}><span /><span>{vibe.length}/30</span></span>
-          </label>
+          <Field id="pe-vibe" label="Tagline" optional count={`${vibe.length}/30`}>
+            <input id="pe-vibe" className="input" value={vibe} onChange={e => setVibe(e.target.value)} maxLength={30} placeholder="Chai, code and cricket" aria-describedby="pe-vibe-help" />
+          </Field>
 
-          <label style={labelStyle}>
-            Bio <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>(optional)</span>
+          <Field id="pe-bio" label="Bio" optional count={`${bio.length}/${BIO_MAX}`}>
             <textarea
+              id="pe-bio"
+              className="input"
               value={bio}
               onChange={e => setBio(e.target.value)}
               maxLength={BIO_MAX}
               rows={3}
-              placeholder="e.g. BCA student, loves metro photowalks"
-              style={{ ...inputStyle, resize: 'none' }}
+              placeholder="BCA student, loves metro photowalks"
+              aria-describedby="pe-bio-help"
+              style={{ resize: 'none', fontFamily: 'inherit' }}
             />
-            <span style={helpStyle}><span /><span>{bio.length}/{BIO_MAX}</span></span>
-          </label>
+          </Field>
 
-          <label style={labelStyle}>
-            College or workplace tag <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>(optional)</span>
-            <input value={college} onChange={e => setCollege(e.target.value)} maxLength={30} placeholder="e.g. DU North Campus" style={inputStyle} />
-          </label>
+          <Field id="pe-college" label="College or workplace" optional>
+            <input id="pe-college" className="input" value={college} onChange={e => setCollege(e.target.value)} maxLength={30} placeholder="DU North Campus" />
+          </Field>
 
           <fieldset style={{ border: 'none', padding: 0, margin: 0 }}>
-            <legend style={{ ...labelStyle, display: 'flex', justifyContent: 'space-between', width: '100%' }}>
+            <legend className="field-label" style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
               <span>Interests</span>
-              <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>{tags.length}/{TAG_MAX}</span>
+              <span className="tnum" style={{ fontWeight: 480, color: 'var(--text-muted)' }}>{tags.length}/{TAG_MAX}</span>
             </legend>
-            <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
               {INTEREST_TAXONOMY.map(t => {
                 const active = tags.includes(t.id);
-                const disabled = !active && tags.length >= TAG_MAX;
                 return (
-                  <Chip key={t.id} active={active} disabled={disabled} onClick={() => toggleTag(t.id)}>
-                    <span aria-hidden="true">{t.emoji}</span> {t.label}
+                  <Chip
+                    key={t.id}
+                    selected={active}
+                    disabled={!active && tags.length >= TAG_MAX}
+                    icon={active ? <CheckIcon size={16} weight="bold" /> : undefined}
+                    onClick={() => toggleTag(t.id)}
+                  >
+                    {t.label}
                   </Chip>
                 );
               })}
             </div>
             {tags.length >= TAG_MAX && (
-              <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '8px 0 0' }}>You’ve picked {TAG_MAX}. Remove one to choose another.</p>
+              <p className="type-meta" style={{ color: 'var(--text-muted)', marginTop: 8 }}>You've picked {TAG_MAX}. Remove one to choose another.</p>
             )}
           </fieldset>
 
           <fieldset style={{ border: 'none', padding: 0, margin: 0 }}>
-            <legend style={{ ...labelStyle, display: 'flex', justifyContent: 'space-between', width: '100%' }}>
+            <legend className="field-label" style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
               <span>Languages you speak</span>
-              <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>{langs.length}/{LANG_MAX}</span>
+              <span className="tnum" style={{ fontWeight: 480, color: 'var(--text-muted)' }}>{langs.length}/{LANG_MAX}</span>
             </legend>
-            <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
               {languageOptions.map(l => {
                 const active = langs.includes(l.code);
                 return (
-                  <Chip key={l.code} active={active} disabled={!active && langs.length >= LANG_MAX} onClick={() => toggleLang(l.code)}>
+                  <Chip
+                    key={l.code}
+                    selected={active}
+                    disabled={!active && langs.length >= LANG_MAX}
+                    icon={active ? <CheckIcon size={16} weight="bold" /> : undefined}
+                    onClick={() => toggleLang(l.code)}
+                  >
                     {l.label}
                   </Chip>
                 );
@@ -267,24 +261,17 @@ export const ProfileEditor: React.FC<Props> = ({ user, onClose, onSaved }) => {
         <div
           style={{
             position: 'sticky', bottom: 0, padding: '12px 20px calc(12px + var(--safe-bottom))',
-            background: 'var(--bg-surface-raised)', borderTop: '1px solid var(--border-subtle)'
+            background: 'var(--bg-surface)', borderTop: '1px solid var(--border-subtle)',
           }}
         >
           {error && (
-            <div role="alert" style={{ fontSize: 13, lineHeight: '18px', color: 'var(--accent-rose-text)', marginBottom: 8 }}>{error}</div>
+            <p role="alert" className="type-meta" style={{ color: 'var(--danger-text)', marginBottom: 8 }}>{error}</p>
           )}
           <div style={{ display: 'flex', gap: 8 }}>
-            <button type="button" onClick={onClose} className="pill-button secondary" style={{ flex: 1 }}>Cancel</button>
-            <button
-              type="button"
-              onClick={save}
-              disabled={saving || !dirty || Boolean(nameError)}
-              aria-busy={saving}
-              className="pill-button primary"
-              style={{ flex: 1, opacity: saving || !dirty || nameError ? 0.5 : 1 }}
-            >
-              {saving ? 'Saving…' : 'Save'}
-            </button>
+            <Button type="button" variant="tonal" onClick={onClose} style={{ flex: 1 }}>Cancel</Button>
+            <Button type="button" onClick={save} disabled={!dirty || Boolean(nameError)} isLoading={saving} style={{ flex: 1 }}>
+              Save
+            </Button>
           </div>
         </div>
       </div>
@@ -292,31 +279,28 @@ export const ProfileEditor: React.FC<Props> = ({ user, onClose, onSaved }) => {
   );
 };
 
-function Chip({ active, disabled, onClick, children }: { active: boolean; disabled?: boolean; onClick: () => void; children: React.ReactNode }) {
+/** Label above, control, then help or error text below with an optional counter. */
+function Field({ id, label, optional, help, error, count, children }: {
+  id: string;
+  label: string;
+  optional?: boolean;
+  help?: string;
+  error?: string | null;
+  count?: string;
+  children: React.ReactNode;
+}) {
   return (
-    <button
-      type="button"
-      aria-pressed={active}
-      disabled={disabled}
-      onClick={onClick}
-      style={{
-        minHeight: 40,
-        padding: '0 14px',
-        borderRadius: 'var(--radius-sm)',
-        fontSize: 13,
-        fontWeight: 600,
-        background: active ? 'var(--accent)' : 'transparent',
-        border: `1px solid ${active ? 'var(--accent)' : 'var(--border-strong)'}`,
-        color: active ? 'var(--text-on-accent)' : 'var(--text-secondary)',
-        opacity: disabled ? 0.45 : 1,
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 6,
-        cursor: disabled ? 'not-allowed' : 'pointer'
-      }}
-    >
-      {active && <Check size={14} aria-hidden="true" />}
+    <div>
+      <label htmlFor={id} className="field-label">
+        {label}{optional && <span style={{ fontWeight: 480, color: 'var(--text-muted)' }}> (optional)</span>}
+      </label>
       {children}
-    </button>
+      {(help || error || count) && (
+        <div id={`${id}-help`} className="type-meta" style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginTop: 6, color: 'var(--text-muted)' }}>
+          <span style={{ color: error ? 'var(--danger-text)' : undefined }}>{error || help}</span>
+          {count && <span className="tnum">{count}</span>}
+        </div>
+      )}
+    </div>
   );
 }

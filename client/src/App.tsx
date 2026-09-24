@@ -498,7 +498,7 @@ export function App() {
     setTimeout(() => {
       setShowCheckInScreen(false);
       goTab('people');
-    }, 500);
+    }, 1200); // long enough to read the StationSign confirmation
   };
 
   const handleUseCommute = async (pattern: { id: string; stationId: string; stationName: string; lineId?: string; lineName?: string; lineColor?: string; direction?: string }, roomFromServer?: ContextRoom) => {
@@ -772,7 +772,7 @@ export function App() {
           <LiveTrackingScreen
             currentUser={user}
             friends={friends}
-            currentContext={context}
+            currentContext={loc.context ?? context}
             activeRoom={trainRoom || stationRoom}
             onOpenChat={fid => {
               const f = friends.find(x => x.id === fid || x.friendId === fid);

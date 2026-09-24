@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { Button } from '../ui/Button';
 
 interface Props {
   open: boolean;
@@ -8,7 +9,7 @@ interface Props {
   confirmLabel: string;
   busyLabel?: string;
   cancelLabel?: string;
-  /** Red confirm button — reserved for destructive actions (delete, block). */
+  /** Red confirm button: reserved for destructive actions (delete, block). */
   destructive?: boolean;
   busy?: boolean;
   /** Shown inside the dialog so a failed action never closes silently. */
@@ -19,9 +20,9 @@ interface Props {
 }
 
 /**
- * Modal confirmation (Material 3 "basic dialog"). Focus lands on Cancel so a
- * stray Enter never triggers the destructive path; Escape and the scrim cancel
- * unless the action is in flight.
+ * Modal confirmation. Focus lands on Cancel so a stray Enter never triggers
+ * the destructive path; Escape and the scrim cancel unless the action is in
+ * flight. Elevated surface, sheet radius, ink-tinted float shadow.
  */
 export function ConfirmDialog({
   open,
@@ -35,11 +36,11 @@ export function ConfirmDialog({
   error,
   icon,
   onConfirm,
-  onCancel
+  onCancel,
 }: Props) {
   const titleId = useId();
   const bodyId = useId();
-  const cancelRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
   // Latest values without re-running the open effect (which would steal focus
   // back to Cancel on every parent render).
   const latest = useRef({ busy, onCancel });
@@ -48,7 +49,8 @@ export function ConfirmDialog({
   useEffect(() => {
     if (!open) return;
     const prevFocus = document.activeElement as HTMLElement | null;
-    cancelRef.current?.focus();
+    // Cancel is the first button in the dialog.
+    dialogRef.current?.querySelector<HTMLButtonElement>('button')?.focus();
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && !latest.current.busy) latest.current.onCancel();
     };
@@ -78,10 +80,11 @@ export function ConfirmDialog({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        padding: 'max(16px, var(--safe-top)) 16px max(16px, var(--safe-bottom))'
+        padding: 'max(16px, var(--safe-top)) 16px max(16px, var(--safe-bottom))',
       }}
     >
       <div
+        ref={dialogRef}
         role="alertdialog"
         aria-modal="true"
         aria-labelledby={titleId}
@@ -90,53 +93,55 @@ export function ConfirmDialog({
         style={{
           width: '100%',
           maxWidth: 360,
-          background: 'var(--bg-surface-raised)',
-          border: '1px solid var(--border-subtle)',
-          borderRadius: 'var(--radius-xl)',
-          boxShadow: 'var(--shadow-lg)',
+          background: 'var(--bg-elevated)',
+          borderRadius: 'var(--radius-sheet)',
+          boxShadow: 'var(--shadow-float)',
           padding: 24,
-          color: 'var(--text-primary)'
+          color: 'var(--text-primary)',
         }}
       >
         {icon && (
-          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12, color: destructive ? 'var(--status-danger)' : 'var(--accent)' }}>
+          <div
+            aria-hidden="true"
+            style={{
+              width: 48, height: 48, borderRadius: 'var(--radius-squircle)', marginBottom: 16,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: destructive ? 'var(--danger-container)' : 'var(--bg-tonal)',
+              color: destructive ? 'var(--danger-text)' : 'var(--text-primary)',
+            }}
+          >
             {icon}
           </div>
         )}
-        <h2 id={titleId} style={{ fontSize: 20, lineHeight: '28px', fontWeight: 700, margin: 0, textAlign: icon ? 'center' : 'left' }}>
-          {title}
-        </h2>
+        <h2 id={titleId} className="type-title">{title}</h2>
         {children && (
-          <div id={bodyId} style={{ fontSize: 14, lineHeight: '20px', color: 'var(--text-secondary)', marginTop: 12 }}>
+          <div id={bodyId} className="type-body" style={{ color: 'var(--text-secondary)', marginTop: 8 }}>
             {children}
           </div>
         )}
         {error && (
-          <div role="alert" style={{ marginTop: 12, fontSize: 13, lineHeight: '18px', color: 'var(--accent-rose-text)' }}>
-            {error}
-          </div>
+          <p role="alert" className="type-meta" style={{ marginTop: 12, color: 'var(--danger-text)' }}>{error}</p>
         )}
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 24, flexWrap: 'wrap' }}>
-          <button
-            ref={cancelRef}
+        <div style={{ display: 'flex', gap: 8, marginTop: 24, flexWrap: 'wrap' }}>
+          <Button
             type="button"
-            className="pill-button secondary"
+            variant="tonal"
             onClick={onCancel}
             disabled={busy}
             style={{ flex: '1 1 120px' }}
           >
             {cancelLabel}
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
-            className={`pill-button ${destructive ? 'danger' : 'primary'}`}
+            variant={destructive ? 'danger' : 'secondary'}
             onClick={onConfirm}
-            disabled={busy}
-            aria-busy={busy}
-            style={{ flex: '1 1 120px', opacity: busy ? 0.7 : 1 }}
+            isLoading={busy}
+            aria-label={busy ? busyLabel || confirmLabel : undefined}
+            style={{ flex: '1 1 120px' }}
           >
-            {busy ? (busyLabel || confirmLabel) : confirmLabel}
-          </button>
+            {confirmLabel}
+          </Button>
         </div>
       </div>
     </div>,
