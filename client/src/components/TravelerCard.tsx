@@ -1,7 +1,10 @@
-import { UserPlus, Check, Sparkles } from 'lucide-react';
+import { CheckIcon, HandWavingIcon, SealCheckIcon } from '@phosphor-icons/react';
 import type { UserProfile } from '../types';
 import { INTEREST_TAXONOMY } from '../types';
 import { getCommuteRelationship } from '../utils/commuteContext';
+import { Avatar } from './ui/Avatar';
+import { Button } from './ui/Button';
+import { Chip } from './ui/Chip';
 
 /** Card-level mirror of the sheet's request state. */
 export type CardRequestState = 'idle' | 'sent' | 'friends';
@@ -24,25 +27,26 @@ interface Props {
 const MAX_TAGS = 3;
 
 const TIER_LABEL: Record<string, string> = {
-  active: 'active now',
-  nearby: 'nearby',
-  other: 'recently active'
+  active: 'Active now',
+  nearby: 'Nearby',
+  other: 'Recently active'
 };
 
-function tagMeta(id: string) {
-  return INTEREST_TAXONOMY.find(t => t.id === id) || { emoji: '', label: id.replace(/_/g, ' ') };
+function interestLabel(id: string): string {
+  return INTEREST_TAXONOMY.find(t => t.id === id)?.label || id.replace(/_/g, ' ');
 }
 
-/** Trust badges arrive as "✅ Verified commuter" / "🌱 New" — keep the words, drop the emoji. */
+/** Trust badges arrive as "✅ Verified commuter" / "🌱 New": keep the words, drop the emoji. */
 function trustWord(badge: string): string {
   return badge.replace(/^[^\p{L}\p{N}]+/u, '').trim() || badge;
 }
 
 /**
- * One traveler in the People list. The body is a single button that opens the
- * profile sheet; the trailing button sends a request without opening it.
- * Two sibling buttons rather than a clickable card with a nested button, so
- * each has its own focus stop and accessible name.
+ * Rider card (DESIGN.md §5): surface card with a --line stub, squircle avatar,
+ * name, tagline, up to three interests (shared ones in lime, listed first) and
+ * one tonal action. The whole card opens the profile; the action button sits
+ * above that hit area so each has its own focus stop and accessible name.
+ * The stub takes --line from the nearest lineStyle() ancestor.
  */
 export const TravelerCard: React.FC<Props> = ({
   user,
@@ -58,13 +62,13 @@ export const TravelerCard: React.FC<Props> = ({
   requestState = 'idle'
 }) => {
   const tier = user.presenceTier;
-  const initials = user.pseudonym.substring(0, 2).toUpperCase();
   const tags = user.interestTags || [];
   const shared = new Set((mutualTags || []).filter(t => tags.includes(t)));
   const orderedTags = [...tags.filter(t => shared.has(t)), ...tags.filter(t => !shared.has(t))];
   const visibleTags = orderedTags.slice(0, MAX_TAGS);
   const overflow = orderedTags.length - visibleTags.length;
   const blurb = vibeTagline || user.bio;
+  const trusted = !isMe && !!trustBadge && (trustTier === 'verified' || trustTier === 'trusted');
 
   const commuteRel = getCommuteRelationship(user, {
     isFriend,
@@ -74,131 +78,93 @@ export const TravelerCard: React.FC<Props> = ({
   const showRel = commuteRel.type !== 'none' && !isMe;
   const effectiveState: CardRequestState = isFriend ? 'friends' : requestState;
 
+  const metaBits = [
+    showRel ? commuteRel.label : tier ? TIER_LABEL[tier] : null,
+    shared.size ? `${shared.size} in common` : null
+  ].filter(Boolean);
+
   const a11yLabel = [
     `${user.pseudonym}${isMe ? ' (you)' : ''}`,
     tier ? TIER_LABEL[tier] : null,
     showRel ? commuteRel.label : null,
+    trusted ? trustWord(trustBadge!) : null,
     shared.size ? `${shared.size} interest${shared.size === 1 ? '' : 's'} in common` : null,
     'View profile'
   ].filter(Boolean).join(', ');
 
   return (
-    <div
-      className={`traveler-card${shared.size > 0 && !isMe ? ' vibe' : ''}`}
-      style={{ padding: 0, gap: 0, alignItems: 'stretch', cursor: 'default' }}
-    >
+    <article className="card has-stub" style={{ position: 'relative', padding: '16px 16px 16px 20px' }}>
+      {/* Full-card hit area: opens the profile. Content below is non-interactive. */}
       <button
         type="button"
         onClick={onTap}
         aria-label={a11yLabel}
-        style={{
-          flex: 1, minWidth: 0, display: 'flex', alignItems: 'flex-start', gap: 12,
-          padding: '14px 8px 14px 14px', background: 'none', border: 'none',
-          textAlign: 'left', color: 'inherit', cursor: 'pointer', borderRadius: 'inherit'
-        }}
-      >
-        {/* Avatar with presence dot (only when presence is known) */}
-        <div className="avatar-wrap" aria-hidden="true">
-          <div className="avatar" style={{ width: 52, height: 52, background: user.avatarBg, fontSize: 16 }}>
-            {initials}
-          </div>
-          {tier && <div className={`avatar-dot ${tier}`} />}
-        </div>
+        className="press"
+        style={{ position: 'absolute', inset: 0, width: '100%', background: 'none', border: 'none', borderRadius: 'inherit', cursor: 'pointer', zIndex: 0 }}
+      />
 
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
-          {/* Name row */}
+      <div style={{ position: 'relative', pointerEvents: 'none', display: 'flex', alignItems: 'center', gap: 12 }}>
+        <Avatar name={user.pseudonym} seed={user.id} bg={user.avatarBg} size={48} presence={tier} you={isMe} />
+        <div style={{ flex: 1, minWidth: 0 }} aria-hidden="true">
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-            <span style={{ fontSize: 15, fontWeight: 800, color: 'var(--text-primary)', letterSpacing: -0.1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            <span className="type-headline" style={{ color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
               {user.pseudonym}
             </span>
-            {isMe && (
-              <span className="tag-pill active" style={{ padding: '2px 8px', fontSize: 11, flexShrink: 0 }}>You</span>
-            )}
-            {!isMe && trustBadge && (trustTier === 'verified' || trustTier === 'trusted') && (
-              <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--accent-purple-text)', whiteSpace: 'nowrap', flexShrink: 0 }}>
-                {trustWord(trustBadge)}
+            {trusted && <SealCheckIcon size={18} weight="fill" style={{ color: 'var(--text-secondary)', flexShrink: 0 }} />}
+            {isMe && <span className="type-meta" style={{ color: 'var(--text-muted)', flexShrink: 0 }}>You</span>}
+          </div>
+          {metaBits.length > 0 && (
+            <p className="type-meta tnum" style={{ color: 'var(--text-secondary)', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {metaBits.join(' · ')}
+            </p>
+          )}
+        </div>
+
+        {!isMe && (
+          <span style={{ pointerEvents: 'auto', flexShrink: 0 }}>
+            {effectiveState === 'idle' ? (
+              <Button
+                type="button"
+                variant="tonal"
+                size="sm"
+                icon={<HandWavingIcon size={18} />}
+                onClick={e => { e.stopPropagation(); onConnect(); }}
+                aria-label={`Say hi to ${user.pseudonym}: sends a request`}
+              >
+                Say hi
+              </Button>
+            ) : (
+              <span
+                role="status"
+                className="type-label"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minHeight: 40, padding: '0 4px', color: 'var(--text-secondary)' }}
+              >
+                <CheckIcon size={18} aria-hidden="true" />
+                {effectiveState === 'friends' ? 'Friends' : 'Sent'}
               </span>
             )}
-          </div>
+          </span>
+        )}
+      </div>
 
-          {/* Context row — how they relate to you, and what you share */}
-          {(showRel || shared.size > 0) && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 12, fontWeight: 700 }}>
-              {showRel && (
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: commuteRel.textColor }}>
-                  <span style={{ width: 7, height: 7, borderRadius: '50%', background: commuteRel.dotColor }} />
-                  {commuteRel.label}
-                </span>
-              )}
-              {shared.size > 0 && (
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--accent-purple-text)' }}>
-                  <Sparkles size={12} />
-                  {shared.size} in common
-                </span>
-              )}
-            </div>
-          )}
+      {blurb && (
+        <p
+          className="type-body"
+          aria-hidden="true"
+          style={{ position: 'relative', pointerEvents: 'none', color: 'var(--text-secondary)', marginTop: 12, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', overflowWrap: 'anywhere' }}
+        >
+          {blurb}
+        </p>
+      )}
 
-          {blurb && (
-            <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.4, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', overflowWrap: 'anywhere' }}>
-              {blurb}
-            </div>
-          )}
-
-          {visibleTags.length > 0 && (
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 2 }}>
-              {visibleTags.map(tid => {
-                const meta = tagMeta(tid);
-                return (
-                  <span key={tid} className={`tag-pill${shared.has(tid) ? ' active' : ''}`} style={{ padding: '4px 9px', fontSize: 12 }}>
-                    {meta.emoji && <span>{meta.emoji}</span>}
-                    {meta.label}
-                  </span>
-                );
-              })}
-              {overflow > 0 && (
-                <span className="tag-pill" style={{ padding: '4px 9px', fontSize: 12 }}>+{overflow}</span>
-              )}
-            </div>
-          )}
-        </div>
-      </button>
-
-      {/* Quick request */}
-      {!isMe && (
-        <div style={{ display: 'flex', alignItems: 'center', padding: '0 14px 0 4px', flexShrink: 0 }}>
-          {effectiveState === 'idle' ? (
-            <button
-              type="button"
-              onClick={onConnect}
-              className="press"
-              aria-label={`Send request to ${user.pseudonym}`}
-              style={{
-                width: 48, height: 48, borderRadius: '50%',
-                background: 'linear-gradient(135deg, var(--accent-fill-from), var(--accent-fill-to))',
-                border: 'none', color: 'var(--text-on-accent)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                boxShadow: 'var(--shadow-sm)', cursor: 'pointer'
-              }}
-            >
-              <UserPlus size={20} />
-            </button>
-          ) : (
-            <span
-              role="img"
-              aria-label={effectiveState === 'friends' ? `Friends with ${user.pseudonym}` : `Request sent to ${user.pseudonym}`}
-              title={effectiveState === 'friends' ? 'Friends' : 'Request sent'}
-              style={{
-                width: 48, height: 48, borderRadius: '50%',
-                background: 'var(--bg-surface-raised)', border: '1px solid var(--border-subtle)',
-                color: effectiveState === 'friends' ? 'var(--accent-emerald)' : 'var(--text-secondary)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center'
-              }}
-            >
-              <Check size={20} />
-            </span>
-          )}
+      {visibleTags.length > 0 && (
+        <div aria-hidden="true" style={{ position: 'relative', pointerEvents: 'none', display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 12 }}>
+          {visibleTags.map(tid => (
+            <Chip key={tid} shared={shared.has(tid)} style={{ minHeight: 32, padding: '5px 12px' }}>{interestLabel(tid)}</Chip>
+          ))}
+          {overflow > 0 && <Chip variant="quiet" style={{ minHeight: 32, padding: '5px 12px' }}>+{overflow}</Chip>}
         </div>
       )}
-    </div>
+    </article>
   );
 };

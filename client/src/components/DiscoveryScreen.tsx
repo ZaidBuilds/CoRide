@@ -1,13 +1,19 @@
-import { useState, useMemo, useEffect } from 'react';
-import { createPortal } from 'react-dom';
-import { Users, UserCheck, Radar, Share2, Check } from 'lucide-react';
+import { useState, useMemo, useCallback } from 'react';
+import { UserCheckIcon, BroadcastIcon } from '@phosphor-icons/react';
 import { TravelerCard } from './TravelerCard';
 import { ProfileSheet } from './ProfileSheet';
 import { ProfileSheetContent } from './ProfileSheetContent';
 import { ProfileSheetActions, type RequestState } from './ProfileSheetActions';
 import { ReportSheet } from './ReportSheet';
-import { Button } from './ui/Button';
-import { CarriageFeedSkeleton } from './transit/CarriageFeedSkeleton';
+import { ContextConfidenceBadge } from './ContextConfidenceBadge';
+import { ScreenHeader } from './ui/ScreenHeader';
+import { LinePill } from './ui/LinePill';
+import { Chip } from './ui/Chip';
+import { EmptyState } from './ui/EmptyState';
+import { Skeleton } from './ui/Skeleton';
+import { Toast } from './ui/Toast';
+import { lineStyle } from '../utils/lineStyle';
+import { getLineById } from '../data/metroData';
 import type { ContextRoom, ContextResult, UserProfile, RankedTraveler, RoomPresenceTraveler } from '../types';
 
 interface Props {
@@ -22,6 +28,13 @@ interface Props {
   onBlock: (targetUserId: string) => void;
   onReport: (targetUserId: string, reason: string) => void;
   onProfileOpen?: (targetUserId: string) => void;
+  /** Open check-in / station picker. Shows "Change" next to the location line when set. */
+  onChangeStation?: () => void;
+  /** Wire to a real notification opt-in for the empty room. Hidden when absent. */
+  onEnablePush?: () => void;
+  pushEnabled?: boolean;
+  /** Set false if the parent already renders a screen header. Default true. */
+  showHeader?: boolean;
 }
 
 type Filter = 'all' | 'nearby' | 'friends';
@@ -49,10 +62,32 @@ function toPresenceTraveler(u: UserProfile): RoomPresenceTraveler {
   };
 }
 
+/** Loading placeholder shaped like the rider cards below. */
+const RiderSkeleton: React.FC = () => (
+  <div aria-busy="true" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+    <span className="sr-only">Loading riders</span>
+    {[0, 1, 2].map(i => (
+      <div key={i} className="card has-stub" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <Skeleton width={48} height={48} borderRadius="var(--radius-squircle)" delayMs={i * 120} />
+          <div style={{ flex: 1 }}>
+            <Skeleton width="45%" height={16} delayMs={i * 120} />
+            <Skeleton width="30%" height={12} style={{ marginTop: 6 }} delayMs={i * 120} />
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          {[64, 80, 56].map((w, j) => <Skeleton key={j} width={w} height={32} borderRadius="var(--radius-pill)" delayMs={i * 120 + 60} />)}
+        </div>
+      </div>
+    ))}
+  </div>
+);
+
 /**
- * People — "who can I meet?". Everything here comes from the live room and the
+ * People: "who can I meet?". Everything here comes from the live room and the
  * ranking endpoints; nothing is invented. Best matches (shared interests) come
- * first, then everyone else in the room, narrowed by the filter tabs.
+ * first, then everyone else in the room, narrowed by the filter chips. The
+ * screen wears the room's line colour.
  */
 export const DiscoveryScreen: React.FC<Props> = ({
   room,
@@ -64,7 +99,11 @@ export const DiscoveryScreen: React.FC<Props> = ({
   isLoading = false,
   onConnect,
   onBlock,
-  onProfileOpen
+  onProfileOpen,
+  onChangeStation,
+  onEnablePush,
+  pushEnabled,
+  showHeader = true
 }) => {
   const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null);
   const [reportTarget, setReportTarget] = useState<UserProfile | null>(null);
@@ -72,14 +111,8 @@ export const DiscoveryScreen: React.FC<Props> = ({
   const [requested, setRequested] = useState<Set<string>>(() => new Set());
   const [hidden, setHidden] = useState<Set<string>>(() => new Set());
   const [notice, setNotice] = useState<string | null>(null);
-  const [shared, setShared] = useState(false);
 
-  useEffect(() => {
-    if (!notice) return;
-    const t = setTimeout(() => setNotice(null), 3200);
-    return () => clearTimeout(t);
-  }, [notice]);
-
+  const dismissNotice = useCallback(() => setNotice(null), []);
   const handleTap = (u: UserProfile) => { setSelectedUser(u); onProfileOpen?.(u.id); };
   const sendRequest = (id: string) => {
     onConnect(id);
@@ -128,31 +161,18 @@ export const DiscoveryScreen: React.FC<Props> = ({
   const sheetState = (id: string): RequestState =>
     id === currentUser.id ? 'self' : friendSet.has(id) ? 'already-friends' : requested.has(id) ? 'sent' : 'idle';
 
-  const lineName = room.lineName || context?.lineName || 'Metro';
-  const lineColor = room.lineColor || context?.lineColor || 'var(--accent-purple)';
+  const lineId = room.lineId || context?.line;
+  const line = lineId ? getLineById(lineId) : undefined;
+  const lineName = line?.name || room.lineName || context?.lineName || 'Metro';
   const stationName = room.stationName || context?.stationName || '';
   const dir = shortDirection(room.direction || context?.direction);
+  const scope = lineStyle(line?.color || room.lineColor || context?.lineColor);
 
-  const tabs: { id: Filter; label: string; count: number }[] = [
-    { id: 'all', label: 'All', count: people.length },
+  const filters: { id: Filter; label: string; count: number }[] = [
+    { id: 'all', label: 'Everyone', count: people.length },
     { id: 'nearby', label: 'Nearby', count: nearbyList.length },
     { id: 'friends', label: 'Friends', count: friendList.length }
   ];
-
-  const invite = async () => {
-    const text = `I'm on the ${lineName}${stationName ? ` at ${stationName}` : ''}. Join me on CoRide to meet people on your commute.`;
-    try {
-      if (navigator.share) {
-        await navigator.share({ title: 'CoRide', text, url: window.location.origin });
-        return;
-      }
-      await navigator.clipboard.writeText(`${text} ${window.location.origin}`);
-      setShared(true);
-      setTimeout(() => setShared(false), 2500);
-    } catch {
-      /* user cancelled the share sheet */
-    }
-  };
 
   const renderCard = (u: UserProfile, mutual?: string[]) => {
     const r = rankedMap.get(u.id);
@@ -174,74 +194,52 @@ export const DiscoveryScreen: React.FC<Props> = ({
     );
   };
 
-  const emptyCopy: Record<Filter, { icon: React.ReactNode; title: string; body: string }> = {
-    all: {
-      icon: <Users size={26} />,
-      title: 'No one else here yet',
-      body: `${stationName ? `${stationName} · ` : ''}${lineName}. People who check in here show up automatically — this list refreshes on its own.`
-    },
-    nearby: {
-      icon: <Radar size={26} />,
-      title: 'No one nearby right now',
-      body: 'Nearby shows people who are active close to you. Check back in a minute, or browse everyone in this room.'
-    },
-    friends: {
-      icon: <UserCheck size={26} />,
-      title: 'None of your friends are here',
-      body: 'Friends show up here when they ride the same line. Send requests to people you meet to build your list.'
-    }
-  };
+  const showMatches = filter === 'all' && matches.length > 0;
+  const where = <span>{stationName}{dir ? `, towards ${dir}` : ''}</span>;
+  const pill = <LinePill line={line || room.lineColor} label={lineName.replace(/\s+Line$/i, '')} />;
 
   return (
-    <div className="animate-fade-in" style={{ paddingBottom: 8 }}>
-      {/* Where you are — real line colour, station and direction only */}
-      <div style={{ marginBottom: 14 }}>
-        <h2 className="display" style={{ fontSize: 22, margin: 0, display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-primary)' }}>
-          <span aria-hidden="true" style={{ width: 12, height: 12, borderRadius: '50%', background: lineColor, flexShrink: 0 }} />
-          People on {lineName}
-        </h2>
-        {(stationName || dir) && (
-          <p style={{ fontSize: 14, color: 'var(--text-secondary)', marginTop: 4 }}>
-            {stationName}{dir ? ` → ${dir}` : ''}
-          </p>
-        )}
-      </div>
+    <div className="animate-fade-in" style={{ ...scope, paddingBottom: 8 }}>
+      {showHeader ? (
+        <ScreenHeader title={`On the ${lineName}`} size="large" subtitle={where} actions={pill} />
+      ) : (
+        <div className="type-meta" style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-secondary)', marginBottom: 12 }}>{pill}{where}</div>
+      )}
+
+      {context && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, margin: '-4px 0 12px' }}>
+          <ContextConfidenceBadge context={context} />
+          {onChangeStation && (
+            <button type="button" className="link-btn" onClick={onChangeStation} aria-label="Change station or direction" style={{ marginRight: -10, flexShrink: 0 }}>
+              Change
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Filters */}
-      <div className="segmented" role="tablist" aria-label="Filter people" style={{ marginBottom: 16 }}>
-        {tabs.map(tab => (
-          <button
-            key={tab.id}
-            type="button"
-            role="tab"
-            id={`people-tab-${tab.id}`}
-            aria-selected={filter === tab.id}
-            aria-controls="people-panel"
-            className="segmented-option"
-            onClick={() => setFilter(tab.id)}
-            style={{ minHeight: 42 }}
-          >
-            {tab.label}
-            <span style={{ fontWeight: 600, opacity: 0.7 }}>{tab.count}</span>
-          </button>
+      <div role="group" aria-label="Filter riders" style={{ display: 'flex', gap: 8, margin: '0 -16px 20px', padding: '6px 16px', overflowX: 'auto', scrollbarWidth: 'none' }}>
+        {filters.map(f => (
+          <Chip key={f.id} selected={filter === f.id} onClick={() => setFilter(f.id)} aria-label={`${f.label}, ${f.count}`}>
+            {f.label}
+            <span className="tnum" style={{ opacity: 0.7, fontWeight: 480 }}>{f.count}</span>
+          </Chip>
         ))}
       </div>
 
-      <div id="people-panel" role="tabpanel" aria-labelledby={`people-tab-${filter}`}>
+      <div aria-live="polite" aria-busy={isLoading || undefined}>
         {isLoading ? (
-          <CarriageFeedSkeleton />
+          <RiderSkeleton />
         ) : (
           <>
-            {/* Best matches — shared interests, from /api/vibe */}
-            {filter === 'all' && matches.length > 0 && (
-              <section aria-labelledby="people-matches" style={{ marginBottom: 20 }}>
+            {/* Best matches: shared interests, from /api/vibe */}
+            {showMatches && (
+              <section aria-labelledby="people-matches" style={{ marginBottom: 24 }}>
                 <div className="section-head">
-                  <h3 id="people-matches" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    Best matches
-                  </h3>
-                  <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600 }}>Shared interests</span>
+                  <h2 id="people-matches">Best matches</h2>
+                  <span className="type-meta" style={{ color: 'var(--text-muted)' }}>Interests you share</span>
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div className="stagger" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {matches.map(m => {
                     const u = people.find(p => p.id === m.profile.id) || m.profile;
                     return renderCard(u, m.mutualTags);
@@ -252,47 +250,47 @@ export const DiscoveryScreen: React.FC<Props> = ({
 
             {list.length > 0 && (
               <section aria-labelledby="people-everyone">
-                {filter === 'all' && matches.length > 0 && (
-                  <div className="section-head">
-                    <h3 id="people-everyone">Everyone else here</h3>
-                    <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600 }}>{list.length}</span>
-                  </div>
-                )}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div className="section-head">
+                  <h2 id="people-everyone">{filter === 'friends' ? 'Friends here' : filter === 'nearby' ? 'Close to you' : showMatches ? 'Everyone else here' : 'Everyone here'}</h2>
+                  <span className="type-meta tnum" style={{ color: 'var(--text-muted)' }}>{list.length}</span>
+                </div>
+                <div className="stagger" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {list.map(u => renderCard(u))}
                 </div>
               </section>
             )}
 
-            {list.length === 0 && !(filter === 'all' && matches.length > 0) && (
-              <div
-                role="status"
-                style={{
-                  textAlign: 'center', padding: '28px 20px', borderRadius: 'var(--radius-lg)',
-                  background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)'
-                }}
-              >
-                <div aria-hidden="true" style={{ width: 56, height: 56, borderRadius: '50%', margin: '0 auto 12px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-surface-raised)', color: 'var(--text-secondary)' }}>
-                  {emptyCopy[filter].icon}
-                </div>
-                <h3 style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-primary)', margin: 0 }}>{emptyCopy[filter].title}</h3>
-                <p style={{ fontSize: 14, lineHeight: 1.5, color: 'var(--text-secondary)', margin: '6px auto 16px', maxWidth: 320 }}>
-                  {emptyCopy[filter].body}
-                </p>
-                {filter === 'all' ? (
-                  <Button variant="secondary" icon={shared ? <Check size={16} /> : <Share2 size={16} />} onClick={invite}>
-                    {shared ? 'Link copied' : 'Invite someone'}
-                  </Button>
-                ) : (
-                  <Button variant="secondary" onClick={() => setFilter('all')}>Show everyone</Button>
-                )}
-              </div>
+            {list.length === 0 && !showMatches && (
+              filter === 'all' ? (
+                <EmptyState
+                  lineName={lineName}
+                  stationName={stationName}
+                  direction={dir ? `towards ${dir}` : undefined}
+                  onBrowseOtherLines={onChangeStation}
+                  onEnablePush={onEnablePush}
+                  pushEnabled={pushEnabled}
+                />
+              ) : filter === 'nearby' ? (
+                <EmptyState
+                  icon={<BroadcastIcon size={24} />}
+                  title="No one close to you right now"
+                  description="Nearby shows riders active near you in this room. Check back in a minute."
+                  action={{ label: 'Show everyone', onClick: () => setFilter('all') }}
+                />
+              ) : (
+                <EmptyState
+                  icon={<UserCheckIcon size={24} />}
+                  title="None of your friends are here"
+                  description="Friends show up here when they ride the same line. Say hi to people you meet to build your list."
+                  action={{ label: 'Show everyone', onClick: () => setFilter('all') }}
+                />
+              )
             )}
           </>
         )}
       </div>
 
-      {/* Traveler profile sheet */}
+      {/* Rider profile sheet */}
       <ProfileSheet
         open={selectedUser !== null}
         onClose={() => setSelectedUser(null)}
@@ -307,6 +305,7 @@ export const DiscoveryScreen: React.FC<Props> = ({
               currentContext={context}
               activeRoomId={room.id}
               sharedTags={sharedFor(selectedUser)}
+              room={room}
             />
             <ProfileSheetActions
               key={selectedUser.id}
@@ -320,33 +319,17 @@ export const DiscoveryScreen: React.FC<Props> = ({
         )}
       </ProfileSheet>
 
-      {/* Report flow — reason, note, optional block; posts /api/reports itself */}
+      {/* Report flow: reason, note, optional block; posts /api/reports itself */}
       <ReportSheet
         open={reportTarget !== null}
         traveler={reportTarget ? toPresenceTraveler(reportTarget) : null}
         currentUserId={currentUser.id}
         onClose={() => setReportTarget(null)}
-        onReported={(msg) => { setReportTarget(null); setNotice(msg || 'Report submitted. Thank you.'); }}
+        onReported={(msg) => { setReportTarget(null); setNotice(msg || 'Report sent. Thank you.'); }}
         onBlocked={(id) => setHidden(prev => new Set(prev).add(id))}
       />
 
-      {notice && createPortal(
-        <div
-          role="status"
-          aria-live="polite"
-          style={{
-            position: 'fixed', left: '50%', transform: 'translateX(-50%)',
-            bottom: 'calc(var(--nav-offset) + 12px)', zIndex: 45,
-            maxWidth: 'calc(100% - 32px)', padding: '12px 18px', borderRadius: 'var(--radius-full)',
-            background: 'var(--bg-surface-raised)', border: '1px solid var(--border-subtle)',
-            boxShadow: 'var(--shadow-lg)', color: 'var(--text-primary)', fontSize: 14, fontWeight: 600,
-            animation: 'fadeIn var(--dur-std) var(--ease-enter)'
-          }}
-        >
-          {notice}
-        </div>,
-        document.body
-      )}
+      <Toast message={notice} onDismiss={dismissNotice} />
     </div>
   );
 };

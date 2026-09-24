@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { UserPlus, Check, MoreHorizontal, Flag, Ban, Clock } from 'lucide-react';
+import { HandWavingIcon, CheckIcon, DotsThreeVerticalIcon, FlagIcon, ProhibitIcon } from '@phosphor-icons/react';
 import { Button } from './ui/Button';
 
-/** 'self' hides the request action entirely — you can't befriend yourself. */
+/** 'self' hides the request action entirely: you can't befriend yourself. */
 export type RequestState = 'idle' | 'sending' | 'sent' | 'already-friends' | 'self';
 
 interface Props {
@@ -20,7 +20,7 @@ interface Props {
 }
 
 const STATUS_COPY: Partial<Record<RequestState, string>> = {
-  sending: 'Sending request…',
+  sending: 'Sending request',
   sent: 'Request sent',
   'already-friends': 'You are friends'
 };
@@ -29,7 +29,7 @@ const STATUS_COPY: Partial<Record<RequestState, string>> = {
  * Action row for the ProfileSheet: the primary request button plus an overflow
  * menu for Report / Block. The button's state follows the outcome of
  * onSendRequest rather than a fixed timer, so a rejected request returns to
- * 'idle'. Block asks for confirmation — it's destructive and hard to undo
+ * 'idle'. Block asks for confirmation: it's destructive and hard to undo
  * from here.
  */
 export function ProfileSheetActions({ initialState = 'idle', travelerName, onSendRequest, onReport, onBlock }: Props) {
@@ -94,19 +94,19 @@ export function ProfileSheetActions({ initialState = 'idle', travelerName, onSen
         role="alertdialog"
         aria-labelledby="block-confirm-title"
         aria-describedby="block-confirm-desc"
-        style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)', padding: 16 }}
+        style={{ background: 'var(--bg-tonal)', borderRadius: 'var(--radius-card)', padding: 16 }}
       >
-        <h3 id="block-confirm-title" style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-primary)', margin: 0 }}>
+        <h3 id="block-confirm-title" className="type-headline" style={{ color: 'var(--text-primary)' }}>
           Block {who}?
         </h3>
-        <p id="block-confirm-desc" style={{ fontSize: 14, lineHeight: 1.45, color: 'var(--text-secondary)', margin: '6px 0 14px' }}>
-          They won't be able to see you or message you, and they won't be told. You can unblock from Profile → Blocked users.
+        <p id="block-confirm-desc" className="type-body" style={{ color: 'var(--text-secondary)', margin: '6px 0 16px' }}>
+          They can't see you or message you, and they aren't told. You can unblock them from Profile, Blocked users.
         </p>
-        <div style={{ display: 'flex', gap: 10 }}>
-          <Button variant="secondary" fullWidth autoFocus onClick={() => setConfirmBlock(false)}>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Button type="button" variant="ghost" fullWidth autoFocus onClick={() => setConfirmBlock(false)}>
             Cancel
           </Button>
-          <Button variant="danger" fullWidth icon={<Ban size={16} />} onClick={() => { setConfirmBlock(false); onBlock?.(); }}>
+          <Button type="button" variant="danger" fullWidth icon={<ProhibitIcon size={20} />} onClick={() => { setConfirmBlock(false); onBlock?.(); }}>
             Block
           </Button>
         </div>
@@ -118,20 +118,20 @@ export function ProfileSheetActions({ initialState = 'idle', travelerName, onSen
   const primary = (() => {
     switch (state) {
       case 'sending':
-        return { label: 'Sending…', icon: <Clock size={18} />, variant: 'primary' as const, disabled: true };
+        return { label: 'Sending', icon: undefined, variant: 'primary' as const, disabled: true, loading: true };
       case 'sent':
-        return { label: 'Request sent', icon: <Check size={18} />, variant: 'secondary' as const, disabled: true };
+        return { label: 'Request sent', icon: <CheckIcon size={20} />, variant: 'tonal' as const, disabled: true, loading: false };
       case 'already-friends':
-        return { label: 'Friends', icon: <Check size={18} />, variant: 'secondary' as const, disabled: true };
+        return { label: 'Friends', icon: <CheckIcon size={20} />, variant: 'tonal' as const, disabled: true, loading: false };
       default:
-        return { label: 'Send request', icon: <UserPlus size={18} />, variant: 'primary' as const, disabled: false };
+        return { label: 'Say hi', icon: <HandWavingIcon size={20} />, variant: 'primary' as const, disabled: false, loading: false };
     }
   })();
 
   return (
     <div>
       {error && (
-        <div role="alert" style={{ fontSize: 13, color: 'var(--accent-rose-text)', textAlign: 'center', marginBottom: 10 }}>
+        <div role="alert" className="type-meta" style={{ color: 'var(--danger-text)', marginBottom: 8 }}>
           {error}
         </div>
       )}
@@ -140,22 +140,26 @@ export function ProfileSheetActions({ initialState = 'idle', travelerName, onSen
         {STATUS_COPY[state] ?? ''}
       </div>
 
-      <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
         {showPrimary ? (
           <Button
+            type="button"
             variant={primary.variant}
+            size="lg"
             fullWidth
             icon={primary.icon}
             onClick={sendRequest}
-            disabled={primary.disabled}
+            isLoading={primary.loading}
+            disabled={primary.disabled && !primary.loading}
             aria-disabled={primary.disabled}
-            // A settled state (sent / friends) is information, not a dead button — keep it legible.
-            style={{ flex: 1, opacity: 1, cursor: primary.disabled ? 'default' : 'pointer' }}
+            aria-label={state === 'idle' ? `Say hi to ${who}: sends a request` : undefined}
+            // A settled state (sent / friends) is information, not a dead button: keep it legible.
+            style={{ flex: 1, ...(state === 'sent' || state === 'already-friends' ? { background: 'var(--bg-tonal)', color: 'var(--text-primary)' } : {}) }}
           >
             {primary.label}
           </Button>
         ) : (
-          <div style={{ flex: 1, fontSize: 14, color: 'var(--text-muted)', textAlign: 'center' }}>This is you</div>
+          <div className="type-meta" style={{ flex: 1, color: 'var(--text-muted)' }}>This is you</div>
         )}
 
         {state !== 'self' && (onReport || onBlock) && (
@@ -163,13 +167,15 @@ export function ProfileSheetActions({ initialState = 'idle', travelerName, onSen
             <button
               ref={triggerRef}
               type="button"
-              className="icon-btn"
+              className="icon-btn tonal"
               aria-label={`More options for ${who}`}
+              title="More options"
               aria-haspopup="menu"
               aria-expanded={menuOpen}
               onClick={() => setMenuOpen(v => !v)}
+              style={{ width: 56, height: 56 }}
             >
-              <MoreHorizontal size={20} />
+              <DotsThreeVerticalIcon size={24} weight="bold" aria-hidden="true" />
             </button>
 
             {menuOpen && (
@@ -181,12 +187,11 @@ export function ProfileSheetActions({ initialState = 'idle', travelerName, onSen
                   bottom: 'calc(100% + 8px)',
                   right: 0,
                   minWidth: 200,
-                  borderRadius: 'var(--radius-md)',
+                  borderRadius: 'var(--radius-card)',
                   padding: 6,
                   zIndex: 2,
-                  background: 'var(--bg-surface-raised)',
-                  border: '1px solid var(--border-subtle)',
-                  boxShadow: 'var(--shadow-lg)',
+                  background: 'var(--bg-elevated)',
+                  boxShadow: 'var(--shadow-float)',
                   animation: 'fadeIn var(--dur-micro) var(--ease-enter)'
                 }}
               >
@@ -199,8 +204,8 @@ export function ProfileSheetActions({ initialState = 'idle', travelerName, onSen
                     style={{ borderRadius: 'var(--radius-sm)', minHeight: 'var(--tap)' }}
                     onClick={() => { setMenuOpen(false); onReport(); }}
                   >
-                    <Flag size={18} aria-hidden="true" style={{ color: 'var(--text-secondary)', flexShrink: 0 }} />
-                    <span className="row-text"><span className="row-title">Report {travelerName || ''}</span></span>
+                    <FlagIcon size={22} aria-hidden="true" style={{ color: 'var(--danger-text)', flexShrink: 0 }} />
+                    <span className="row-text"><span className="row-title" style={{ color: 'var(--danger-text)' }}>Report {travelerName || ''}</span></span>
                   </button>
                 )}
                 {onBlock && (
@@ -212,8 +217,8 @@ export function ProfileSheetActions({ initialState = 'idle', travelerName, onSen
                     style={{ borderRadius: 'var(--radius-sm)', minHeight: 'var(--tap)' }}
                     onClick={() => { setMenuOpen(false); setConfirmBlock(true); }}
                   >
-                    <Ban size={18} aria-hidden="true" style={{ color: 'var(--accent-rose-text)', flexShrink: 0 }} />
-                    <span className="row-text"><span className="row-title" style={{ color: 'var(--accent-rose-text)' }}>Block {travelerName || ''}</span></span>
+                    <ProhibitIcon size={22} aria-hidden="true" style={{ color: 'var(--danger-text)', flexShrink: 0 }} />
+                    <span className="row-text"><span className="row-title" style={{ color: 'var(--danger-text)' }}>Block {travelerName || ''}</span></span>
                   </button>
                 )}
               </div>

@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { Search, X, Shield } from 'lucide-react';
+import { MagnifyingGlassIcon, XIcon, ShieldCheckIcon } from '@phosphor-icons/react';
 import type { MetroLine, MetroStation } from '../types';
 import { DELHI_METRO_LINES } from '../data/metroData';
 import { ProfileSheet } from './ProfileSheet';
 import { API } from '../config';
+import { Button } from './ui/Button';
+import { LinePill } from './ui/LinePill';
+import { lineStyle } from '../utils/lineStyle';
 
 interface Props {
   onConfirm: (station: MetroStation, line: MetroLine) => void;
@@ -17,7 +20,7 @@ interface Row {
   score: number;
 }
 
-/** Lowercase, unify "Sector"/"Sec", strip punctuation — so "sec 18" finds "Noida Sector 18 (Atta Market)". */
+/** Lowercase, unify "Sector"/"Sec", strip punctuation, so "sec 18" finds "Noida Sector 18 (Atta Market)". */
 function norm(s: string): string {
   return s
     .toLowerCase()
@@ -42,11 +45,11 @@ function matchScore(station: MetroStation, line: MetroLine, q: string, rawQ: str
 const ROW_SELECTOR = '[data-station-row]';
 
 /**
- * "Where are you now?" — pick a station to join the right room.
+ * "Where are you?": pick a station to join the right room.
  * Renders instantly from the bundled line data and swaps in the server's
  * active-line list when it arrives (so a beachhead launch shows only its line).
- * No query → stations grouped by line in route order, with sticky line headers.
- * Query → one ranked list; each row carries its line colour.
+ * No query: stations grouped by line in route order, with sticky line headers.
+ * Query: one ranked list; each row carries its line colour.
  */
 export const StationPicker: React.FC<Props> = ({ onConfirm, onDismiss, showInline }) => {
   const [lines, setLines] = useState<MetroLine[]>(DELHI_METRO_LINES);
@@ -119,7 +122,14 @@ export const StationPicker: React.FC<Props> = ({ onConfirm, onDismiss, showInlin
     else focusRow(rows.length - 1);
   };
 
-  const renderRow = (station: MetroStation, line: MetroLine, showLine: boolean) => {
+  const shortName = (l: MetroLine) => l.name.replace(/\s*\(.*\)\s*$/, '').replace(/\s+Line$/i, '');
+
+  /**
+   * One stop on a route diagram: a 4px stripe in the line colour runs through
+   * every row of a line group (continuous = the line), with a hollow node per
+   * stop. In search results each row carries its own short stripe plus a pill.
+   */
+  const renderRow = (station: MetroStation, line: MetroLine, showLine: boolean, pos?: 'first' | 'last' | 'only') => {
     const others = (station.interchangeLines || []).map(lineName).filter((l): l is MetroLine => !!l && l.id !== line.id);
     return (
       <button
@@ -128,34 +138,33 @@ export const StationPicker: React.FC<Props> = ({ onConfirm, onDismiss, showInlin
         data-station-row
         onClick={() => pick(station, line)}
         aria-label={`${station.name}, ${line.name}${others.length ? `, interchange with ${others.map(o => o.name).join(', ')}` : ''}`}
-        className="list-row"
-        style={{ minHeight: 60, padding: '10px 4px', gap: 14, borderRadius: 'var(--radius-md)' }}
+        className="list-row press-row"
+        style={{ ...lineStyle(line.color), minHeight: 56, padding: '6px 8px 6px 4px', gap: 12, border: 'none', borderRadius: 'var(--radius-input)', cursor: 'pointer' }}
       >
-        {/* Route stripe + stop marker in the line's colour */}
-        <span aria-hidden="true" style={{ position: 'relative', width: 16, alignSelf: 'stretch', flexShrink: 0, display: 'flex', justifyContent: 'center' }}>
-          <span style={{ position: 'absolute', top: -10, bottom: -10, width: 4, borderRadius: 2, background: line.color, opacity: showLine ? 0 : 0.55 }} />
-          <span style={{ position: 'relative', alignSelf: 'center', width: 14, height: 14, borderRadius: '50%', background: 'var(--bg-surface)', border: `3px solid ${line.color}` }} />
+        <span aria-hidden="true" style={{ position: 'relative', width: 20, alignSelf: 'stretch', flexShrink: 0, display: 'flex', justifyContent: 'center', margin: '-6px 0' }}>
+          {!showLine && (
+            <span style={{ position: 'absolute', top: pos === 'first' || pos === 'only' ? '50%' : 0, bottom: pos === 'last' || pos === 'only' ? '50%' : 0, width: 4, left: 8, background: 'var(--line)' }} />
+          )}
+          {showLine && <span style={{ position: 'absolute', top: 14, bottom: 14, width: 4, left: 8, borderRadius: 2, background: 'var(--line)' }} />}
+          <span style={{ position: 'relative', alignSelf: 'center', width: 12, height: 12, borderRadius: '50%', background: 'var(--bg-surface)', border: '3px solid var(--line)', boxShadow: others.length ? '0 0 0 2px var(--bg-surface), 0 0 0 3.5px var(--text-primary)' : undefined }} />
         </span>
         <span className="row-text">
-          <span className="row-title" style={{ fontSize: 15, fontWeight: 700 }}>{station.name}</span>
-          <span className="row-sub" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
-            {showLine && <span style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>{line.name}</span>}
-            {showLine && station.hindiName && <span aria-hidden="true">·</span>}
-            {station.hindiName && <span lang="hi">{station.hindiName}</span>}
+          <span className="row-title" style={{ fontSize: 16, lineHeight: '21px' }}>{station.name}</span>
+          <span className="row-sub" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {showLine && <LinePill line={line} label={shortName(line)} size="sm" />}
+            {station.hindiName && <span lang="hi" className="type-hi">{station.hindiName}</span>}
           </span>
         </span>
         {others.length > 0 && (
-          <span aria-hidden="true" title="Interchange" style={{ display: 'inline-flex', alignItems: 'center', gap: 3, flexShrink: 0 }}>
-            {others.slice(0, 3).map(o => (
-              <span key={o.id} style={{ width: 10, height: 10, borderRadius: '50%', background: o.color, border: '2px solid var(--bg-surface)' }} />
-            ))}
+          <span aria-hidden="true" title="Interchange" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end', maxWidth: 140 }}>
+            {others.slice(0, 3).map(o => <LinePill key={o.id} line={o} label={shortName(o)} size="sm" />)}
           </span>
         )}
       </button>
     );
   };
 
-  const stickyBg = 'var(--bg-elevated)';
+  const stickyBg = 'var(--bg-surface)';
 
   const gutter = showInline ? 16 : 20;
 
@@ -170,25 +179,20 @@ export const StationPicker: React.FC<Props> = ({ onConfirm, onDismiss, showInlin
     >
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <h2 id="station-picker-title" className="display" style={{ fontSize: 20, margin: 0, color: 'var(--text-primary)' }}>
-            Where are you now?
+          <h2 id="station-picker-title" className="type-title" style={{ color: 'var(--text-primary)' }}>
+            Where are you?
           </h2>
-          <p style={{ fontSize: 14, color: 'var(--text-secondary)', margin: '4px 0 0', lineHeight: 1.4 }}>
-            Pick your station so you join the right room.
+          <p className="type-meta" style={{ color: 'var(--text-secondary)', marginTop: 4 }}>
+            Pick your station so you land in the right room.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={onDismiss}
-          className="pill-button plain"
-          style={{ minHeight: 'var(--tap)', padding: '0 8px', marginTop: -8, flexShrink: 0 }}
-        >
+        <Button type="button" variant="ghost" size="sm" onClick={onDismiss} style={{ marginTop: -6, marginRight: -12, flexShrink: 0 }}>
           Not now
-        </button>
+        </Button>
       </div>
 
-      <div style={{ position: 'relative', marginTop: 12 }}>
-        <Search size={18} aria-hidden="true" style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', pointerEvents: 'none' }} />
+      <div style={{ position: 'relative', marginTop: 14 }}>
+        <MagnifyingGlassIcon size={20} aria-hidden="true" style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', pointerEvents: 'none' }} />
         <input
           ref={inputRef}
           type="text"
@@ -197,61 +201,74 @@ export const StationPicker: React.FC<Props> = ({ onConfirm, onDismiss, showInlin
           autoComplete="off"
           aria-label="Search stations"
           aria-describedby="station-picker-hint"
-          placeholder="Search station, e.g. Rajiv Chowk"
+          placeholder="Search a station, e.g. Rajiv Chowk"
           value={query}
           onChange={e => setQuery(e.target.value)}
           onKeyDown={onInputKey}
-          style={{
-            width: '100%', minHeight: 'var(--tap)', padding: '12px 44px 12px 42px', borderRadius: 'var(--radius-full)',
-            background: 'var(--bg-input)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)', fontSize: 16,
-            WebkitAppearance: 'none', appearance: 'none'
-          }}
+          className="input"
+          style={{ paddingLeft: 44, paddingRight: 48, WebkitAppearance: 'none', appearance: 'none' }}
         />
         {query && (
           <button
             type="button"
             aria-label="Clear search"
             onClick={() => { setQuery(''); inputRef.current?.focus(); }}
-            style={{ position: 'absolute', right: 2, top: '50%', transform: 'translateY(-50%)', width: 44, height: 44, borderRadius: '50%', border: 'none', background: 'transparent', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+            className="icon-btn plain"
+            style={{ position: 'absolute', right: 0, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }}
           >
-            <X size={18} />
+            <XIcon size={20} aria-hidden="true" />
           </button>
         )}
       </div>
 
-      {/* Line filter chips */}
+      {/* Line filter: the lines themselves, as pills */}
       {lines.length > 1 && (
         <div
           role="group"
           aria-label="Filter by line"
-          style={{ display: 'flex', gap: 8, overflowX: 'auto', margin: `10px -${gutter}px 0`, padding: `0 ${gutter}px 2px`, scrollbarWidth: 'none' }}
+          style={{ display: 'flex', alignItems: 'center', gap: 2, overflowX: 'auto', margin: `6px -${gutter}px 0`, padding: `0 ${gutter - 4}px`, scrollbarWidth: 'none' }}
         >
-          {[{ id: 'all', name: 'All lines', color: '' }, ...lines].map(l => {
+          {[{ id: 'all', name: 'All lines', color: '' } as Pick<MetroLine, 'id' | 'name' | 'color'>, ...lines].map(l => {
             const active = lineFilter === l.id;
+            const dim = lineFilter !== 'all' && !active;
             return (
               <button
                 key={l.id}
                 type="button"
                 aria-pressed={active}
+                aria-label={l.id === 'all' ? 'All lines' : l.name}
                 onClick={() => setLineFilter(l.id)}
-                style={{
-                  flexShrink: 0, minHeight: 40, padding: '0 14px', borderRadius: 'var(--radius-full)',
-                  display: 'inline-flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap', cursor: 'pointer',
-                  fontSize: 13, fontWeight: 700,
-                  background: active ? 'var(--text-primary)' : 'var(--bg-surface)',
-                  color: active ? 'var(--bg-base)' : 'var(--text-secondary)',
-                  border: `1px solid ${active ? 'var(--text-primary)' : 'var(--border-subtle)'}`
-                }}
+                style={{ flexShrink: 0, minHeight: 'var(--tap)', padding: '0 4px', background: 'none', border: 'none', cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }}
               >
-                {l.color && <span aria-hidden="true" style={{ width: 10, height: 10, borderRadius: '50%', background: l.color }} />}
-                {l.name}
+                {l.id === 'all' ? (
+                  <span
+                    className="type-label"
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', height: 28, padding: '0 12px', borderRadius: 'var(--radius-pill)',
+                      background: active ? 'var(--ink)' : 'transparent', color: active ? 'var(--ink-inverse)' : 'var(--text-secondary)',
+                      border: active ? '1px solid var(--ink)' : '1px solid var(--border-strong)'
+                    }}
+                  >
+                    All
+                  </span>
+                ) : (
+                  <LinePill
+                    line={l as MetroLine}
+                    label={shortName(l as MetroLine)}
+                    style={{
+                      height: 28, padding: '0 12px', opacity: dim ? 0.4 : 1,
+                      boxShadow: active ? '0 0 0 2px var(--bg-surface), 0 0 0 4px var(--text-primary)' : undefined,
+                      transition: 'opacity var(--dur-micro) var(--ease-standard)'
+                    }}
+                  />
+                )}
               </button>
             );
           })}
         </div>
       )}
-      <p id="station-picker-hint" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-muted)', margin: '10px 0 0' }}>
-        <Shield size={13} aria-hidden="true" /> Other riders only see your station and line.
+      <p id="station-picker-hint" className="type-meta" style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-muted)', marginTop: 4 }}>
+        <ShieldCheckIcon size={16} aria-hidden="true" /> Other riders only see your station and line.
       </p>
     </div>
   );
@@ -261,40 +278,44 @@ export const StationPicker: React.FC<Props> = ({ onConfirm, onDismiss, showInlin
       {q ? (
         results.length > 0 ? (
           <div role="list" aria-label={`${results.length} matching stations`}>
-            <div aria-live="polite" style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', padding: '8px 4px' }}>
+            <div aria-live="polite" className="type-meta tnum" style={{ color: 'var(--text-muted)', padding: '8px 4px' }}>
               {results.length} {results.length === 1 ? 'station' : 'stations'}
             </div>
             {results.map(r => <div role="listitem" key={`${r.line.id}:${r.station.id}`}>{renderRow(r.station, r.line, true)}</div>)}
           </div>
         ) : (
-          <div role="status" style={{ textAlign: 'center', padding: '32px 16px' }}>
-            <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>No stations match “{query.trim()}”</div>
-            <p style={{ fontSize: 14, color: 'var(--text-secondary)', margin: '6px 0 12px' }}>
-              {lineFilter !== 'all' ? 'Try searching all lines.' : 'Check the spelling, or try part of the name.'}
+          <div role="status" style={{ padding: '32px 4px' }}>
+            <p className="type-headline" style={{ color: 'var(--text-primary)' }}>No station called "{query.trim()}"</p>
+            <p className="type-body" style={{ color: 'var(--text-secondary)', margin: '4px 0 12px' }}>
+              {lineFilter !== 'all' ? 'It may be on another line.' : 'Check the spelling, or try part of the name.'}
             </p>
             {lineFilter !== 'all' && (
-              <button type="button" className="pill-button secondary" onClick={() => setLineFilter('all')}>Search all lines</button>
+              <Button type="button" variant="tonal" onClick={() => setLineFilter('all')}>Search all lines</Button>
             )}
           </div>
         )
       ) : (
         visibleLines.map(line => (
-          <section key={line.id} aria-label={line.name}>
+          <section key={line.id} aria-label={line.name} style={lineStyle(line.color)}>
             <h3
               style={{
                 position: showInline ? 'static' : 'sticky', top: headerH, zIndex: 1,
                 display: 'flex', alignItems: 'center', gap: 8,
-                margin: showInline ? 0 : '0 -20px', padding: showInline ? '12px 4px 6px' : '12px 24px 6px',
-                background: showInline ? 'transparent' : stickyBg,
-                fontSize: 13, fontWeight: 800, color: 'var(--text-primary)'
+                margin: showInline ? 0 : '0 -20px', padding: showInline ? '16px 4px 8px' : '16px 20px 8px',
+                background: showInline ? 'transparent' : stickyBg
               }}
             >
-              <span aria-hidden="true" style={{ width: 22, height: 6, borderRadius: 3, background: line.color }} />
-              {line.name}
-              <span style={{ fontWeight: 600, color: 'var(--text-muted)' }}>{line.stations.length} stations</span>
+              <LinePill line={line} />
+              <span className="type-meta" style={{ color: 'var(--text-muted)' }}>
+                {line.terminalA} to {line.terminalB}
+              </span>
             </h3>
             <div role="list">
-              {line.stations.map(st => <div role="listitem" key={st.id}>{renderRow(st, line, false)}</div>)}
+              {line.stations.map((st, i) => (
+                <div role="listitem" key={st.id}>
+                  {renderRow(st, line, false, line.stations.length === 1 ? 'only' : i === 0 ? 'first' : i === line.stations.length - 1 ? 'last' : undefined)}
+                </div>
+              ))}
             </div>
           </section>
         ))
@@ -304,7 +325,7 @@ export const StationPicker: React.FC<Props> = ({ onConfirm, onDismiss, showInlin
 
   if (showInline) {
     return (
-      <div className="glass-panel" role="region" aria-labelledby="station-picker-title" style={{ overflow: 'hidden', marginBottom: 16, borderRadius: 'var(--radius-xl)' }}>
+      <div className="card" role="region" aria-labelledby="station-picker-title" style={{ padding: 0, overflow: 'hidden', marginBottom: 16 }}>
         {header}
         <div style={{ maxHeight: 360, overflowY: 'auto' }}>{body}</div>
       </div>

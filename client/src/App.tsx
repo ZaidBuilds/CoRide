@@ -5,9 +5,7 @@ import { setToken, getToken, authHeaders } from './utils/auth';
 import { DiscoveryScreen } from './components/DiscoveryScreen';
 import { ChatView } from './components/ChatView';
 import type { MetroFriend } from './components/FriendsTab';
-import { ContextConfidenceBadge } from './components/ContextConfidenceBadge';
 import { StationPicker } from './components/StationPicker';
-import { LiveRoomHeader } from './components/LiveRoomHeader';
 import { EngagementHub } from './components/engagement/EngagementHub';
 import { ProfileEditor } from './components/personalization/ProfileEditor';
 import { SavedCommutes } from './components/personalization/SavedCommutes';
@@ -94,7 +92,6 @@ export function App() {
   const [toast, setToast] = useState<string | null>(null);
   const [showStationPicker, setShowStationPicker] = useState(false);
   const [showCheckInScreen, setShowCheckInScreen] = useState(false);
-  const [hasManualOverride, setHasManualOverride] = useState(false);
   const [typingUsers, setTypingUsers] = useState<Record<string, { userId: string; pseudonym: string }[]>>({});
   const [engagement, setEngagement] = useState<Record<string, EngagementSnapshot>>({});
   const [rankedMap, setRankedMap] = useState<Record<string, RankedTraveler[]>>({});
@@ -107,7 +104,6 @@ export function App() {
   const [showOffline, setShowOffline] = useState(false);
   const [pushBannerDismissed, setPushBannerDismissed] = useState(() => lsGet('coride_push_banner_dismissed') === new Date().toISOString().slice(0, 10));
 
-  const nudgedRef = useRef(false);
   const scrollMemo = useRef<Record<string, number>>({});
   const userRef = useRef<UserProfile | null>(null);
   const roomsRef = useRef<{ station: ContextRoom | null; train: ContextRoom | null }>({ station: null, train: null });
@@ -483,19 +479,9 @@ export function App() {
     }
   }, [loc.rooms]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Low-confidence detection → suggest picking the station, once per session.
-  useEffect(() => {
-    if (!context || hasManualOverride || nudgedRef.current || onboardingSteps || showCheckInScreen) return;
-    if (context.confidence < 0.6 && (view === 'home' || view === 'people')) {
-      const t = setTimeout(() => { nudgedRef.current = true; setShowStationPicker(true); }, 1200);
-      return () => clearTimeout(t);
-    }
-  }, [context, hasManualOverride, onboardingSteps, showCheckInScreen, view]);
-
   // ─── Actions ──────────────────────────────────────────────────────────────
   const handleStationPicked = (station: { id: string; name: string; lat: number; lng: number; cellTowerId?: string }) => {
     if (!user) return;
-    setHasManualOverride(true);
     setShowStationPicker(false);
     showToast(`Station set to ${station.name}`);
     void loc.override(station.id);
@@ -508,7 +494,6 @@ export function App() {
     const ok = await loc.override(stationId, lineId, direction || undefined);
     // CheckInScreen shows this error instead of a false "Checked in".
     if (!ok) throw new Error("Couldn't check you in. Check your connection and try again.");
-    setHasManualOverride(true);
     showToast(`Checked in at ${stationName}${direction ? ` · ${direction}` : ''}`);
     setTimeout(() => {
       setShowCheckInScreen(false);
@@ -520,7 +505,6 @@ export function App() {
     if (!user) return;
     showToast(`Joining ${pattern.stationName}`);
     track('commute_pattern_used', user.id, { patternId: pattern.id, station: pattern.stationName });
-    setHasManualOverride(true);
     if (roomFromServer) {
       leaveCurrentRooms();
       if (roomFromServer.type === 'station') {
@@ -731,10 +715,11 @@ export function App() {
               }}
               onOpenLiveTracking={() => goTab('liveTracking')}
               onOpenCheckIn={() => setShowCheckInScreen(true)}
-            />
-            <div style={{ marginTop: 16 }}>
+              context={context}
+              onConfirmContext={() => { void loc.confirm(); }}
+            >
               <SavedCommutes userId={user.id} currentStationId={context?.station} onUse={handleUseCommute} />
-            </div>
+            </HomeScreen>
           </>
         )}
 
@@ -742,22 +727,6 @@ export function App() {
         {view === 'people' && (
           activePeopleRoom ? (
             <>
-              <LiveRoomHeader room={activePeopleRoom} />
-              <div style={{ height: 12 }} />
-              {context && (
-                <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '8px 8px 12px 16px', marginBottom: 12 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                    <span className="type-caption" style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-secondary)', minWidth: 0 }}>
-                      <MapPin size={14} aria-hidden="true" style={{ color: hasManualOverride ? 'var(--success-text)' : 'var(--info-text)', flexShrink: 0 }} />
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {hasManualOverride ? 'You picked' : 'Detected'}: <strong style={{ color: 'var(--text-primary)' }}>{context.stationName}</strong>
-                      </span>
-                    </span>
-                    <button type="button" className="link-btn" onClick={() => setShowCheckInScreen(true)} aria-label="Change station or direction">Change</button>
-                  </div>
-                  <ContextConfidenceBadge context={context} />
-                </div>
-              )}
               <DiscoveryScreen
                 room={activePeopleRoom}
                 context={context}
@@ -770,6 +739,7 @@ export function App() {
                 onBlock={handleBlock}
                 onReport={handleReport}
                 onProfileOpen={handleProfileOpen}
+                onChangeStation={() => setShowCheckInScreen(true)}
               />
               <div style={{ marginTop: 16 }}>
                 <EngagementHub room={activePeopleRoom} snapshot={engagement[activePeopleRoom.id] || null} currentUser={user} socket={socket} onReaction={(tid, emoji, ttype, rid) => handleReaction(tid, emoji, ttype, rid)} />
@@ -781,7 +751,7 @@ export function App() {
               <Skeleton height={112} borderRadius="var(--radius-xl)" style={{ marginBottom: 16 }} />
               {[0, 1, 2].map(i => (
                 <div key={i} className="traveler-card" style={{ gap: 12, marginBottom: 10, pointerEvents: 'none' }}>
-                  <Skeleton width={48} height={48} borderRadius="50%" delayMs={i * 120} />
+                  <Skeleton width={48} height={48} borderRadius="34%" delayMs={i * 120} />
                   <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
                     <Skeleton width="50%" height={14} delayMs={i * 120 + 60} />
                     <Skeleton width="80%" height={12} delayMs={i * 120 + 120} />
@@ -890,7 +860,7 @@ export function App() {
         {view === 'savedCommutes' && (
           <>
             <ScreenHeader title="Saved commutes" onBack={pop} />
-            <SavedCommutes userId={user.id} currentStationId={context?.station} onUse={handleUseCommute} />
+            <SavedCommutes userId={user.id} currentStationId={context?.station} onUse={handleUseCommute} variant="screen" />
           </>
         )}
 
