@@ -1,34 +1,39 @@
 import { useState, useEffect } from 'react';
-import { Clock, Send } from 'lucide-react';
-import type { PromptState } from '../../types/engagement';
+import { ArrowsClockwiseIcon, ClockIcon, PaperPlaneRightIcon } from '@phosphor-icons/react';
+import { Avatar } from '../ui/Avatar';
+import type { PromptState, ReactionState } from '../../types/engagement';
 import type { Socket } from 'socket.io-client';
 import type { UserProfile } from '../../types';
 import { ReactionBar } from './ReactionBar';
+import { gameInput, gameSubmit, submitStyle, panelTitle, timerChip, errorLine, gameWell } from './gameStyles';
 
 interface Props {
   game: PromptState;
   currentUser: UserProfile;
   socket: Socket | null;
   roomId: string;
-  reactions: Record<string, any>;
+  reactions: Record<string, ReactionState>;
   onReaction: (targetId: string, emoji: string) => void;
 }
 
+const PROMPT_MAX = 40;
+const secondsTo = (t: number) => Math.max(0, Math.floor((t - Date.now()) / 1000));
+
 export const PromptWall: React.FC<Props> = ({ game, currentUser, socket, roomId, reactions, onReaction }) => {
   const [input, setInput] = useState('');
-  const [secs, setSecs] = useState(Math.max(0, Math.floor((game.expiresAt - Date.now())/1000)));
-  const [err, setErr] = useState<string|null>(null);
+  const [secs, setSecs] = useState(() => secondsTo(game.expiresAt));
+  const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
-    const id = setInterval(() => setSecs(Math.max(0, Math.floor((game.expiresAt - Date.now())/1000))), 700);
+    const id = setInterval(() => setSecs(secondsTo(game.expiresAt)), 700);
     return () => clearInterval(id);
   }, [game.expiresAt, game.currentPrompt.id]);
 
   useEffect(() => {
     if (!socket) return;
-    const h = (p:any)=> setErr(p.error);
+    const h = (p: { error?: string }) => setErr(p?.error || 'Try again.');
     socket.on('game_error', h);
-    return ()=> { socket.off('game_error', h); };
+    return () => { socket.off('game_error', h); };
   }, [socket]);
 
   const submit = (e: React.FormEvent) => {
@@ -47,51 +52,85 @@ export const PromptWall: React.FC<Props> = ({ game, currentUser, socket, roomId,
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <h3 style={{ fontSize: 14, fontWeight: 800, color: 'var(--text-primary)' }}>💬 Prompt Wall</h3>
-        <span style={{ fontSize: 11, padding: '4px 8px', borderRadius: 'var(--radius-full)', background: isExpired ? 'rgba(244,63,94,0.12)' : 'var(--bg-surface)', border: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', gap: 4 }}>
-          <Clock size={11} /> {isExpired ? 'Closed' : `${Math.floor(secs/60)}:${String(secs%60).padStart(2,'0')}`}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+        <h3 style={panelTitle}>Prompt Wall</h3>
+        <span style={timerChip}>
+          <ClockIcon size={14} aria-hidden="true" /> {isExpired ? 'Closed' : `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`}
         </span>
       </div>
 
-      <div style={{ padding: 16, borderRadius: 'var(--radius-lg)', background: 'linear-gradient(135deg, rgba(236,72,153,0.12), rgba(99,102,241,0.08))', border: '1px solid var(--border-subtle)', textAlign: 'center' }}>
-        <div style={{ fontSize: 28 }}>{game.currentPrompt.emoji}</div>
-        <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--text-primary)', marginTop: 6, lineHeight: 1.3 }}>{game.currentPrompt.text}</div>
-        {game.currentPrompt.textHi && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>{game.currentPrompt.textHi}</div>}
-        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{game.currentPrompt.category.replace('_',' ')}</div>
+      <div style={gameWell}>
+        <div className="type-meta" style={{ color: 'var(--text-muted)', marginBottom: 6 }}>{game.currentPrompt.category.replace(/_/g, ' ')}</div>
+        <div className="type-headline" style={{ color: 'var(--text-primary)' }}>{game.currentPrompt.text}</div>
+        {game.currentPrompt.textHi && <div lang="hi" className="type-meta" style={{ color: 'var(--text-secondary)', marginTop: 4 }}>{game.currentPrompt.textHi}</div>}
       </div>
 
       {!isExpired && (
-        <form onSubmit={submit} style={{ display: 'flex', gap: 6 }}>
-          <input value={input} onChange={e=>setInput(e.target.value)} maxLength={40} aria-label="Your answer" placeholder="Your take in 40 chars… / अपना जवाब" style={{ flex: 1, padding: '10px 14px', borderRadius: 'var(--radius-md)', background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)', fontSize: 16 }} />
-          <button type="submit" aria-label="Post answer" className="btn-primary" style={{ padding: '10px 14px' }}><Send size={14} /></button>
+        <form onSubmit={submit} style={{ display: 'flex', gap: 8 }}>
+          <div style={{ flex: 1, minWidth: 0, position: 'relative', display: 'flex' }}>
+            <input
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              maxLength={PROMPT_MAX}
+              aria-label={`Your answer, up to ${PROMPT_MAX} characters`}
+              placeholder="Your take / अपना जवाब"
+              style={{ ...gameInput, paddingRight: 48 }}
+            />
+            <span aria-hidden="true" className="type-meta tnum" style={{ position: 'absolute', right: 16, top: '50%', transform: 'translateY(-50%)', fontWeight: 560, color: input.length >= PROMPT_MAX ? 'var(--danger-text)' : 'var(--text-muted)' }}>
+              {PROMPT_MAX - input.length}
+            </span>
+          </div>
+          <button type="submit" disabled={!input.trim()} aria-label="Post answer" className="press" style={submitStyle(!!input.trim(), true)}>
+            <PaperPlaneRightIcon size={20} aria-hidden="true" />
+          </button>
         </form>
       )}
-      {err && <div role="alert" style={{ fontSize: 11, color: 'var(--accent-rose-text)' }}>{err}</div>}
+      {err && <div role="alert" style={errorLine}>{err}</div>}
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 700 }}>{game.submissions.length} sharings • {game.players.length} joined</span>
-        <button onClick={rotate} style={{ fontSize: 11, padding: '4px 10px', borderRadius: 'var(--radius-full)', background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)', color: 'var(--text-secondary)', cursor: 'pointer' }}>↻ New prompt</button>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+        <span className="type-meta tnum" style={{ color: 'var(--text-muted)' }}>
+          {game.submissions.length} {game.submissions.length === 1 ? 'answer' : 'answers'} · {game.players.length} joined
+        </span>
+        <button
+          type="button"
+          onClick={rotate}
+          className="btn-tonal press"
+          style={{ ...gameSubmit, minHeight: 40, fontSize: 14 }}
+        >
+          <ArrowsClockwiseIcon size={16} aria-hidden="true" /> New prompt
+        </button>
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 260, overflowY: 'auto', paddingRight: 2 }}>
-        {[...game.submissions].reverse().map(s => {
-          const rs = reactions[s.id] || { counts: s.reactions || {}, total: 0 };
-          const my = Object.entries(rs.users || {}).filter(([_, ids]: any) => (ids as string[]).includes(currentUser.id)).map(([e])=>e);
+      <ul aria-label="Answers" style={{ display: 'flex', flexDirection: 'column', maxHeight: 320, overflowY: 'auto', listStyle: 'none', margin: 0, padding: 0 }}>
+        {[...game.submissions].reverse().map((s, i) => {
+          const rs = reactions[s.id];
+          const counts = rs?.counts || s.reactions || {};
+          const my = Object.entries(rs?.users || s.reactedUsers || {})
+            .filter(([, ids]) => ids.includes(currentUser.id))
+            .map(([e]) => e);
+          const mine = s.userId === currentUser.id;
           return (
-            <div key={s.id} style={{ padding: '10px 12px', borderRadius: 'var(--radius-md)', background: s.userId===currentUser.id ? 'rgba(99,102,241,0.10)' : 'var(--bg-surface)', border: '1px solid var(--border-subtle)', display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ width: 22, height: 22, borderRadius: 6, background: s.avatarBg, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: 10, fontWeight: 800 }}>{s.pseudonym[0]}</span>
-                <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>{s.pseudonym}</span>
-                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{new Date(s.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
+            <li key={s.id} style={{ padding: '12px 0 4px', borderTop: i ? '1px solid var(--border-subtle)' : undefined, display: 'flex', gap: 10 }}>
+              <Avatar name={s.pseudonym} seed={s.userId} bg={s.avatarBg} size={32} you={mine} />
+              <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                  <span className="type-label" style={{ color: 'var(--text-primary)' }}>{mine ? 'You' : s.pseudonym}</span>
+                  <span className="type-meta tnum" style={{ color: 'var(--text-muted)' }}>{new Date(s.timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>
+                </div>
+                <div className="type-body" style={{ color: 'var(--text-primary)', overflowWrap: 'anywhere' }}>{s.content}</div>
+                <div style={{ marginTop: 6 }}>
+                  <ReactionBar targetId={s.id} targetType="submission" roomId={roomId} counts={counts} myReactions={my} onToggle={(e) => onReaction(s.id, e)} compact />
+                </div>
               </div>
-              <div style={{ fontSize: 13, color: 'var(--text-primary)', lineHeight: 1.4, wordBreak: 'break-word' }}>{s.content}</div>
-              <ReactionBar targetId={s.id} targetType="submission" roomId={roomId} counts={rs.counts} myReactions={my} onToggle={(e)=>onReaction(s.id, e)} compact />
-            </div>
+            </li>
           );
         })}
-        {game.submissions.length===0 && <div style={{ textAlign: 'center', padding: 16, fontSize: 11, color: 'var(--text-muted)', border: '1px dashed var(--border-subtle)', borderRadius: 'var(--radius-md)' }}>No sharings yet — be first! 🚀</div>}
-      </div>
+        {game.submissions.length === 0 && (
+          <li className="type-meta" style={{ padding: '8px 0', color: 'var(--text-muted)' }}>
+            No answers yet. Be the first.
+          </li>
+        )}
+      </ul>
     </div>
   );
 };

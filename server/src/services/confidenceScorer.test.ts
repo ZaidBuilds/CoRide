@@ -1,4 +1,8 @@
+import { describe, test } from 'node:test';
+import assert from 'node:assert/strict';
 import { calculateConfidence, ConfidenceBreakdown } from './confidenceScorer';
+
+const close = (a: number, b: number, digits = 3) => assert.ok(Math.abs(a - b) < 10 ** -digits / 2, `${a} ≉ ${b}`);
 
 describe('calculateConfidence', () => {
   const maxBreakdown: ConfidenceBreakdown = {
@@ -19,35 +23,35 @@ describe('calculateConfidence', () => {
 
   test('young input (no decay) returns rawScore / 145', () => {
     const result = calculateConfidence(maxBreakdown, 0);
-    // rawScore = 125, no decay → 125 / 145 ≈ 0.862
-    expect(result.confidence).toBeCloseTo(125 / 145, 3);
-    expect(result.breakdown).toEqual(maxBreakdown);
+    // rawScore = 30+25+20+20+50 = 145, no decay → 145 / 145 = 1
+    close(result.confidence, 145 / 145);
+    assert.deepEqual(result.breakdown, maxBreakdown);
   });
 
   test('old input (0.80 decay) reduces the score', () => {
     const result = calculateConfidence(maxBreakdown, 700_000);
-    // rawScore = 125, decay = 0.80 → decayedRaw = 100, 100 / 145 ≈ 0.690
-    expect(result.confidence).toBeCloseTo(100 / 145, 3);
+    // rawScore = 145, decay = 0.80 → decayedRaw = 116, 116 / 145 = 0.8
+    close(result.confidence, 116 / 145);
   });
 
   test('middle-aged input (0.92 decay) reduces the score', () => {
     const result = calculateConfidence(maxBreakdown, 300_000);
-    // rawScore = 125, decay = 0.92 → decayedRaw = 115, 115 / 145 ≈ 0.793
-    expect(result.confidence).toBeCloseTo(115 / 145, 3);
+    // rawScore = 145, decay = 0.92 → decayedRaw = 133.4, 133.4 / 145 = 0.92
+    close(result.confidence, 133.4 / 145);
   });
 
   test('zero breakdown yields zero confidence', () => {
     const result = calculateConfidence(zeroBreakdown, 0);
-    expect(result.confidence).toBe(0);
+    assert.equal(result.confidence, 0);
   });
 
   test('confidence is never above 1', () => {
     const result = calculateConfidence(maxBreakdown, 0);
-    expect(result.confidence).toBeLessThanOrEqual(1);
+    assert.ok(result.confidence <= 1);
   });
 
   test('confidence is never below 0', () => {
     const result = calculateConfidence(zeroBreakdown, 100_000);
-    expect(result.confidence).toBeGreaterThanOrEqual(0);
+    assert.ok(result.confidence >= 0);
   });
 });

@@ -1,0 +1,14 @@
+{
+  "name": "CoRide · Delhi Metro",
+  "short_name": "CoRide",
+  "description": "See who is riding your Delhi Metro line right now.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0C0E11",
+  "theme_color": "#0C0E11",
+  "icons": [
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

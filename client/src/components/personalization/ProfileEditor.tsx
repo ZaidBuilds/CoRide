@@ -1,9 +1,14 @@
-import { useState } from 'react';
-import { X, Save, Sparkles } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { XIcon, CheckIcon } from '@phosphor-icons/react';
 import type { UserProfile } from '../../types';
 import { INTEREST_TAXONOMY } from '../../types';
+import { authHeaders } from '../../utils/auth';
+import { triggerHaptic } from '../../utils/nativeBridge';
+import { API } from '../../config';
+import { Button } from '../ui/Button';
+import { IconButton } from '../ui/IconButton';
+import { Chip } from '../ui/Chip';
 
-const API = 'http://localhost:4000';
 
 interface Props {
   user: UserProfile;
@@ -11,106 +16,291 @@ interface Props {
   onSaved: (p: UserProfile) => void;
 }
 
+// Limits mirror PATCH /api/profile/:userId — the server silently ignores a
+// pseudonym outside 2–20 chars, so we must validate here or the edit is lost.
+const NAME_MIN = 2;
+const NAME_MAX = 20;
+const BIO_MAX = 120;
+const TAG_MAX = 5;
+const LANG_MAX = 3;
+
+const LANGUAGES: { code: string; label: string }[] = [
+  { code: 'en', label: 'English' },
+  { code: 'hi', label: 'Hindi' },
+  { code: 'pa', label: 'Punjabi' },
+  { code: 'ur', label: 'Urdu' },
+  { code: 'bn', label: 'Bengali' },
+  { code: 'mr', label: 'Marathi' },
+  { code: 'gu', label: 'Gujarati' },
+  { code: 'ta', label: 'Tamil' },
+  { code: 'te', label: 'Telugu' },
+  { code: 'kn', label: 'Kannada' },
+  { code: 'ml', label: 'Malayalam' },
+  { code: 'or', label: 'Odia' }
+];
+
+
 export const ProfileEditor: React.FC<Props> = ({ user, onClose, onSaved }) => {
-  const [pseudonym, setPseudonym] = useState(user.pseudonym);
+  const [pseudonym, setPseudonym] = useState(user.pseudonym || '');
   const [bio, setBio] = useState(user.bio || '');
   const [college, setCollege] = useState(user.collegeOrTag || '');
-  const [vibe, setVibe] = useState((user as any).vibeTagline || '');
+  const [vibe, setVibe] = useState(user.vibeTagline || '');
   const [tags, setTags] = useState<string[]>(user.interestTags || []);
-  const [langs, setLangs] = useState<string[]>((user as any).languages || ['en']);
+  const [langs, setLangs] = useState<string[]>(user.languages?.length ? user.languages : ['en']);
   const [saving, setSaving] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  // App re-renders often (socket events) and passes a fresh onClose each time;
+  // read it through a ref so the mount effect never re-runs and steals focus.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => { onCloseRef.current = onClose; });
+
+  useEffect(() => {
+    panelRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onCloseRef.current(); };
+    window.addEventListener('keydown', onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, []);
+
+  const trimmedName = pseudonym.trim();
+  const nameError = trimmedName.length < NAME_MIN
+    ? `Use at least ${NAME_MIN} characters.`
+    : null;
+
+  const dirty =
+    trimmedName !== (user.pseudonym || '') ||
+    bio.trim() !== (user.bio || '') ||
+    college.trim() !== (user.collegeOrTag || '') ||
+    vibe.trim() !== (user.vibeTagline || '') ||
+    tags.join(',') !== (user.interestTags || []).join(',') ||
+    langs.join(',') !== (user.languages?.length ? user.languages : ['en']).join(',');
 
   const toggleTag = (id: string) => {
-    setTags(prev => prev.includes(id) ? prev.filter(t=>t!==id) : prev.length <5 ? [...prev, id] : prev);
+    triggerHaptic('light');
+    setTags(prev => prev.includes(id) ? prev.filter(t => t !== id) : prev.length < TAG_MAX ? [...prev, id] : prev);
   };
 
+  const toggleLang = (code: string) => {
+    triggerHaptic('light');
+    setLangs(prev => prev.includes(code) ? prev.filter(l => l !== code) : prev.length < LANG_MAX ? [...prev, code] : prev);
+  };
+
+  // Keep any language code the server already has, even if it's not in our list.
+  const languageOptions = [
+    ...LANGUAGES,
+    ...langs.filter(c => !LANGUAGES.some(l => l.code === c)).map(c => ({ code: c, label: c.toUpperCase() }))
+  ];
+
   const save = async () => {
+    if (nameError || saving) return;
     setSaving(true);
+    setError(null);
     try {
-      const r = await fetch(`${API}/api/profile/${user.id}`, {
+      const r = await fetch(`${API}/api/profile/${encodeURIComponent(user.id)}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({
-          pseudonym, bio, collegeOrTag: college, interestTags: tags, languages: langs, vibeTagline: vibe
+          pseudonym: trimmedName,
+          bio: bio.trim(),
+          collegeOrTag: college.trim(),
+          interestTags: tags,
+          languages: langs,
+          vibeTagline: vibe.trim()
         })
       });
-      const j = await r.json();
-      if (r.ok) {
-        // update localStorage
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.profile) {
+        setError(
+          r.status === 401 || r.status === 403
+            ? "We couldn't confirm this is your profile. Restart CoRide and try again."
+            : j.error || `Couldn't save (error ${r.status}). Your changes are still here.`
+        );
+        setSaving(false);
+        return;
+      }
+      try {
         const stored = localStorage.getItem('coride_profile');
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          if (parsed.id === j.profile.id) {
-            localStorage.setItem('coride_profile', JSON.stringify(j.profile));
-          }
+        if (stored && JSON.parse(stored).id === j.profile.id) {
+          localStorage.setItem('coride_profile', JSON.stringify(j.profile));
         }
-        onSaved(j.profile);
-        setMsg('Saved ✓');
-        setTimeout(onClose, 600);
-      } else setMsg(j.error || 'Save failed');
-    } catch (e:any) { setMsg(String(e)); }
-    setSaving(false);
+      } catch { /* storage unavailable — server copy is the source of truth */ }
+      triggerHaptic('success');
+      onSaved(j.profile);
+      onClose();
+    } catch {
+      setError("No connection. Your changes weren't saved. Try again when you're back online.");
+      setSaving(false);
+    }
   };
 
   return (
     <div className="drawer-overlay" onClick={onClose}>
-      <div className="drawer-panel animate-slide-up" onClick={e=>e.stopPropagation()} style={{ maxWidth: 520, maxHeight: '88vh', overflowY: 'auto' }}>
-        <div style={{ width: 40, height: 4, borderRadius: 2, background: 'var(--text-muted)', margin: '0 auto 14px' }} />
-        <button onClick={onClose} aria-label="Close profile editor" className="tap-target" style={{ position:'absolute', top:16, right:16, background:'none', border:'none', color:'var(--text-muted)', cursor:'pointer' }}><X size={20}/></button>
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="profile-editor-title"
+        tabIndex={-1}
+        className="drawer-panel"
+        onClick={e => e.stopPropagation()}
+        style={{ maxWidth: 'var(--shell-max)', maxHeight: '92dvh', overflowY: 'auto', padding: 0, position: 'relative', outline: 'none' }}
+      >
+        {/* Header */}
+        <div
+          style={{
+            position: 'sticky', top: 0, zIndex: 1, display: 'flex', alignItems: 'center', gap: 8,
+            padding: '8px 8px 8px 20px', background: 'var(--bg-surface)', borderBottom: '1px solid var(--border-subtle)',
+          }}
+        >
+          <h2 id="profile-editor-title" className="type-title" style={{ flex: 1, color: 'var(--text-primary)' }}>
+            Edit profile
+          </h2>
+          <IconButton label="Close without saving" variant="plain" onClick={onClose}>
+            <XIcon size={24} aria-hidden="true" />
+          </IconButton>
+        </div>
 
-        <h3 style={{ fontSize: 16, fontWeight: 900, color: 'var(--text-primary)', display:'flex', alignItems:'center', gap:6 }}><Sparkles size={16} style={{color:'var(--accent-purple-text)'}}/> Edit profile</h3>
-        <p style={{ fontSize: 11, color:'var(--text-muted)', marginTop:4 }}>Enhance discovery — better tags → better vibe matches. Visible to travelers.</p>
+        <div style={{ padding: '16px 20px 24px', display: 'flex', flexDirection: 'column', gap: 24 }}>
+          <p className="type-meta" style={{ color: 'var(--text-secondary)' }}>
+            Riders in your station room see everything here. Leave out your real name, phone number and social handles.
+          </p>
 
-        <div style={{ marginTop:16, display:'flex', flexDirection:'column', gap:12 }}>
-          <label style={{ fontSize:12, fontWeight:700, color:'var(--text-secondary)' }}>Display name (2-20 chars)
-            <input value={pseudonym} onChange={e=>setPseudonym(e.target.value)} maxLength={20} style={{ marginTop:6, width:'100%', padding:'9px 12px', borderRadius:'var(--radius-md)', background:'var(--bg-surface)', border:'1px solid var(--border-subtle)', color:'var(--text-primary)', fontSize:16 }}/>
-          </label>
-          <label style={{ fontSize:12, fontWeight:700, color:'var(--text-secondary)' }}>Vibe tagline (up to 30, optional)
-            <input value={vibe} onChange={e=>setVibe(e.target.value)} maxLength={30} placeholder="e.g. Chai + Code + Cricket" style={{ marginTop:6, width:'100%', padding:'9px 12px', borderRadius:'var(--radius-md)', background:'var(--bg-surface)', border:'1px solid var(--border-subtle)', color:'var(--text-primary)', fontSize:16 }}/>
-          </label>
-          <label style={{ fontSize:12, fontWeight:700, color:'var(--text-secondary)' }}>Bio (120 chars, optional)
-            <textarea value={bio} onChange={e=>setBio(e.target.value)} maxLength={120} rows={2} placeholder="BCA student, loves metro photowalks" style={{ marginTop:6, width:'100%', padding:'9px 12px', borderRadius:'var(--radius-md)', background:'var(--bg-surface)', border:'1px solid var(--border-subtle)', color:'var(--text-primary)', fontSize:16, resize:'none' }}/>
-            <span style={{ fontSize:11, color:'var(--text-muted)' }}>{bio.length}/120</span>
-          </label>
-          <label style={{ fontSize:12, fontWeight:700, color:'var(--text-secondary)' }}>College / Tag
-            <input value={college} onChange={e=>setCollege(e.target.value)} maxLength={30} placeholder="e.g. DU North Campus, Hostel" style={{ marginTop:6, width:'100%', padding:'9px 12px', borderRadius:'var(--radius-md)', background:'var(--bg-surface)', border:'1px solid var(--border-subtle)', color:'var(--text-primary)', fontSize:16 }}/>
-          </label>
+          <Field id="pe-name" label="Display name" count={`${pseudonym.length}/${NAME_MAX}`} error={nameError} help="Your pseudonym on CoRide">
+            <input
+              id="pe-name"
+              className="input"
+              value={pseudonym}
+              onChange={e => setPseudonym(e.target.value)}
+              maxLength={NAME_MAX}
+              autoComplete="off"
+              aria-invalid={Boolean(nameError)}
+              aria-describedby="pe-name-help"
+              style={nameError ? { borderColor: 'var(--status-danger)' } : undefined}
+            />
+          </Field>
 
-          <div>
-            <div style={{ fontSize:12, fontWeight:700, color:'var(--text-secondary)', display:'flex', justifyContent:'space-between' }}>
-              <span>Interest tags (up to 5)</span><span style={{ color:'var(--text-muted)', fontWeight:600 }}>{tags.length}/5</span>
-            </div>
-            <div style={{ marginTop:8, display:'flex', flexWrap:'wrap', gap:6 }}>
+          <Field id="pe-vibe" label="Tagline" optional count={`${vibe.length}/30`}>
+            <input id="pe-vibe" className="input" value={vibe} onChange={e => setVibe(e.target.value)} maxLength={30} placeholder="Chai, code and cricket" aria-describedby="pe-vibe-help" />
+          </Field>
+
+          <Field id="pe-bio" label="Bio" optional count={`${bio.length}/${BIO_MAX}`}>
+            <textarea
+              id="pe-bio"
+              className="input"
+              value={bio}
+              onChange={e => setBio(e.target.value)}
+              maxLength={BIO_MAX}
+              rows={3}
+              placeholder="BCA student, loves metro photowalks"
+              aria-describedby="pe-bio-help"
+              style={{ resize: 'none', fontFamily: 'inherit' }}
+            />
+          </Field>
+
+          <Field id="pe-college" label="College or workplace" optional>
+            <input id="pe-college" className="input" value={college} onChange={e => setCollege(e.target.value)} maxLength={30} placeholder="DU North Campus" />
+          </Field>
+
+          <fieldset style={{ border: 'none', padding: 0, margin: 0 }}>
+            <legend className="field-label" style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
+              <span>Interests</span>
+              <span className="tnum" style={{ fontWeight: 480, color: 'var(--text-muted)' }}>{tags.length}/{TAG_MAX}</span>
+            </legend>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
               {INTEREST_TAXONOMY.map(t => {
                 const active = tags.includes(t.id);
                 return (
-                  <button key={t.id} onClick={()=>toggleTag(t.id)} style={{
-                    padding:'6px 10px', borderRadius:'var(--radius-full)', fontSize:12, fontWeight:700,
-                    background: active ? 'rgba(168,85,247,0.18)' : 'var(--bg-surface)',
-                    border: `1px solid ${active ? 'rgba(168,85,247,0.4)' : 'var(--border-subtle)'}`,
-                    color: active ? 'var(--accent-purple)' : 'var(--text-secondary)',
-                    display:'inline-flex', alignItems:'center', gap:4, cursor:'pointer'
-                  }}>
-                    <span>{t.emoji}</span>{t.label}
-                  </button>
+                  <Chip
+                    key={t.id}
+                    selected={active}
+                    disabled={!active && tags.length >= TAG_MAX}
+                    icon={active ? <CheckIcon size={16} weight="bold" /> : undefined}
+                    onClick={() => toggleTag(t.id)}
+                  >
+                    {t.label}
+                  </Chip>
                 );
               })}
             </div>
-          </div>
+            {tags.length >= TAG_MAX && (
+              <p className="type-meta" style={{ color: 'var(--text-muted)', marginTop: 8 }}>You've picked {TAG_MAX}. Remove one to choose another.</p>
+            )}
+          </fieldset>
 
-          <label style={{ fontSize:12, fontWeight:700, color:'var(--text-secondary)' }}>Languages (comma)
-            <input value={langs.join(',')} onChange={e=>setLangs(e.target.value.split(',').map(s=>s.trim()).filter(Boolean).slice(0,3))} placeholder="en,hi" style={{ marginTop:6, width:'100%', padding:'9px 12px', borderRadius:'var(--radius-md)', background:'var(--bg-surface)', border:'1px solid var(--border-subtle)', color:'var(--text-primary)', fontSize:16 }}/>
-          </label>
+          <fieldset style={{ border: 'none', padding: 0, margin: 0 }}>
+            <legend className="field-label" style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
+              <span>Languages you speak</span>
+              <span className="tnum" style={{ fontWeight: 480, color: 'var(--text-muted)' }}>{langs.length}/{LANG_MAX}</span>
+            </legend>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              {languageOptions.map(l => {
+                const active = langs.includes(l.code);
+                return (
+                  <Chip
+                    key={l.code}
+                    selected={active}
+                    disabled={!active && langs.length >= LANG_MAX}
+                    icon={active ? <CheckIcon size={16} weight="bold" /> : undefined}
+                    onClick={() => toggleLang(l.code)}
+                  >
+                    {l.label}
+                  </Chip>
+                );
+              })}
+            </div>
+          </fieldset>
+        </div>
 
-          <div style={{ display:'flex', gap:8, marginTop:8 }}>
-            <button onClick={onClose} className="btn-secondary" style={{ flex:1, justifyContent:'center' }}>Cancel</button>
-            <button onClick={save} disabled={saving} className="btn-primary" style={{ flex:1, justifyContent:'center', opacity: saving?0.6:1 }}><Save size={14}/> {saving?'Saving…':'Save'}</button>
+        {/* Action bar */}
+        <div
+          style={{
+            position: 'sticky', bottom: 0, padding: '12px 20px calc(12px + var(--safe-bottom))',
+            background: 'var(--bg-surface)', borderTop: '1px solid var(--border-subtle)',
+          }}
+        >
+          {error && (
+            <p role="alert" className="type-meta" style={{ color: 'var(--danger-text)', marginBottom: 8 }}>{error}</p>
+          )}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Button type="button" variant="tonal" onClick={onClose} style={{ flex: 1 }}>Cancel</Button>
+            <Button type="button" onClick={save} disabled={!dirty || Boolean(nameError)} isLoading={saving} style={{ flex: 1 }}>
+              Save
+            </Button>
           </div>
-          {msg && <div style={{ fontSize:12, color:'var(--accent-emerald)', textAlign:'center' }}>{msg}</div>}
-          <div style={{ fontSize:11, color:'var(--text-muted)', textAlign:'center', marginTop:4 }}>Karma {user.karmaScore} • {(user as any).trustBadge || 'Regular'} • Real-time presence</div>
         </div>
       </div>
     </div>
   );
 };
+
+/** Label above, control, then help or error text below with an optional counter. */
+function Field({ id, label, optional, help, error, count, children }: {
+  id: string;
+  label: string;
+  optional?: boolean;
+  help?: string;
+  error?: string | null;
+  count?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div>
+      <label htmlFor={id} className="field-label">
+        {label}{optional && <span style={{ fontWeight: 480, color: 'var(--text-muted)' }}> (optional)</span>}
+      </label>
+      {children}
+      {(help || error || count) && (
+        <div id={`${id}-help`} className="type-meta" style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginTop: 6, color: 'var(--text-muted)' }}>
+          <span style={{ color: error ? 'var(--danger-text)' : undefined }}>{error || help}</span>
+          {count && <span className="tnum">{count}</span>}
+        </div>
+      )}
+    </div>
+  );
+}

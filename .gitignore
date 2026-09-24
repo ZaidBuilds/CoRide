@@ -12,10 +12,14 @@ dist/
 .env
 server/.env
 client/.env
+client/.env.*
+!client/.env.example
 *.local
 
 # Runtime data (ephemeral) — keep examples
 server/src/data/store.json
+server/src/data/store.json.*
+server/src/data/analytics.log.*
 server/dist/data/store.json
 server/dist/data/analytics.log
 **/analytics.log

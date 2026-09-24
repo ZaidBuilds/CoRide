@@ -1,6 +1,13 @@
-import { Home, Users, MessageCircle, User, Map } from 'lucide-react';
+import { HouseIcon, UsersThreeIcon, PathIcon, ChatsCircleIcon, UserIcon } from '@phosphor-icons/react';
+import type { Icon } from '@phosphor-icons/react';
 import { triggerHaptic } from '../utils/nativeBridge';
 
+/**
+ * Primary navigation: five equal destinations on a flat surface bar.
+ * Active tab: Phosphor `fill` weight on a Signal Lime pill (ink icon), label in
+ * primary text. Inactive: `regular` weight, muted. Unread count sits on Chats.
+ * Each tab is a top-level screen; App.tsx maps sub-screens onto their parent tab.
+ */
 export type NavView = 'home' | 'people' | 'chats' | 'profile' | 'connect' | 'station' | 'train' | 'friends' | 'chat' | 'liveTracking';
 
 interface Props {
@@ -9,55 +16,42 @@ interface Props {
   unreadChats?: number;
 }
 
-export const BottomNav: React.FC<Props> = ({ active, onNavigate, unreadChats = 0 }) => {
-  const isPeopleActive = active === 'people' || active === 'station' || active === 'train';
-  const isChatsActive = active === 'chats' || active === 'chat' || active === 'friends' || active === 'connect';
-  const isMapActive = active === 'liveTracking';
+type Tab = { id: NavView; label: string; icon: Icon; match: NavView[] };
 
-  const nav = (v: NavView) => {
-    triggerHaptic('light');
-    onNavigate(v);
-  };
+const TABS: Tab[] = [
+  { id: 'home', label: 'Home', icon: HouseIcon, match: ['home'] },
+  { id: 'people', label: 'People', icon: UsersThreeIcon, match: ['people', 'station', 'train'] },
+  { id: 'liveTracking', label: 'Journey', icon: PathIcon, match: ['liveTracking'] },
+  { id: 'chats', label: 'Chats', icon: ChatsCircleIcon, match: ['chats', 'chat', 'friends', 'connect'] },
+  { id: 'profile', label: 'Profile', icon: UserIcon, match: ['profile'] },
+];
 
-  return (
-    <nav className="bottom-nav" aria-label="Primary">
-      <button className={`bottom-nav-item ${active === 'home' ? 'active' : ''}`} aria-current={active === 'home' ? 'page' : undefined} onClick={() => nav('home')}>
-        <Home />
-        <span>Home</span>
-      </button>
-
-      <button className={`bottom-nav-item ${isPeopleActive ? 'active' : ''}`} aria-current={isPeopleActive ? 'page' : undefined} onClick={() => nav('people')}>
-        <Users />
-        <span>People</span>
-      </button>
-
-      <button
-        onClick={() => nav('liveTracking')}
-        className={`bottom-nav-scan ${isMapActive ? 'active' : ''}`}
-        aria-label="Live Metro Map & Tracking"
-        title="Live Metro Map"
-      >
-        <Map size={26} />
-      </button>
-
-      <button
-        className={`bottom-nav-item ${isChatsActive ? 'active' : ''}`}
-        aria-current={isChatsActive ? 'page' : undefined}
-        aria-label={unreadChats > 0 ? `Chats, ${unreadChats} unread` : 'Chats'}
-        onClick={() => nav('chats')}
-        style={{ position:'relative' }}
-      >
-        <MessageCircle />
-        <span>Chats</span>
-        {unreadChats > 0 && (
-          <span aria-hidden="true" style={{ position:'absolute', top:2, right:18, minWidth:16, height:16, padding:'0 4px', borderRadius:999, background:'#EF4444', color:'white', fontSize:10, fontWeight:800, display:'flex', alignItems:'center', justifyContent:'center' }}>{unreadChats > 9 ? '9+' : unreadChats}</span>
-        )}
-      </button>
-
-      <button className={`bottom-nav-item ${active === 'profile' ? 'active' : ''}`} aria-current={active === 'profile' ? 'page' : undefined} onClick={() => nav('profile')}>
-        <User />
-        <span>Profile</span>
-      </button>
-    </nav>
-  );
-};
+export const BottomNav: React.FC<Props> = ({ active, onNavigate, unreadChats = 0 }) => (
+  <nav className="bottom-nav" aria-label="Primary">
+    {TABS.map(({ id, label, icon: Icon, match }) => {
+      const isActive = match.includes(active);
+      const unread = id === 'chats' && unreadChats > 0 ? unreadChats : 0;
+      return (
+        <button
+          key={id}
+          type="button"
+          className={`bottom-nav-item ${isActive ? 'active' : ''}`.trim()}
+          aria-current={isActive ? 'page' : undefined}
+          aria-label={unread ? `${label}, ${unread} unread` : undefined}
+          onClick={() => {
+            void triggerHaptic('light');
+            onNavigate(id);
+          }}
+        >
+          <span className="nav-indicator" aria-hidden="true">
+            <Icon weight={isActive ? 'fill' : 'regular'} />
+          </span>
+          <span aria-hidden={unread ? true : undefined}>{label}</span>
+          {unread > 0 && (
+            <span className="badge tnum" aria-hidden="true">{unread > 9 ? '9+' : unread}</span>
+          )}
+        </button>
+      );
+    })}
+  </nav>
+);

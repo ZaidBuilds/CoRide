@@ -1,543 +1,506 @@
-import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Map as MapIcon, GitCommit, Repeat, Clock, Radio, Users } from 'lucide-react';
-import type { UserProfile, ContextResult, ContextRoom } from '../types';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { ListNumbersIcon, MapTrifoldIcon, InfoIcon } from '@phosphor-icons/react';
+import type { UserProfile, ContextResult, ContextRoom, MetroLine } from '../types';
+import type { LocationContext } from '../hooks/useLocationContext';
 import type { MetroFriend } from './FriendsTab';
 import { DELHI_METRO_LINES, getLineById } from '../data/metroData';
 import { FriendsMetroMap } from './FriendsMetroMap';
-import { getCommuteRelationship } from '../utils/commuteContext';
+import { railLayout, shortStationName, shortLineName, type RailCell, type RailGroup, type RailRow } from './transit/lineSegments';
 import { triggerHaptic } from '../utils/nativeBridge';
+import { lineStyle } from '../utils/lineStyle';
+import { describeContext, CONFIDENT_CONTEXT } from '../utils/commuteContext';
+import { ScreenHeader } from './ui/ScreenHeader';
+import { LinePill } from './ui/LinePill';
+import { Button } from './ui/Button';
+import { Avatar } from './ui/Avatar';
 
 interface Props {
   currentUser: UserProfile;
   friends: MetroFriend[];
-  currentContext?: ContextResult | null;
+  /** Engine v2 context (LocationContext) or the legacy shape. */
+  currentContext?: LocationContext | ContextResult | null;
   activeRoom?: ContextRoom | null;
   onBack?: () => void;
   onOpenChat?: (friendId: string) => void;
   onOpenProfile?: (profile: UserProfile) => void;
   onContextUpdated?: (newCtx: ContextResult) => void;
+  /** Opens the check-in screen to set/confirm station and direction. Button hidden until wired. */
+  onOpenCheckIn?: () => void;
 }
 
+type Tab = 'route' | 'map';
+
+/** Header height (ScreenHeader min-height) so the direction bar sticks just under it. */
+const HEADER_H = 'calc(64px + var(--safe-top))';
+
+/** Compact terminal label for the direction control: "Noida Electronic City / Vaishali" → "Noida / Vaishali". */
+function terminalLabel(name: string): string {
+  const clean = name.split(' (')[0].trim();
+  if (clean.includes(' / ') && clean.length > 22) return clean.split(' / ').map(p => p.split(' ')[0]).join(' / ');
+  return clean;
+}
+
+type Item =
+  | { kind: 'stop'; row: RailRow; key: string }
+  | { kind: 'marker'; cells: RailCell[]; col: 0 | 1; group: RailGroup; key: string; label: string }
+  | { kind: 'header'; cells: RailCell[]; key: string; label: string };
+
+const passThrough = (prev: RailCell[] | undefined, columns: number): RailCell[] =>
+  Array.from({ length: columns }, (_, c) => {
+    const on = Boolean(prev?.[c]?.bottom);
+    return { node: false, top: on, bottom: on };
+  });
+
+/**
+ * Journey: the route diagram of a whole line, in travel order, with the
+ * rider's own position when we know it. Static network data from metroData;
+ * the only live input is the rider's context. No timetables, ETAs or crowding.
+ */
 export const LiveTrackingScreen: React.FC<Props> = ({
   currentUser,
-  friends,
   currentContext,
   activeRoom,
-  onBack,
-  onOpenChat,
   onOpenProfile,
-  onContextUpdated
+  onOpenCheckIn,
 }) => {
-  // Tab switcher: 'map' (Friends Live Map) or 'diagram' (Subway Diagram & Route)
-  const [activeTab, setActiveTab] = useState<'map' | 'diagram'>('diagram');
+  const rawCtx = (currentContext ?? null) as LocationContext | null;
+  // source 'none' means the engine doesn't know where the rider is: draw nothing for them.
+  const ctx = rawCtx && rawCtx.source !== 'none' && rawCtx.station ? rawCtx : null;
+  const [tab, setTab] = useState<Tab>('route');
 
-  // Selected line in the diagram (defaults to user's active detected line or Blue Line)
-  const initialLineId = currentContext?.line || 'blue';
-  const [selectedLineId, setSelectedLineId] = useState<string>(initialLineId);
+  const contextLine = ctx?.line ? getLineById(ctx.line) : undefined;
+  const [selectedLineId, setSelectedLineId] = useState<string>(contextLine?.id || DELHI_METRO_LINES[0].id);
+  const line: MetroLine = getLineById(selectedLineId) || DELHI_METRO_LINES[0];
 
-  // Direction state (e.g. "Towards Noida Electronic City")
-  const currentLine = getLineById(selectedLineId) || DELHI_METRO_LINES[0];
-  const initialDirection = currentContext?.direction || `Towards ${currentLine.terminalB}`;
-  const [currentDirection, setCurrentDirection] = useState<string>(initialDirection);
-  const [flippingDirection, setFlippingDirection] = useState(false);
+  // Follow the rider's context when it changes line (render-time sync, no effect).
+  const [syncedLine, setSyncedLine] = useState(contextLine?.id);
+  if (contextLine && contextLine.id !== syncedLine) {
+    setSyncedLine(contextLine.id);
+    setSelectedLineId(contextLine.id);
+  }
 
-  // Arrival countdown simulation in seconds
-  const [countdownSeconds, setCountdownSeconds] = useState(135);
+  const userOnThisLine = contextLine?.id === line.id;
 
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setCountdownSeconds(prev => (prev > 10 ? prev - 1 : 180));
-    }, 1000);
-    return () => clearInterval(timer);
-  }, []);
+  // The rider's direction: the engine's key when present, else the "Towards X" label.
+  const ctxTowardsA = ctx?.directionKey
+    ? ctx.directionKey === 'towards_a'
+    : !!ctx?.direction && ctx.direction.toLowerCase().includes(line.terminalA.toLowerCase());
+  const ctxDirectionKnown = ctx?.directionKey ? ctx.directionKnown !== false : !!ctx?.direction;
 
-  // Update line and direction when context changes
-  useEffect(() => {
-    if (currentContext?.line) {
-      setSelectedLineId(currentContext.line);
-    }
-    if (currentContext?.direction) {
-      setCurrentDirection(currentContext.direction);
-    }
-  }, [currentContext]);
+  // Viewer's choice per line; defaults to the rider's direction on their line.
+  const [dirFor, setDirFor] = useState<Record<string, 'a' | 'b'>>({});
+  const towardsA = dirFor[line.id]
+    ? dirFor[line.id] === 'a'
+    : userOnThisLine && ctxDirectionKnown ? ctxTowardsA : false;
 
-  // Order stations according to current direction
-  const isTowardsA = currentDirection.toLowerCase().includes(currentLine.terminalA.toLowerCase());
-  const orderedStations = React.useMemo(() => {
-    const list = [...currentLine.stations];
-    return isTowardsA ? list.reverse() : list;
-  }, [currentLine, isTowardsA]);
+  const layout = useMemo(() => railLayout(line, towardsA), [line, towardsA]);
 
-  // Find user's active station index in ordered stations
-  const userStationId = currentContext?.station || '';
-  const currentStationIndex = orderedStations.findIndex(s => s.id === userStationId);
-  const activeStationIndex = currentStationIndex >= 0 ? currentStationIndex : 0;
+  const headline = describeContext(rawCtx);
+  const sure = !!ctx && ((ctx.confidence >= CONFIDENT_CONTEXT && !ctx.stale) || ctx.source === 'manual');
+  const riding = !!ctx && (ctx.context === 'train' || ctx.movement === 'in_vehicle');
+  const dimPast = userOnThisLine && riding && ctxDirectionKnown && ctxTowardsA === towardsA;
 
-  // 1-Tap Direction Flip handler
-  const handleFlipDirection = async () => {
-    if (flippingDirection) return;
-    triggerHaptic('medium');
-    setFlippingDirection(true);
-
-    const nextDirection = isTowardsA ? `Towards ${currentLine.terminalB}` : `Towards ${currentLine.terminalA}`;
-    setCurrentDirection(nextDirection);
-
-    try {
-      const token = localStorage.getItem('coride_token');
-      const res = await fetch('/api/context/direction-override', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {})
-        },
-        body: JSON.stringify({
-          userId: currentUser.id,
-          lineId: currentLine.id,
-          direction: nextDirection,
-          stationId: currentContext?.station
-        })
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        if (data.context && onContextUpdated) {
-          onContextUpdated(data.context);
-        }
+  // ── Display items: stops, branch headers and the "you" marker ────────────
+  const { items, youKey } = useMemo(() => {
+    const rows = layout.rows;
+    const out: Item[] = [];
+    rows.forEach((row, i) => {
+      const prev = rows[i - 1];
+      if (row.group !== 'trunk' && prev?.group !== row.group) {
+        const term = row.group === 'main' ? layout.mainTerminal : layout.branchTerminal;
+        out.push({
+          kind: 'header',
+          key: `h-${row.group}`,
+          label: `${towardsA ? 'From' : 'To'} ${term}`,
+          cells: passThrough(prev?.cells, layout.columns),
+        });
       }
-    } catch (err) {
-      console.error('Failed to update direction override', err);
-    } finally {
-      setTimeout(() => setFlippingDirection(false), 300);
+      out.push({ kind: 'stop', row, key: row.station.id });
+    });
+
+    let you: string | undefined;
+    if (userOnThisLine && ctx) {
+      const b = riding ? ctx.between : null;
+      const fromIdx = b ? out.findIndex(it => it.kind === 'stop' && it.row.station.id === b.fromStationId) : -1;
+      const toIdx = b ? out.findIndex(it => it.kind === 'stop' && it.row.station.id === b.toStationId) : -1;
+      if (b && fromIdx >= 0 && toIdx >= 0) {
+        const [ui, li] = fromIdx < toIdx ? [fromIdx, toIdx] : [toIdx, fromIdx];
+        const upper = (out[ui] as Extract<Item, { kind: 'stop' }>).row;
+        const lower = (out[li] as Extract<Item, { kind: 'stop' }>).row;
+        const col = upper.isFork ? lower.col : upper.col;
+        const at = !upper.isFork && col === upper.col ? ui + 1 : li;
+        const before = out[at - 1];
+        const prevCells = before.kind === 'stop' ? before.row.cells : before.cells;
+        const cells = passThrough(prevCells, layout.columns);
+        cells[col] = { node: true, top: true, bottom: true };
+        out.splice(at, 0, {
+          kind: 'marker', key: 'you', col, cells,
+          group: (upper.isFork ? lower : upper).group,
+          label: `Between ${shortStationName(b.fromStationName)} and ${shortStationName(b.toStationName)}`,
+        });
+        you = 'you';
+      } else if (ctx.station && rows.some(r => r.station.id === ctx.station)) {
+        you = ctx.station;
+      }
     }
+    return { items: out, youKey: you };
+  }, [layout, towardsA, userOnThisLine, ctx, riding]);
+
+  const youIdx = youKey ? items.findIndex(it => it.key === youKey) : -1;
+  const youItem = youIdx >= 0 ? items[youIdx] : undefined;
+  const youGroup: RailGroup | undefined = youItem?.kind === 'stop' ? youItem.row.group : youItem?.kind === 'marker' ? youItem.group : undefined;
+  const isPast = (it: Item, idx: number): boolean => {
+    if (!dimPast || youIdx < 0 || idx >= youIdx) return false;
+    const g = it.kind === 'stop' ? it.row.group : it.kind === 'marker' ? it.group : undefined;
+    if (!g) {
+      // Headers follow the item after them.
+      const next = items[idx + 1];
+      return next ? isPast(next, idx + 1) : false;
+    }
+    return g === youGroup || g === 'trunk' || youGroup === 'trunk';
   };
 
-  const formatCountdown = (secs: number) => {
-    const m = Math.floor(secs / 60);
-    const s = secs % 60;
-    return `${m}m ${s < 10 ? '0' : ''}${s}s`;
+  // While riding, bring the rider's position into view once per line.
+  const youRef = useRef<HTMLLIElement>(null);
+  const scrolledFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (tab !== 'route' || !youKey || !dimPast || scrolledFor.current === `${line.id}:${youKey}`) return;
+    scrolledFor.current = `${line.id}:${youKey}`;
+    youRef.current?.scrollIntoView({ block: 'center', behavior: 'auto' });
+  }, [tab, youKey, line.id, dimPast]);
+
+  const chooseLine = (id: string) => {
+    triggerHaptic('light');
+    setSelectedLineId(id);
   };
+  const chooseDirection = (d: 'a' | 'b') => {
+    if ((d === 'a') === towardsA) return;
+    triggerHaptic('light');
+    setDirFor(prev => ({ ...prev, [line.id]: d }));
+  };
+
+  const riders = activeRoom?.users?.filter(u => u.id !== currentUser.id) ?? [];
+
+  const viewSwitch = (
+    <div role="tablist" aria-label="Journey view" className="segmented" style={{ width: 176 }}>
+      {([
+        { id: 'route', label: 'Route', Icon: ListNumbersIcon },
+        { id: 'map', label: 'Map', Icon: MapTrifoldIcon },
+      ] as const).map(t => (
+        <button
+          key={t.id}
+          type="button"
+          role="tab"
+          id={`journey-tab-${t.id}`}
+          aria-selected={tab === t.id}
+          aria-controls={`journey-panel-${t.id}`}
+          className="segmented-option"
+          onClick={() => { triggerHaptic('light'); setTab(t.id); }}
+        >
+          <t.Icon size={18} weight={tab === t.id ? 'fill' : 'regular'} aria-hidden="true" />
+          {t.label}
+        </button>
+      ))}
+    </div>
+  );
 
   return (
-    <div className="animate-fade-in" style={{ paddingBottom: 90 }}>
-      {/* Top Header Bar */}
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        marginBottom: 14,
-        paddingTop: 4
-      }}>
-        <button
-          onClick={onBack}
-          aria-label="Back"
-          className="icon-btn press"
-          style={{ width: 42, height: 42 }}
-        >
-          <ArrowLeft size={18} />
-        </button>
+    <div className="animate-fade-in" style={{ ...lineStyle(line), maxWidth: 520, margin: '0 auto', paddingBottom: 16 }}>
+      <ScreenHeader title="Journey" size="large" actions={viewSwitch} />
 
-        {/* View Switcher Segmented Control */}
-        <div style={{
-          display: 'flex',
-          background: 'rgba(255, 255, 255, 0.06)',
-          borderRadius: 999,
-          padding: 3,
-          border: '1px solid rgba(255, 255, 255, 0.1)'
-        }}>
-          <button
-            onClick={() => setActiveTab('diagram')}
-            className="press"
-            style={{
-              padding: '6px 14px',
-              borderRadius: 999,
-              fontSize: 12,
-              fontWeight: 800,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              border: 'none',
-              background: activeTab === 'diagram' ? 'var(--accent-purple)' : 'transparent',
-              color: activeTab === 'diagram' ? '#fff' : 'var(--text-secondary)',
-              cursor: 'pointer',
-              transition: 'all 0.2s ease'
-            }}
-          >
-            <GitCommit size={14} /> Route Diagram
-          </button>
-          <button
-            onClick={() => setActiveTab('map')}
-            className="press"
-            style={{
-              padding: '6px 14px',
-              borderRadius: 999,
-              fontSize: 12,
-              fontWeight: 800,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              border: 'none',
-              background: activeTab === 'map' ? 'var(--accent-purple)' : 'transparent',
-              color: activeTab === 'map' ? '#fff' : 'var(--text-secondary)',
-              cursor: 'pointer',
-              transition: 'all 0.2s ease'
-            }}
-          >
-            <MapIcon size={14} /> Friends Map
-          </button>
-        </div>
-
-        <div style={{ width: 42, height: 42 }} />
+      {/* Line selection */}
+      <div
+        role="group"
+        aria-label="Metro line"
+        style={{ display: 'flex', gap: 4, overflowX: 'auto', margin: '0 calc(-1 * var(--gutter)) 12px', padding: '0 var(--gutter)', scrollbarWidth: 'none' }}
+      >
+        {DELHI_METRO_LINES.map(l => {
+          const selected = l.id === line.id;
+          return (
+            <button
+              key={l.id}
+              type="button"
+              aria-pressed={selected}
+              onClick={() => chooseLine(l.id)}
+              className="press"
+              style={{ minHeight: 48, padding: '0 3px', border: 'none', background: 'none', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', flexShrink: 0 }}
+            >
+              <LinePill
+                line={l}
+                label={l.name.replace(/\s*\(.*\)/, '')}
+                style={{
+                  height: 30, padding: '0 12px',
+                  ...(selected
+                    ? { outline: '2px solid var(--text-primary)', outlineOffset: 2 }
+                    : { background: 'transparent', color: 'var(--text-secondary)', boxShadow: 'inset 0 0 0 2px var(--line)' }),
+                }}
+              />
+            </button>
+          );
+        })}
       </div>
 
-      {/* VIEW 1: Interactive Snapchat-Style Friends Live Map */}
-      {activeTab === 'map' && (
-        <div style={{ height: 'calc(100dvh - 180px)', minHeight: 520 }}>
-          <FriendsMetroMap
-            currentUser={currentUser}
-            friends={friends}
-            currentContext={currentContext}
-            onOpenChat={onOpenChat}
-            onOpenProfile={onOpenProfile}
-          />
+      {/* Where you are: honest words from the location engine */}
+      {(ctx || onOpenCheckIn) && (
+        <section
+          aria-label="Your location"
+          className="card"
+          style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 12 }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div className="type-headline" style={{ color: 'var(--text-primary)', overflowWrap: 'anywhere' }}>{headline.headline}</div>
+              <div className="type-meta" style={{ color: 'var(--text-muted)', marginTop: 2 }}>
+                {ctx ? [contextLine?.name, ctx.direction, headline.meta].filter(Boolean).join(' · ') : 'Check in to see yourself on the route'}
+              </div>
+            </div>
+            {onOpenCheckIn && (
+              <Button type="button" variant="tonal" size="sm" onClick={onOpenCheckIn} style={{ flexShrink: 0 }}>
+                {ctx ? 'Change' : 'Check in'}
+              </Button>
+            )}
+          </div>
+          {riders.length > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 12, borderTop: '1px solid var(--border-subtle)' }}>
+              <div style={{ display: 'flex' }}>
+                {riders.slice(0, 4).map((u, i) => (
+                  <button
+                    key={u.id}
+                    type="button"
+                    onClick={() => onOpenProfile?.(u)}
+                    aria-label={`View ${u.pseudonym}'s profile`}
+                    style={{ width: 40, height: 48, marginLeft: i ? -6 : -4, padding: 0, background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                  >
+                    <Avatar name={u.pseudonym} seed={u.id} bg={u.avatarBg} size={32} style={{ boxShadow: '0 0 0 2px var(--bg-surface)' }} />
+                  </button>
+                ))}
+              </div>
+              <span className="type-label tnum" style={{ color: 'var(--text-primary)' }}>
+                {riders.length} <span style={{ fontWeight: 480, color: 'var(--text-secondary)' }}>
+                  {riders.length === 1 ? 'rider' : 'riders'} in your room
+                </span>
+              </span>
+            </div>
+          )}
+        </section>
+      )}
+
+      {tab === 'map' && (
+        <div
+          id="journey-panel-map"
+          role="tabpanel"
+          aria-labelledby="journey-tab-map"
+          style={{ height: 'calc(100dvh - var(--safe-top) - var(--nav-offset) - 380px)', minHeight: 320 }}
+        >
+          <FriendsMetroMap currentUser={currentUser} friends={[]} currentContext={ctx} focusLineId={line.id} />
         </div>
       )}
 
-      {/* VIEW 2: High-Standard Subway Route Progression Diagram */}
-      {activeTab === 'diagram' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          {/* Multi-Line Carousel */}
-          <div style={{
-            display: 'flex',
-            gap: 8,
-            overflowX: 'auto',
-            paddingBottom: 4,
-            scrollbarWidth: 'none'
-          }}>
-            {DELHI_METRO_LINES.map(line => {
-              const isSelected = line.id === selectedLineId;
-              return (
-                <button
-                  key={line.id}
-                  onClick={() => {
-                    setSelectedLineId(line.id);
-                    setCurrentDirection(`Towards ${line.terminalB}`);
-                  }}
-                  className="press"
-                  style={{
-                    padding: '7px 12px',
-                    borderRadius: 999,
-                    border: isSelected ? `2px solid ${line.color}` : '1px solid rgba(255, 255, 255, 0.1)',
-                    background: isSelected ? `${line.color}22` : 'rgba(255, 255, 255, 0.04)',
-                    color: isSelected ? '#fff' : 'var(--text-secondary)',
-                    fontWeight: 800,
-                    fontSize: 12,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    whiteSpace: 'nowrap',
-                    cursor: 'pointer'
-                  }}
-                >
-                  <span style={{
-                    width: 8,
-                    height: 8,
-                    borderRadius: '50%',
-                    background: line.color,
-                    boxShadow: isSelected ? `0 0 8px ${line.color}` : 'none'
-                  }} />
-                  <span>{line.name}</span>
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Active Line & Direction Banner */}
-          <div className="glass-thick" style={{
-            padding: '16px',
-            borderRadius: 'var(--radius-xl)',
-            border: `1px solid ${currentLine.color}44`,
-            background: `linear-gradient(135deg, ${currentLine.color}15, rgba(15, 23, 42, 0.85))`,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 12
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{
-                    padding: '2px 8px',
-                    borderRadius: 999,
-                    background: currentLine.color,
-                    color: '#fff',
-                    fontWeight: 900,
-                    fontSize: 11
-                  }}>
-                    {currentLine.name}
-                  </span>
-                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                    {currentLine.stations.length} Stations
-                  </span>
-                </div>
-                <h3 style={{ fontSize: 17, fontWeight: 900, color: '#f8fafc', marginTop: 4, marginBottom: 0 }}>
-                  {currentDirection}
-                </h3>
-              </div>
-
-              {/* 1-Tap Direction Reversal Button */}
-              <button
-                onClick={handleFlipDirection}
-                className="press"
-                style={{
-                  padding: '8px 12px',
-                  borderRadius: 'var(--radius-lg)',
-                  background: 'rgba(255, 255, 255, 0.08)',
-                  border: '1px solid rgba(255, 255, 255, 0.16)',
-                  color: '#f8fafc',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  fontSize: 12,
-                  fontWeight: 800,
-                  cursor: 'pointer',
-                  transform: flippingDirection ? 'rotate(180deg)' : 'none',
-                  transition: 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)'
-                }}
-                title="Flip travel direction"
-              >
-                <Repeat size={14} />
-                <span>Reverse</span>
-              </button>
-            </div>
-
-            {/* Arrival & Headway Metrics Strip */}
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: '1fr 1fr',
-              gap: 8,
-              paddingTop: 8,
-              borderTop: '1px solid rgba(255, 255, 255, 0.08)'
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Clock size={16} color="#38bdf8" />
-                <div>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Next Train</div>
-                  <div style={{ fontSize: 14, fontWeight: 900, color: '#38bdf8' }}>
-                    {formatCountdown(countdownSeconds)}
-                  </div>
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Radio size={16} color="#10b981" />
-                <div>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Headway Interval</div>
-                  <div style={{ fontSize: 13, fontWeight: 800, color: '#10b981' }}>
-                    Every 3 - 4 min
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Co-Riders on this Line / Room */}
-          {activeRoom && activeRoom.users && activeRoom.users.length > 0 && (
-            <div className="glass-thick" style={{
-              padding: '12px 14px',
-              borderRadius: 'var(--radius-lg)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between'
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Users size={16} color="var(--accent-purple-text)" />
-                <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--text-primary)' }}>
-                  {activeRoom.users.length} Co-Riders Active
-                </span>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                {activeRoom.users.slice(0, 4).map(u => {
-                  const rel = getCommuteRelationship(u, {
-                    activeRoomId: activeRoom.id,
-                    currentContext
-                  });
-                  return (
-                    <div
-                      key={u.id}
-                      onClick={() => onOpenProfile?.(u)}
-                      className="press"
-                      style={{
-                        width: 28,
-                        height: 28,
-                        borderRadius: '50%',
-                        background: u.avatarBg || '#6366f1',
-                        color: '#fff',
-                        fontSize: 10,
-                        fontWeight: 800,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        border: '2px solid var(--bg-card)',
-                        cursor: 'pointer'
-                      }}
-                      title={`${u.pseudonym} • ${rel.label}`}
-                    >
-                      {u.pseudonym.slice(0, 2).toUpperCase()}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* Vertical Subway Progression Diagram */}
-          <div className="glass-thick" style={{
-            padding: '18px 16px',
-            borderRadius: 'var(--radius-xl)',
-            background: 'var(--bg-card)'
-          }}>
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              marginBottom: 16
-            }}>
-              <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--text-primary)' }}>
-                Station Progression
-              </span>
-              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                Terminal: {isTowardsA ? currentLine.terminalA : currentLine.terminalB}
-              </span>
-            </div>
-
-            <div style={{ position: 'relative', paddingLeft: 24 }}>
-              {/* Vertical Track Line */}
-              <div style={{
-                position: 'absolute',
-                left: 7,
-                top: 8,
-                bottom: 12,
-                width: 4,
-                borderRadius: 2,
-                background: currentLine.color,
-                opacity: 0.8
-              }} />
-
-              {/* Station Rows */}
-              {orderedStations.map((station, index) => {
-                const isCurrent = index === activeStationIndex;
-                const isPassed = index < activeStationIndex;
-                const isUpcoming = index > activeStationIndex;
-                const minutesAway = (index - activeStationIndex) * 2.5;
-
+      {tab === 'route' && (
+        <div id="journey-panel-route" role="tabpanel" aria-labelledby="journey-tab-route">
+          {/* Direction: sticky under the header while the diagram scrolls */}
+          <div
+            style={{
+              position: 'sticky', top: HEADER_H, zIndex: 5,
+              margin: '0 calc(-1 * var(--gutter))', padding: '8px var(--gutter) 12px',
+              background: 'var(--bg-base)',
+            }}
+          >
+            <div role="radiogroup" aria-label={`${line.name} direction`} className="segmented">
+              {(['b', 'a'] as const).map(d => {
+                const selected = (d === 'a') === towardsA;
+                const term = d === 'a' ? line.terminalA : line.terminalB;
                 return (
-                  <div
-                    key={station.id}
-                    style={{
-                      position: 'relative',
-                      paddingBottom: index === orderedStations.length - 1 ? 0 : 20,
-                      display: 'flex',
-                      alignItems: 'flex-start',
-                      justifyContent: 'space-between'
-                    }}
+                  <button
+                    key={d}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    aria-label={`Towards ${term}`}
+                    onClick={() => chooseDirection(d)}
+                    className={`segmented-option${selected ? ' selected' : ''}`}
+                    style={{ flexDirection: 'column', gap: 0, minHeight: 52, whiteSpace: 'normal', lineHeight: '18px', textAlign: 'center' }}
                   >
-                    {/* Track Node Bullet */}
-                    <div style={{
-                      position: 'absolute',
-                      left: -24,
-                      top: 2,
-                      width: 18,
-                      height: 18,
-                      borderRadius: '50%',
-                      background: isCurrent ? '#38bdf8' : isPassed ? currentLine.color : '#1e293b',
-                      border: isCurrent ? '3px solid #ffffff' : `2px solid ${currentLine.color}`,
-                      boxShadow: isCurrent ? '0 0 12px #38bdf8' : 'none',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      zIndex: 2
-                    }}>
-                      {isCurrent && (
-                        <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#fff' }} />
-                      )}
-                    </div>
-
-                    {/* Station Name and Details */}
-                    <div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <span style={{
-                          fontSize: 14,
-                          fontWeight: isCurrent ? 900 : 700,
-                          color: isCurrent ? '#38bdf8' : isPassed ? 'var(--text-muted)' : 'var(--text-primary)'
-                        }}>
-                          {station.name}
-                        </span>
-
-                        {isCurrent && (
-                          <span style={{
-                            fontSize: 10,
-                            fontWeight: 800,
-                            padding: '2px 6px',
-                            borderRadius: 999,
-                            background: 'rgba(56, 189, 248, 0.2)',
-                            color: '#38bdf8',
-                            border: '1px solid rgba(56, 189, 248, 0.4)'
-                          }}>
-                            You are here
-                          </span>
-                        )}
-                      </div>
-
-                      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
-                        {station.hindiName}
-                      </div>
-
-                      {/* Multi-Line Interchange Pills */}
-                      {station.isInterchange && (
-                        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 4 }}>
-                          {(station.interchangeLines || []).map(ilId => {
-                            const il = getLineById(ilId);
-                            if (!il) return null;
-                            return (
-                              <span
-                                key={ilId}
-                                style={{
-                                  fontSize: 10,
-                                  fontWeight: 800,
-                                  padding: '1px 6px',
-                                  borderRadius: 4,
-                                  background: `${il.color}25`,
-                                  color: il.color,
-                                  border: `1px solid ${il.color}45`
-                                }}
-                              >
-                                🔀 {il.name}
-                              </span>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Estimated Arrival Time Pill */}
-                    {isUpcoming && (
-                      <span style={{
-                        fontSize: 11,
-                        fontWeight: 700,
-                        color: 'var(--text-muted)',
-                        padding: '2px 6px',
-                        borderRadius: 6,
-                        background: 'rgba(255, 255, 255, 0.04)'
-                      }}>
-                        +{Math.round(minutesAway)} min
-                      </span>
-                    )}
-                  </div>
+                    <span className="type-meta" style={{ color: 'inherit', opacity: 0.72 }}>Towards</span>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }}>{terminalLabel(term)}</span>
+                  </button>
                 );
               })}
             </div>
           </div>
+
+          <section aria-label={`${line.name} stations towards ${towardsA ? line.terminalA : line.terminalB}`} className="card" style={{ padding: '8px 16px' }}>
+            <ol style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+              {items.map((it, idx) => {
+                const past = isPast(it, idx);
+                if (it.kind === 'header') {
+                  return (
+                    <li key={it.key} style={{ display: 'flex', alignItems: 'stretch', gap: 12, minHeight: 40 }}>
+                      <Track cells={it.cells} columns={layout.columns} past={past} />
+                      <span className="type-label" style={{ alignSelf: 'center', color: 'var(--text-secondary)', fontWeight: 600, padding: '12px 0 4px' }}>
+                        {it.label}
+                      </span>
+                    </li>
+                  );
+                }
+                if (it.kind === 'marker') {
+                  return (
+                    <li key={it.key} ref={youRef} aria-current="location" style={{ display: 'flex', alignItems: 'stretch', gap: 12, minHeight: 48 }}>
+                      <Track cells={it.cells} columns={layout.columns} dimTop={dimPast} you={sure ? 'live' : 'unsure'} youCol={it.col} />
+                      <span style={{ alignSelf: 'center', minWidth: 0, padding: '6px 0' }}>
+                        <span className="type-label" style={{ display: 'block', color: 'var(--text-primary)', fontWeight: 650 }}>You</span>
+                        <span className="type-meta" style={{ display: 'block', color: 'var(--text-secondary)' }}>{it.label} · {headline.meta}</span>
+                      </span>
+                    </li>
+                  );
+                }
+                const st = it.row.station;
+                const isYou = it.key === youKey;
+                const terminal = idx === 0 || idx === items.length - 1 || !it.row.cells[it.row.col].top || !it.row.cells[it.row.col].bottom;
+                const others = (st.interchangeLines || [])
+                  .map(id => getLineById(id))
+                  .filter((l): l is MetroLine => !!l && l.id !== line.id);
+                const forkNote = it.row.isFork ? (towardsA ? 'Branches join here' : 'Line splits here') : null;
+                return (
+                  <li
+                    key={it.key}
+                    ref={isYou ? youRef : undefined}
+                    aria-current={isYou ? 'location' : undefined}
+                    style={{ display: 'flex', alignItems: 'stretch', gap: 12, minHeight: 52 }}
+                  >
+                    <Track
+                      cells={it.row.cells}
+                      columns={layout.columns}
+                      past={past}
+                      dimTop={isYou && dimPast}
+                      you={isYou ? (sure ? 'live' : 'unsure') : undefined}
+                      youCol={it.row.col}
+                      interchange={others.length > 0}
+                      terminal={terminal}
+                    />
+                    <span style={{ flex: 1, minWidth: 0, alignSelf: 'center', padding: '7px 0' }}>
+                      <span
+                        className="type-body"
+                        style={{
+                          display: 'block', lineHeight: '20px',
+                          color: past ? 'var(--text-muted)' : 'var(--text-primary)',
+                          fontWeight: isYou ? 650 : terminal ? 600 : 480,
+                        }}
+                      >
+                        {st.name}
+                      </span>
+                      {st.hindiName && (
+                        <span lang="hi" className="type-hi type-meta" style={{ display: 'block', color: 'var(--text-muted)' }}>{st.hindiName}</span>
+                      )}
+                      {isYou && (
+                        <span className="type-meta" style={{ display: 'block', color: 'var(--text-primary)', fontWeight: 600, marginTop: 2 }}>
+                          {sure ? 'You are here' : 'You might be here'} <span style={{ fontWeight: 480, color: 'var(--text-secondary)' }}>· {headline.meta}</span>
+                        </span>
+                      )}
+                      {forkNote && (
+                        <span className="type-meta" style={{ display: 'block', color: 'var(--text-secondary)', marginTop: 2 }}>{forkNote}</span>
+                      )}
+                    </span>
+                    {others.length > 0 && (
+                      <span aria-label={`Change for ${others.map(o => o.name).join(', ')}`} style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 4, alignSelf: 'center', maxWidth: 132, opacity: past ? 0.6 : 1 }}>
+                        {others.map(o => <LinePill key={o.id} line={o} label={shortLineName(o)} size="sm" />)}
+                      </span>
+                    )}
+                  </li>
+                );
+              })}
+            </ol>
+          </section>
+
+          <p className="type-meta" style={{ display: 'flex', gap: 8, color: 'var(--text-muted)', margin: '12px 4px 0' }}>
+            <InfoIcon size={16} aria-hidden="true" style={{ flexShrink: 0, marginTop: 1 }} />
+            Main stations and interchanges. CoRide has no live train times yet, so check DMRC for timetables.
+          </p>
         </div>
       )}
     </div>
   );
 };
+
+const COL_W = 20;
+
+/** The track column(s) of one diagram row: bars, the branch curve and the node. */
+function Track({ cells, columns, past = false, dimTop = false, you, youCol = 0, interchange = false, terminal = false }: {
+  cells: RailCell[];
+  columns: number;
+  past?: boolean;
+  /** Dim the track above the node (the rider's own row while riding). */
+  dimTop?: boolean;
+  you?: 'live' | 'unsure';
+  youCol?: number;
+  interchange?: boolean;
+  terminal?: boolean;
+}) {
+  const barOpacity = past ? 0.35 : 1;
+  return (
+    <span aria-hidden="true" style={{ position: 'relative', width: COL_W * columns, flexShrink: 0, alignSelf: 'stretch' }}>
+      {cells.map((c, col) => {
+        const x = col * COL_W + COL_W / 2;
+        const bar = (from: string, to: string, dim: boolean) => (
+          <span style={{ position: 'absolute', left: x - 2, width: 4, top: from, bottom: to, background: 'var(--line)', opacity: dim ? 0.35 : 1 }} />
+        );
+        const isYou = !!you && col === youCol;
+        return (
+          <React.Fragment key={col}>
+            {c.curve ? null : c.top && c.bottom && !c.node ? bar('0', '0', past) : (
+              <>
+                {c.top && bar('0', '50%', past || (dimTop && col === youCol))}
+                {c.bottom && bar('50%', '0', past)}
+              </>
+            )}
+            {c.curve && (
+              <svg
+                viewBox={`0 0 ${COL_W * 2} 100`}
+                preserveAspectRatio="none"
+                style={{ position: 'absolute', left: 0, width: COL_W * 2, top: c.curve === 'fork' ? '50%' : 0, height: '50%', overflow: 'visible', opacity: barOpacity }}
+              >
+                <path
+                  d={c.curve === 'fork'
+                    ? `M${COL_W / 2} 0 C${COL_W / 2} 70, ${COL_W * 1.5} 30, ${COL_W * 1.5} 100`
+                    : `M${COL_W * 1.5} 0 C${COL_W * 1.5} 70, ${COL_W / 2} 30, ${COL_W / 2} 100`}
+                  fill="none"
+                  stroke="var(--line)"
+                  strokeWidth={4}
+                  vectorEffect="non-scaling-stroke"
+                />
+              </svg>
+            )}
+            {c.node && <Node x={x} you={isYou ? you : undefined} past={past} interchange={interchange} terminal={terminal} />}
+          </React.Fragment>
+        );
+      })}
+    </span>
+  );
+}
+
+function Node({ x, you, past, interchange, terminal }: { x: number; you?: 'live' | 'unsure'; past: boolean; interchange: boolean; terminal: boolean }) {
+  let size = 12;
+  let style: React.CSSProperties = { background: 'var(--bg-surface)', border: '3px solid var(--line)' };
+  if (you === 'live') {
+    size = 20;
+    style = { background: 'var(--line)', border: '3px solid var(--bg-surface)', boxShadow: '0 0 0 3px var(--signal), 0 0 0 4.5px var(--ink-fixed)' };
+  } else if (you === 'unsure') {
+    size = 18;
+    style = { background: 'var(--line)', border: '3px solid var(--bg-surface)', boxShadow: '0 0 0 2px var(--text-muted)' };
+  } else if (terminal) {
+    size = 16;
+    style = { background: 'var(--line)', border: `3px solid ${interchange ? 'var(--text-primary)' : 'var(--line)'}` };
+  } else if (interchange) {
+    size = 14;
+    style = { background: 'var(--bg-surface)', border: '3px solid var(--text-primary)' };
+  }
+  if (past && !you) style = { ...style, borderColor: 'color-mix(in srgb, var(--line) 45%, var(--bg-surface))', background: 'var(--bg-surface)' };
+  return (
+    <span
+      style={{
+        position: 'absolute', zIndex: 1, left: x - size / 2, top: '50%', marginTop: -size / 2,
+        width: size, height: size, borderRadius: '50%', ...style,
+      }}
+    />
+  );
+}

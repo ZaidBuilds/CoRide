@@ -1,13 +1,27 @@
-import { Train, Users, Map } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { ArrowRightIcon, MapPinIcon, SwapIcon, UsersIcon, GameControllerIcon } from '@phosphor-icons/react';
 import { ThemeToggle } from './ThemeToggle';
-import type { UserProfile, ContextRoom, RankedTraveler } from '../types';
+import { Button } from './ui/Button';
+import { Skeleton } from './ui/Skeleton';
+import { StationSign } from './ui/StationSign';
+import { LineRail } from './ui/LineRail';
+import { PresenceStack } from './ui/PresenceStack';
+import { Avatar } from './ui/Avatar';
+import { BrandMark } from './ui/BrandMark';
+import { ListGroup, ListRow } from './ui/ListRow';
+import { lineStyle } from '../utils/lineStyle';
+import { getLineById, getStationById } from '../data/metroData';
+import { describeContext } from '../utils/commuteContext';
+import type { UserProfile, ContextRoom, RankedTraveler, ContextResult } from '../types';
+import type { LocationContext } from '../hooks/useLocationContext';
 import type { EngagementSnapshot } from '../types/engagement';
+import { presenceRoomId } from '../utils/presenceRoom';
 
-/** CoRide peaks on the evening commute as much as the morning — greeting follows the clock. */
+/** CoRide peaks on the evening commute as much as the morning; the greeting follows the clock. */
 function greetingFor(hour: number): string {
-  if (hour < 12) return 'Good Morning';
-  if (hour < 17) return 'Good Afternoon';
-  return 'Good Evening';
+  if (hour < 12) return 'Good morning';
+  if (hour < 17) return 'Good afternoon';
+  return 'Good evening';
 }
 
 interface Props {
@@ -21,241 +35,349 @@ interface Props {
   onViewAllPeople: () => void;
   onJoinRoom: (roomId: string) => void;
   onOpenRoom?: (roomId?: string) => void;
+  /** Open a traveler's profile sheet. Without it, tapping a person opens People. */
+  onOpenProfile?: (u: UserProfile) => void;
   onShowNotifications?: () => void;
   onOpenLiveTracking?: () => void;
   onOpenCheckIn?: () => void;
+  /** Full detector result (engine v2). Drives the honest wording and the line rail. */
+  context?: LocationContext | ContextResult | null;
+  /** One-tap "Yes, I'm here" for a low-confidence guess ("Near Rajiv Chowk?"). Wire to useLocationContext().confirm. */
+  onConfirmContext?: () => unknown;
+  /** Rendered after "Riding with you", e.g. <SavedCommutes />. */
+  children?: React.ReactNode;
 }
 
-export const HomeScreen: React.FC<Props> = ({ user, contextStationName, contextLineName, stationRoom, trainRoom, vibe, engagement, onViewAllPeople, onJoinRoom, onOpenRoom, onOpenLiveTracking, onOpenCheckIn }) => {
+interface AroundItem {
+  profile: UserProfile;
+  shared: number;
+}
+
+const GAME_TITLES: Record<string, string> = {
+  word_chain: 'Word Chain',
+  trivia: 'Fast Trivia',
+  twenty_q: '20 Questions',
+  prompt: 'Prompt Wall'
+};
+
+const TIER_WORD: Record<string, string> = { active: 'Here now', nearby: 'Nearby', other: 'Earlier' };
+
+function firstName(pseudonym: string): string {
+  return pseudonym.split('_')[0] || pseudonym;
+}
+
+function norm(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function agoLabel(ms: number): string {
+  const min = Math.floor(ms / 60000);
+  if (min < 1) return 'just now';
+  if (min < 60) return `${min} min ago`;
+  const h = Math.floor(min / 60);
+  return `${h} h ago`;
+}
+
+/**
+ * Home: "your platform". A DMRC-style sign for where you are (and how we
+ * know), the stretch of line around you, who is riding with you, then your
+ * saved commutes. The whole screen wears the current line's colour. Only real
+ * signals: no placeholder rooms, schedules or match scores.
+ */
+export const HomeScreen: React.FC<Props> = ({
+  user, contextStationName, contextLineName, stationRoom, trainRoom, vibe, engagement,
+  onViewAllPeople, onJoinRoom, onOpenRoom, onOpenProfile, onOpenCheckIn,
+  context, onConfirmContext, children
+}) => {
   const greeting = greetingFor(new Date().getHours());
-  const nearbyCount = stationRoom?.userCount || trainRoom?.userCount || 0;
-  const line = contextLineName || trainRoom?.lineName || 'Blue Line';
-  const station = contextStationName || trainRoom?.stationName || 'Rajiv Chowk';
-  const next = trainRoom?.stationName ? 'Mandi House' : 'Noida Sec 18';
+  const liveRoom = trainRoom || stationRoom;
+  const presenceId = presenceRoomId(trainRoom) || presenceRoomId(stationRoom);
+  const ctx = (context ?? null) as LocationContext | null;
 
-  // Build Around You Now avatars — use vibe or first 6 station users
-  const around = vibe && vibe.length ? vibe : (stationRoom?.users.slice(0,6) || trainRoom?.users.slice(0,6) || []);
-  // For around, we need to map RankedTraveler[] vs UserProfile[] — normalize
-  const aroundItems: { id: string; name: string; bg: string; match: number; avatar?: string; tier?: string }[] =
-    (around as any).slice(0,6).map((r: any, idx: number) => {
-      if (r.profile) {
-        const pct = Math.max(65, 90 - idx*5); // 90,80,75,70,65
-        return { id: r.profile.id, name: r.profile.pseudonym.split('_')[0] || r.profile.pseudonym, bg: r.profile.avatarBg, match: pct, tier: r.profile.presenceTier };
-      } else {
-        const u = r as UserProfile;
-        const pct = 90 - idx*5;
-        return { id: u.id, name: u.pseudonym.split('_')[0] || u.pseudonym, bg: u.avatarBg, match: pct, tier: (u as any).presenceTier };
-      }
+  // "N min ago" should age honestly, so re-render on a slow tick.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 30000);
+    return () => clearInterval(t);
+  }, []);
+
+  // Resolve the line and station from metroData so names, Hindi and colours are canonical.
+  const noSignal = ctx?.source === 'none';
+  const lineId = (noSignal ? undefined : ctx?.line) || liveRoom?.lineId;
+  const line = lineId ? getLineById(lineId) : undefined;
+  const stationId = (noSignal ? undefined : ctx?.station) || liveRoom?.stationId;
+  const station = (stationId && (line?.stations.find(s => s.id === stationId) || getStationById(stationId))) || undefined;
+  const stationName = station?.name || (noSignal ? undefined : contextStationName) || liveRoom?.stationName;
+  const lineName = line?.name || contextLineName || liveRoom?.lineName;
+  const direction = (ctx?.direction || trainRoom?.direction || stationRoom?.direction || '').replace(/^Towards\s+/i, '').trim();
+  const hasPlace = !!stationName && !noSignal;
+
+  // Honest wording (DESIGN.md §9): never claim more than the confidence supports.
+  const described = describeContext(
+    ctx
+      ? { ...ctx, stationName: ctx.stationName || stationName || '', lineName: ctx.lineName || lineName || '' }
+      : hasPlace
+        ? { context: trainRoom ? 'train' : 'station', confidence: 1, stationName: stationName!, lineName: lineName || '', source: 'manual' }
+        : null,
+    now
+  );
+  const confident = hasPlace && !described.needsConfirm;
+  const onTrain = ctx ? ctx.context === 'train' && confident : !!trainRoom;
+  const between = ctx?.movement === 'in_vehicle' && ctx.between ? ctx.between : null;
+  const fixAgo = ctx?.source === 'gps' && ctx.lastFixAt ? agoLabel(Math.max(0, now - ctx.lastFixAt)) : null;
+  const metaLine = hasPlace ? `${described.meta}${fixAgo ? ` · ${fixAgo}` : ''}` : null;
+
+  // The stretch of line around you, drawn in the direction of travel.
+  const fromId = between?.fromStationId || station?.id;
+  const dirKey = ctx?.directionKey;
+  const rail = useMemo(() => {
+    if (!line || !fromId) return null;
+    const stops = line.stations.map(s => ({ id: s.id, name: s.name.replace(/\s*\(.*\)\s*$/, '') }));
+    const first = line.stations[0]?.name || '';
+    const d = norm(direction);
+    const reverse = dirKey ? dirKey === 'towards_a' : !!d && (norm(line.terminalA).includes(d) || d.includes(norm(first)));
+    const ordered = reverse ? [...stops].reverse() : stops;
+    const index = ordered.findIndex(s => s.id === fromId);
+    return index >= 0 ? { stops: ordered, index } : null;
+  }, [line, fromId, direction, dirKey]);
+
+
+  // Riding with you: best matches (shared interests) first, then everyone else in
+  // your rooms. Never yourself, never duplicates, and only real shared counts.
+  const aroundItems: AroundItem[] = [];
+  const seen = new Set<string>(user ? [user.id] : []);
+  for (const r of vibe || []) {
+    if (seen.has(r.profile.id)) continue;
+    seen.add(r.profile.id);
+    aroundItems.push({ profile: r.profile, shared: r.mutualCount || 0 });
+  }
+  for (const u of [...(trainRoom?.users || []), ...(stationRoom?.users || [])]) {
+    if (seen.has(u.id)) continue;
+    seen.add(u.id);
+    const shared = user ? u.interestTags?.filter(t => user.interestTags?.includes(t)).length || 0 : 0;
+    aroundItems.push({ profile: u, shared });
+  }
+  const shown = aroundItems.slice(0, 10);
+  const othersCount = aroundItems.length;
+
+  // Live games in your own rooms (real engagement snapshots only).
+  const liveGames: { roomId: string; title: string; desc: string }[] = [];
+  for (const snap of Object.values(engagement || {})) {
+    const g = snap.activeGame as { type?: string; players?: unknown[]; currentPrompt?: { text?: string } } | null;
+    if (!g?.type) continue;
+    const players = Array.isArray(g.players) ? g.players.length : 0;
+    liveGames.push({
+      roomId: snap.roomId,
+      title: GAME_TITLES[g.type] || g.type.replace(/_/g, ' '),
+      desc: g.type === 'prompt'
+        ? (g.currentPrompt?.text?.slice(0, 60) || 'Share your answer')
+        : players > 0 ? `${players} playing now` : 'Starting now'
     });
-
-  // Active rooms from real engagement rooms only — no demo fallbacks.
-  const activeRooms: { id: string; title: string; desc: string; emoji: string; count: number }[] = [];
-  if (engagement) {
-    for (const snap of Object.values(engagement)) {
-      if (snap.activeGame) {
-        const g: any = snap.activeGame;
-        const titleMap: Record<string,string> = { word_chain: 'Word Chain', trivia: 'Fast Trivia', twenty_q: '20 Questions', prompt: 'Prompt Wall' };
-        activeRooms.push({ id: snap.roomId, title: `${titleMap[g.type] || g.type} • Live`, desc: g.type==='prompt' ? g.currentPrompt?.text?.slice(0,28) || 'Share your vibe' : `${g.players?.length || 0} playing`, emoji: g.type==='trivia'?'⚡':g.type==='prompt'?'💬':'🎮', count: g.players?.length || 0 });
-      }
-    }
   }
 
+  const openGame = (roomId: string) => {
+    // Games are played in the People tab's room hub for your current room;
+    // a game in your other room opens that room's chat.
+    if (liveRoom && roomId === liveRoom.id) onViewAllPeople();
+    else onJoinRoom(roomId);
+  };
+
+  const openPerson = (u: UserProfile) => (onOpenProfile ? onOpenProfile(u) : onViewAllPeople());
+  const openRoom = () => (onOpenRoom ? onOpenRoom(presenceId) : onViewAllPeople());
+
+  const canConfirm = hasPlace && !confident && !!onConfirmContext;
+  // Moving between two stations: the sign shows the next one, like the in-train display.
+  const showNext = !!between && confident;
+  const signStation = showNext
+    ? (line?.stations.find(s => s.id === between!.toStationId) || getStationById(between!.toStationId))
+    : station;
+  const signLines: string[] = signStation
+    ? [signStation.lineId, ...(signStation.interchangeLines || [])].filter((v, i, a) => !!v && a.indexOf(v) === i)
+    : lineId ? [lineId] : [];
+
   return (
-    <div className="animate-fade-in" style={{ paddingBottom: 86 }}>
-      {/* Header — sticky frosted bar; content scrolls under it */}
-      <div className="app-header">
-        <div style={{ minWidth:0 }}>
-          <h1 className="display" style={{ fontSize:24, fontWeight:700, letterSpacing:-0.6, margin:0 }}>CoRide</h1>
-          <p style={{ fontSize:13, color:'var(--text-secondary)', marginTop:1 }}>
-            {greeting}, {user ? user.pseudonym.split('_')[0] : 'there'} <span>👋</span>
-          </p>
-        </div>
-        <div style={{ display:'flex', gap:8, flexShrink:0 }}>
-          <ThemeToggle />
-        </div>
-      </div>
-
-      {/* On Ride */}
-      <div
-        style={{
-          background:'var(--bg-accent-wash)',
-          border:'1px solid var(--border-purple)',
-          borderRadius:'var(--radius-xl)',
-          padding:14,
-          display:'flex',
-          alignItems:'center',
-          gap:12,
-          marginBottom:16,
-          cursor: onOpenRoom ? 'pointer' : 'default'
-        }}
-        onClick={() => onOpenRoom && onOpenRoom()}
-      >
-        <div className="avatar" style={{ width:42, height:42, background:'linear-gradient(135deg, var(--accent-fill-from), var(--accent-fill-to))' }}>
-          <Train size={20} />
-        </div>
-        <div style={{ flex:1, minWidth:0 }}>
-          <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-            <span style={{ fontSize:13, color:'var(--accent-purple-text)', fontWeight:700 }}>On Ride · Live Presence</span>
-            <span style={{ width:6, height:6, borderRadius:'50%', background:'var(--presence-active)' }} />
+    <div className="animate-fade-in" style={lineStyle(line?.color || liveRoom?.lineColor)}>
+      <header className="app-header">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+          <BrandMark size={32} />
+          <div style={{ minWidth: 0 }}>
+            <p className="type-label" style={{ color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {greeting}{user ? `, ${firstName(user.pseudonym)}` : ''}
+            </p>
+            <p className="type-meta" style={{ color: 'var(--text-muted)' }}>
+              {hasPlace ? (!confident ? 'Checking your station' : between ? `On the ${lineName ?? 'train'}` : described.headline) : ctx ? 'Where are you?' : 'Finding your station'}
+            </p>
           </div>
-          <div style={{ fontSize:14, color:'var(--text-primary)', fontWeight:600 }}>{line} • {station} → {next}</div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          {onOpenCheckIn && (
-            <button
-              className="btn-secondary press"
-              style={{
-                background: 'var(--ink-700)',
-                border: '1px solid var(--border-subtle)',
-                color: 'var(--text-primary)',
-                padding: '8px 14px',
-                fontSize: 13,
-                fontWeight: 700,
-                borderRadius: 'var(--radius-pill)',
-                minHeight: 40
-              }}
-              onClick={(e) => {
-                e.stopPropagation();
-                onOpenCheckIn();
-              }}
-            >
-              Check In
-            </button>
-          )}
-          <button
-            className="btn-secondary press"
-            style={{
-              background: 'transparent',
-              border: '1px solid var(--border-purple)',
-              color: 'var(--accent-purple-text)',
-              padding: '8px 14px',
-              fontSize: 13,
-              fontWeight: 700,
-              borderRadius: 'var(--radius-pill)',
-              minHeight: 40
-            }}
-            onClick={(e) => {
-              e.stopPropagation();
-              if (onOpenRoom) onOpenRoom();
-            }}
-          >
-            View Room
-          </button>
-        </div>
-      </div>
+        <ThemeToggle variant="plain" />
+      </header>
 
-      {/* Live Metro Map & Subway Route Tracker Tile */}
-      <div
-        className="glass-thick press"
-        style={{
-          borderRadius: 'var(--radius-xl)',
-          padding: 14,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 12,
-          marginBottom: 16,
-          cursor: 'pointer',
-          background: 'linear-gradient(135deg, rgba(56, 189, 248, 0.12), rgba(123, 93, 255, 0.15))',
-          border: '1px solid rgba(56, 189, 248, 0.25)'
-        }}
-        onClick={() => onOpenLiveTracking && onOpenLiveTracking()}
-      >
-        <div className="avatar" style={{ width: 42, height: 42, background: 'linear-gradient(135deg, #0284c7, #38bdf8)' }}>
-          <Map size={20} color="#fff" />
-        </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ fontSize: 13, color: '#38bdf8', fontWeight: 800 }}>Delhi Metro Live Map</span>
-            <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 999, background: 'rgba(16, 185, 129, 0.2)', color: '#10b981', fontWeight: 800 }}>10 Lines</span>
-          </div>
-          <div style={{ fontSize: 13, color: 'var(--text-primary)', fontWeight: 600 }}>Friends Transit Map & Route Diagram</div>
-        </div>
-        <button
-          className="btn-secondary press"
-          style={{ background: 'rgba(56, 189, 248, 0.15)', border: '1px solid rgba(56, 189, 248, 0.3)', color: '#38bdf8', padding: '6px 12px', fontSize: 13, fontWeight: 700 }}
-          onClick={(e) => {
-            e.stopPropagation();
-            if (onOpenLiveTracking) onOpenLiveTracking();
-          }}
-        >
-          Open Map
-        </button>
-      </div>
+      {/* ── Your platform ── */}
+      <section aria-label="Your current ride" className="card has-stub" style={{ padding: '20px 16px 16px 20px' }}>
+        {hasPlace ? (
+          <>
+            {showNext && (
+              <p className="type-meta" style={{ color: 'var(--text-secondary)', marginBottom: 4 }}>
+                Next station, from {between!.fromStationName}
+              </p>
+            )}
+            <StationSign
+              station={signStation}
+              name={showNext ? signStation?.name ?? between!.toStationName : confident ? stationName : `Near ${stationName}?`}
+              hindiName={signStation?.hindiName}
+              lines={signLines}
+              towards={direction || undefined}
+              meta={metaLine}
+            />
 
-      {/* Around You Now */}
-      <div className="glass-panel" style={{ padding:16, marginBottom:16 }}>
-        <div className="section-head" style={{ marginBottom:6 }}>
-          <h3>Around You Now</h3>
-          <button onClick={onViewAllPeople} className="link">View all</button>
-        </div>
-        {/* Only claim a live count when there is one — the old `|| 74` fallback
-            contradicted the empty state directly below it. */}
-        {nearbyCount > 0 && (
-          <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:12 }}>
-            <div style={{ width:7,height:7, borderRadius:'50%', background:'var(--presence-active)', boxShadow:'0 0 6px var(--presence-active)' }} />
-            <span style={{ fontSize:13, color:'var(--text-secondary)', fontWeight:600 }}>
-              {nearbyCount} {nearbyCount === 1 ? 'person' : 'people'} nearby
-            </span>
+            {rail && (
+              <div style={{ marginTop: 16 }}>
+                <LineRail
+                  orientation="horizontal"
+                  stations={rail.stops}
+                  currentIndex={rail.index}
+                  window={2}
+                  compact
+                  live={confident && ctx?.source === 'gps'}
+                  dimPast={onTrain}
+                  annotate={showNext ? (stop => (stop.id === between!.toStationId ? 'next' : null)) : undefined}
+                  ariaLabel={`${lineName ?? 'Line'} around ${stationName}`}
+                />
+              </div>
+            )}
+
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginTop: 16, paddingTop: 12, borderTop: '1px solid var(--border-subtle)' }}>
+              {liveRoom ? (
+                <PresenceStack
+                  people={shown.map(s => ({ id: s.profile.id, name: s.profile.pseudonym, avatarBg: s.profile.avatarBg }))}
+                  count={othersCount}
+                  label={othersCount === 1 ? (onTrain ? 'rider with you' : 'rider here') : (onTrain ? 'riders with you' : 'riders here')}
+                  live
+                />
+              ) : (
+                <span className="type-meta" style={{ color: 'var(--text-muted)' }}>Joining the room</span>
+              )}
+            </div>
+          </>
+        ) : (
+          <div aria-busy="true" aria-live="polite">
+            <Skeleton width="70%" height={34} />
+            <Skeleton width="30%" height={14} style={{ marginTop: 8 }} />
+            <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+              <Skeleton width={84} height={22} borderRadius="var(--radius-pill)" />
+              <Skeleton width={140} height={22} borderRadius="var(--radius-pill)" delayMs={120} />
+            </div>
+            <p className="type-meta" style={{ color: 'var(--text-muted)', marginTop: 14 }}>
+              Finding your station from GPS. You can also pick it yourself.
+            </p>
           </div>
         )}
-        <div style={{ display: aroundItems.length ? 'flex' : 'block', gap:12, overflowX:'auto', paddingBottom:4, scrollbarWidth:'none' }}>
-          {aroundItems.length ? aroundItems.map(it => (
-            <div key={it.id} style={{ flex:'0 0 72px', textAlign:'center' }}>
-              <div className="avatar-wrap" style={{ width:64, height:64, margin:'0 auto 6px' }}>
-                <div className="avatar" style={{ width:64, height:64, background: it.bg, fontSize:15 }}>
-                  {it.name[0]}
-                </div>
-                <div className={`avatar-dot ${it.tier === 'nearby' ? 'nearby' : it.tier === 'other' ? 'other' : 'active'}`} />
-              </div>
-              <div style={{ fontSize:13, fontWeight:700, color:'var(--text-primary)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{it.name}</div>
-              <span className="tag-pill active" style={{ marginTop:4, padding:'3px 8px', fontSize:11, fontWeight:800 }}>{it.match}% Match</span>
-            </div>
-          )) : (
-            // Empty state — context + one action, rather than a row of grey voids
-            <div style={{ textAlign:'center', padding:'20px 12px' }}>
-              <div style={{ width:48,height:48, borderRadius:'50%', background:'var(--bg-surface)', border:'1px solid var(--border-card)', display:'inline-flex', alignItems:'center', justifyContent:'center', color:'var(--text-muted)', marginBottom:10 }}>
-                <Users size={22} />
-              </div>
-              <div style={{ fontSize:14, fontWeight:700, color:'var(--text-primary)' }}>Nobody nearby yet</div>
-              <div style={{ fontSize:13, color:'var(--text-muted)', marginTop:4, lineHeight:1.5 }}>
-                Set your station and we'll show who's riding with you.
-              </div>
-              <button onClick={onViewAllPeople} className="btn-secondary" style={{ marginTop:12 }}>Set my station</button>
-            </div>
-          )}
-        </div>
+      </section>
+
+      {/* ── The one action ── */}
+      <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+        {!hasPlace ? (
+          onOpenCheckIn && (
+            <Button fullWidth icon={<MapPinIcon size={20} />} onClick={onOpenCheckIn}>Pick my station</Button>
+          )
+        ) : canConfirm ? (
+          <>
+            <Button style={{ flex: 1 }} onClick={() => { void onConfirmContext?.(); }}>Yes, I'm here</Button>
+            {onOpenCheckIn && <Button variant="tonal" style={{ flex: 1 }} icon={<SwapIcon size={20} />} onClick={onOpenCheckIn}>Change</Button>}
+          </>
+        ) : (
+          <>
+            <Button style={{ flex: 1 }} iconEnd={<ArrowRightIcon size={20} />} onClick={openRoom}>Open room</Button>
+            {onOpenCheckIn && (
+              <Button variant="tonal" icon={<SwapIcon size={20} />} onClick={onOpenCheckIn} aria-label="Change station or direction">Change</Button>
+            )}
+          </>
+        )}
       </div>
 
-      {/* Active Rooms */}
-      <div className="section-head">
-        <h3>Active Rooms</h3>
-        <button onClick={onViewAllPeople} className="link">View all</button>
-      </div>
-      <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
-        {activeRooms.map(rm=>(
-          <div key={rm.id} className="glass-panel" style={{ padding:14, display:'flex', alignItems:'center', gap:12 }}>
-            <div style={{ flex:1, minWidth:0 }}>
-              <div style={{ fontSize:14, fontWeight:800, display:'flex', alignItems:'center', gap:6 }}>
-                {rm.title} <span style={{ fontSize:12, color:'var(--text-muted)', fontWeight:500 }}>👥 {rm.count}</span>
-              </div>
-              <div style={{ fontSize:13, color:'var(--text-muted)', marginTop:2 }}>{rm.desc}</div>
-            </div>
-            <button
-              onClick={() => {
-                if (rm.id.includes(':') && onOpenRoom) {
-                  onOpenRoom(rm.id);
-                } else {
-                  onJoinRoom(rm.id);
-                }
-              }}
-              className="btn-primary press"
-              style={{ padding:'8px 18px', fontSize:13 }}
-            >
-              Join
-            </button>
+      {/* ── Riding with you ── */}
+      {hasPlace && (
+        <section aria-labelledby="home-around" style={{ marginTop: 28 }}>
+          <div className="section-head">
+            <h2 id="home-around">{onTrain ? 'Riding with you' : 'On your platform'}</h2>
+            {othersCount > 0 && (
+              <button type="button" className="link" onClick={onViewAllPeople}>See all</button>
+            )}
           </div>
-        ))}
-      </div>
+
+          {!liveRoom ? (
+            <div style={{ display: 'flex', gap: 16 }} aria-hidden="true">
+              {[0, 1, 2, 3].map(i => (
+                <div key={i} style={{ width: 64, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+                  <Skeleton width={56} height={56} borderRadius="var(--radius-squircle)" delayMs={i * 120} />
+                  <Skeleton width={44} height={10} delayMs={i * 120} />
+                </div>
+              ))}
+            </div>
+          ) : shown.length > 0 ? (
+            <ul
+              className="stagger"
+              style={{ display: 'flex', gap: 4, overflowX: 'auto', listStyle: 'none', margin: '0 -16px', padding: '0 12px 4px', scrollbarWidth: 'none' }}
+            >
+              {shown.map(({ profile: p, shared }) => (
+                <li key={p.id} style={{ flex: '0 0 76px', minWidth: 0 }}>
+                  <button
+                    type="button"
+                    className="press"
+                    onClick={() => openPerson(p)}
+                    aria-label={`${p.pseudonym}${shared ? `, ${shared} interest${shared === 1 ? '' : 's'} in common` : ''}. View profile`}
+                    style={{ width: 76, minHeight: 'var(--tap)', background: 'none', border: 'none', padding: '4px 0', cursor: 'pointer', color: 'inherit', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, borderRadius: 'var(--radius-card)' }}
+                  >
+                    <Avatar name={p.pseudonym} seed={p.id} bg={p.avatarBg} size={56} presence={p.presenceTier} style={{ fontSize: 19 }} />
+                    <span className="type-label" style={{ display: 'block', width: '100%', textAlign: 'center', color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {firstName(p.pseudonym)}
+                    </span>
+                    <span className="type-meta tnum" style={{ color: shared ? 'var(--text-secondary)' : 'var(--text-muted)', marginTop: -4, whiteSpace: 'nowrap' }}>
+                      {shared ? `${shared} in common` : p.presenceTier ? TIER_WORD[p.presenceTier] : '\u00a0'}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            // Honest zero-state: what's empty, why, and one way forward.
+            <div className="card" style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
+              <span aria-hidden="true" style={{ width: 44, height: 44, borderRadius: 'var(--radius-squircle)', background: 'var(--bg-tonal)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)', flexShrink: 0 }}>
+                <UsersIcon size={22} />
+              </span>
+              <div style={{ minWidth: 0 }}>
+                <p className="type-label" style={{ color: 'var(--text-primary)' }}>No one else here yet</p>
+                <p className="type-meta" style={{ color: 'var(--text-secondary)', marginTop: 2 }}>
+                  Riders show up as they check in{stationName ? ` at ${stationName}` : ''}. Peak hours are busiest.
+                </p>
+              </div>
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* ── Live in your rooms: only when a real game is running ── */}
+      {liveGames.length > 0 && (
+        <section aria-labelledby="home-live-games" style={{ marginTop: 28 }}>
+          <div className="section-head">
+            <h2 id="home-live-games">Live in your rooms</h2>
+          </div>
+          <ListGroup style={{ marginBottom: 0 }}>
+            {liveGames.map(g => (
+              <ListRow
+                key={g.roomId}
+                leading={<GameControllerIcon size={22} />}
+                title={g.title}
+                subtitle={g.desc}
+                onClick={() => openGame(g.roomId)}
+                navigable
+              />
+            ))}
+          </ListGroup>
+        </section>
+      )}
+
+      {children && <div style={{ marginTop: 28 }}>{children}</div>}
     </div>
   );
 };

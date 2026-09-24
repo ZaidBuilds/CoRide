@@ -1,7 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import type { UserProfile, RoomMessage } from '../types';
 import { AVATAR_PALETTE } from '../data/metroData';
-import { PresenceManager } from './presenceManager';
+import { PresenceManager, MEMBER_TTL_MS } from './presenceManager';
 import { Persistence } from './persistence';
 import type { ContextResult } from './transitContextEngine';
 
@@ -42,7 +42,22 @@ export class RoomManager {
 
   private constructor() {
     this.hydrateProfiles();
-    setInterval(() => this.cleanup(), 60_000);
+    setInterval(() => this.cleanup(), 60_000).unref();
+  }
+
+  /** Re-read profiles after persistence.init() swapped in the real store (DB mode). */
+  public rehydrate(): void {
+    this.hydrateProfiles();
+  }
+
+  /** Account deletion: forget the in-memory profile copy. */
+  public forgetProfile(userId: string): void {
+    this.userProfiles.delete(userId);
+  }
+
+  /** Keep the in-memory profile copy in sync after an edit. */
+  public setProfile(profile: UserProfile): void {
+    this.userProfiles.set(profile.id, profile);
   }
 
   private hydrateProfiles(): void {
@@ -78,7 +93,10 @@ export class RoomManager {
   /** Build a room ID from context result */
   public buildRoomId(contextResult: ContextResult): string {
     if (contextResult.context === 'train' && contextResult.trainId) {
-      const dir = contextResult.direction.toLowerCase().replace(/[^a-z0-9]/g, '_');
+      // Prefer the stable direction key: the label gains the branch name once
+      // a Blue Line train passes Yamuna Bank, and the room must not change.
+      const dir = (contextResult as { directionKey?: string }).directionKey
+        || contextResult.direction.toLowerCase().replace(/[^a-z0-9]/g, '_');
       return `train:${contextResult.line}:${dir}:${contextResult.trainId}`;
     }
     return `station:${contextResult.station}`;
@@ -257,6 +275,7 @@ export class RoomManager {
     if (!room) return null;
     const wasPresent = room.userIds.delete(userId);
     this.userToRooms.get(userId)?.delete(roomId);
+    this.presence.removeFromContext(userId, roomId);
     if (!wasPresent) return null;
     const profile = this.userProfiles.get(userId);
     const leaveMsg: RoomMessage = {
@@ -279,6 +298,51 @@ export class RoomManager {
     return leaveMsg;
   }
 
+  /**
+   * Heartbeat from a socket already in the room. Refreshes presence and, if a
+   * ghost sweep dropped the user while the app was backgrounded, quietly puts
+   * them back (no second "X is at …" message).
+   */
+  public touchMember(roomId: string, user: UserProfile, socketId: string, now: number = Date.now()): boolean {
+    const room = this.rooms.get(roomId);
+    if (!room) return false;
+    const readded = !room.userIds.has(user.id);
+    if (readded) {
+      room.userIds.add(user.id);
+      if (!this.userToRooms.has(user.id)) this.userToRooms.set(user.id, new Set());
+      this.userToRooms.get(user.id)!.add(roomId);
+      this.userProfiles.set(user.id, user);
+    }
+    this.socketToUser.set(socketId, user.id);
+    this.presence.heartbeat(user.id, roomId, socketId, now);
+    this.touchRoom(roomId);
+    return readded;
+  }
+
+  /**
+   * Drop members whose heartbeat in that room is older than MEMBER_TTL_MS
+   * (app backgrounded or killed while the socket lingers). Seeds are exempt.
+   * Returns the ids of rooms whose membership changed.
+   */
+  public sweepGhosts(now: number = Date.now()): string[] {
+    const changed: string[] = [];
+    for (const room of this.rooms.values()) {
+      let any = false;
+      for (const uid of Array.from(room.userIds)) {
+        if (uid.startsWith('seed_')) continue;
+        const last = this.presence.lastHeartbeat(uid, room.id);
+        if (last === undefined || now - last > MEMBER_TTL_MS) {
+          room.userIds.delete(uid);
+          this.userToRooms.get(uid)?.delete(room.id);
+          this.presence.removeFromContext(uid, room.id);
+          any = true;
+        }
+      }
+      if (any) changed.push(room.id);
+    }
+    return changed;
+  }
+
   public getAllRooms(): ContextRoom[] {
     return Array.from(this.rooms.values());
   }
@@ -289,6 +353,12 @@ export class RoomManager {
 
     this.socketToUser.delete(socketId);
     this.presence.removeBySocket(socketId);
+
+    // Another tab/device (or a reconnect that beat this disconnect) is still
+    // connected for this user: they have not left their rooms.
+    for (const uid of this.socketToUser.values()) {
+      if (uid === userId) return { userId, roomIds: [], leaveMessages: new Map() };
+    }
 
     const roomIds = Array.from(this.userToRooms.get(userId) || []);
     const leaveMessages = new Map<string, RoomMessage>();
@@ -353,7 +423,7 @@ export class RoomManager {
     const users = this.getRoomUsers(roomId);
     return users.map(u => ({
       ...u,
-      presenceTier: this.presence.getTier(u.id)
+      presenceTier: this.presence.getTierIn(u.id, roomId)
     }));
   }
 

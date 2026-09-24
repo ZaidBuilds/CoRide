@@ -1,39 +1,53 @@
+import { NavigationArrowIcon, HandPointingIcon, ClockCounterClockwiseIcon, CalendarDotsIcon } from '@phosphor-icons/react';
 import type { ContextResult } from '../types';
-import { Radio } from 'lucide-react';
+import type { LocationContext } from '../hooks/useLocationContext';
+import { describeContext } from '../utils/commuteContext';
 
 interface Props {
-  context: ContextResult | null;
+  context: ContextResult | LocationContext | null;
 }
 
+const SOURCE_ICON = {
+  gps: NavigationArrowIcon,
+  manual: HandPointingIcon,
+  last_checkin: ClockCounterClockwiseIcon,
+  schedule: CalendarDotsIcon,
+  none: NavigationArrowIcon,
+} as const;
+
+/**
+ * One quiet line that says which signal placed you and how sure it is:
+ * "GPS · ±20 m · Likely", "Your pick", "Near Karol Bagh? · Unsure".
+ * A neutral tonal pill; only the small dot carries the status colour.
+ * The percentage stays in the accessible name and the tooltip, not the chrome.
+ */
 export const ContextConfidenceBadge: React.FC<Props> = ({ context }) => {
   if (!context) return null;
-
-  const pct = Math.round(context.confidence * 100);
-  const isHigh = pct >= 70;
-  const isMid = pct >= 40 && pct < 70;
-
-  const color = isHigh ? '#6EE7B7' : isMid ? '#FDE68A' : '#FDA4AF';
-  const bg = isHigh ? 'rgba(16,185,129,0.12)' : isMid ? 'rgba(234,179,8,0.10)' : 'rgba(244,63,94,0.10)';
-  const border = isHigh ? 'rgba(16,185,129,0.22)' : isMid ? 'rgba(234,179,8,0.18)' : 'rgba(244,63,94,0.18)';
+  const ctx = context as LocationContext;
+  const source = ctx.source ?? 'gps';
+  const pct = Math.round(Math.max(0, Math.min(1, ctx.confidence)) * 100);
+  const d = describeContext(ctx);
+  const manual = source === 'manual';
+  const level = manual || pct >= 70 ? 'high' : pct >= 40 ? 'mid' : 'low';
+  const tone = {
+    high: { dot: 'var(--status-ok)', word: manual ? '' : 'Likely' },
+    mid: { dot: 'var(--status-warn)', word: 'Unsure' },
+    low: { dot: 'var(--status-danger)', word: 'Guess' },
+  }[level];
+  const Icon = SOURCE_ICON[source] ?? NavigationArrowIcon;
+  const text = [d.needsConfirm && source !== 'none' ? d.headline : null, d.meta, tone.word || null].filter(Boolean).join(' · ');
 
   return (
     <div
       className="confidence-badge"
-      style={{ background: bg, color, border: `1px solid ${border}`, backdropFilter:'blur(8px)' }}
-      title={context.reason}
+      style={{ background: 'var(--bg-tonal)', color: 'var(--text-secondary)', maxWidth: '100%' }}
+      title={ctx.reason}
+      role="note"
+      aria-label={`${d.headline}. ${d.meta}${manual ? '' : `, ${pct}% confidence`}`}
     >
-      <Radio size={11} />
-      <span style={{ fontWeight:800 }}>{context.lineName} → {context.direction.replace('Towards ', '').split(' ')[0]}</span>
-      <span style={{
-        padding:'2px 6px',
-        borderRadius:999,
-        background:'rgba(0,0,0,0.24)',
-        fontWeight:800,
-        fontSize:11,
-        border:'1px solid rgba(255,255,255,0.06)'
-      }}>
-        {pct}%
-      </span>
+      <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: '50%', background: tone.dot, flexShrink: 0 }} />
+      <Icon size={16} aria-hidden="true" style={{ flexShrink: 0 }} />
+      <span className="tnum" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{text}</span>
     </div>
   );
 };

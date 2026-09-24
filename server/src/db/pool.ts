@@ -15,7 +15,7 @@ import path from 'path';
 const DATABASE_URL = process.env.DATABASE_URL;
 
 export const pool: Pool | null = DATABASE_URL
-  ? new Pool({ connectionString: DATABASE_URL, max: 10, idleTimeoutMillis: 30_000 })
+  ? new Pool({ connectionString: DATABASE_URL, max: 10, idleTimeoutMillis: 30_000, connectionTimeoutMillis: 5_000 })
   : null;
 
 export function isDbEnabled(): boolean {
@@ -46,4 +46,10 @@ export async function pingDb(): Promise<boolean> {
     console.error('[db] ping failed', err);
     return false;
   }
+}
+
+/** Shutdown: release pooled connections. */
+export async function closeDb(): Promise<void> {
+  if (!pool) return;
+  try { await pool.end(); } catch (err) { console.error('[db] close failed', err); }
 }

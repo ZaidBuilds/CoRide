@@ -21,6 +21,16 @@ interface PresenceEntry {
  * Presence decays:
  *   active → nearby (2 min idle) → other (5 min idle) → gone (disconnect)
  */
+/** Heartbeat-less time after which a member counts as gone from a context room. */
+export const MEMBER_TTL_MS = Number(process.env.CONTEXT_PRESENCE_TTL_SECONDS) * 1000 || 90_000;
+
+const keyOf = (userId: string, contextId: string) => `${userId}\u0000${contextId}`;
+
+/**
+ * Presence is tracked per (user, context room). A rider is normally in two
+ * rooms at once (station lounge + train); a single per-user entry flipped its
+ * contextId on every heartbeat, so each room's count flickered.
+ */
 export class PresenceManager {
   private static instance: PresenceManager;
   private presenceMap: Map<string, PresenceEntry> = new Map();
@@ -30,8 +40,9 @@ export class PresenceManager {
   private static readonly GONE_TIMEOUT_MS = 15 * 60 * 1000;   // 15 min
 
   private constructor() {
-    // Decay loop: every 30 seconds, decay idle users
-    setInterval(() => this.decayPresence(), 30_000);
+    // Decay loop: every 30 seconds, decay idle users. unref: never keeps a
+    // test or a draining process alive.
+    setInterval(() => this.decayPresence(), 30_000).unref();
   }
 
   public static getInstance(): PresenceManager {
@@ -42,21 +53,35 @@ export class PresenceManager {
   }
 
   /** Record a heartbeat — user is actively interacting */
-  public heartbeat(userId: string, contextId: string, socketId: string): void {
-    this.presenceMap.set(userId, {
+  public heartbeat(userId: string, contextId: string, socketId: string, now: number = Date.now()): void {
+    this.presenceMap.set(keyOf(userId, contextId), {
       userId,
       tier: 'active',
-      lastHeartbeat: Date.now(),
+      lastHeartbeat: now,
       contextId,
       socketId
     });
   }
 
-  /** Get a user's current presence tier */
+  /** Last heartbeat of a user in one context, if any. */
+  public lastHeartbeat(userId: string, contextId: string): number | undefined {
+    return this.presenceMap.get(keyOf(userId, contextId))?.lastHeartbeat;
+  }
+
+  /** A user's best presence tier across the rooms they are in. */
   public getTier(userId: string): PresenceTier {
-    const entry = this.presenceMap.get(userId);
-    if (!entry) return 'other';
-    return entry.tier;
+    let best: PresenceTier = 'other';
+    for (const e of this.presenceMap.values()) {
+      if (e.userId !== userId) continue;
+      if (e.tier === 'active') return 'active';
+      if (e.tier === 'nearby') best = 'nearby';
+    }
+    return best;
+  }
+
+  /** A user's tier in one room. */
+  public getTierIn(userId: string, contextId: string): PresenceTier {
+    return this.presenceMap.get(keyOf(userId, contextId))?.tier || 'other';
   }
 
   /** Get all users in a given context, grouped by presence tier */
@@ -67,9 +92,9 @@ export class PresenceManager {
   } {
     const result = { active: [] as string[], nearby: [] as string[], other: [] as string[] };
 
-    for (const [userId, entry] of this.presenceMap.entries()) {
+    for (const entry of this.presenceMap.values()) {
       if (entry.contextId === contextId) {
-        result[entry.tier].push(userId);
+        result[entry.tier].push(entry.userId);
       }
     }
 
@@ -87,31 +112,35 @@ export class PresenceManager {
     };
   }
 
-  /** Remove user on disconnect */
+  /** Remove user on disconnect / account deletion (all rooms). */
   public removeUser(userId: string): void {
-    this.presenceMap.delete(userId);
+    for (const [k, e] of this.presenceMap.entries()) if (e.userId === userId) this.presenceMap.delete(k);
   }
 
-  /** Remove by socket id (for disconnect handling) */
+  /** Remove a user from one room's presence (they left it). */
+  public removeFromContext(userId: string, contextId: string): void {
+    this.presenceMap.delete(keyOf(userId, contextId));
+  }
+
+  /** Remove by socket id (for disconnect handling). Returns the user, if any. */
   public removeBySocket(socketId: string): string | null {
-    for (const [userId, entry] of this.presenceMap.entries()) {
-      if (entry.socketId === socketId) {
-        this.presenceMap.delete(userId);
-        return userId;
+    let userId: string | null = null;
+    for (const [k, e] of this.presenceMap.entries()) {
+      if (e.socketId === socketId) {
+        this.presenceMap.delete(k);
+        userId = e.userId;
       }
     }
-    return null;
+    return userId;
   }
 
   /** Decay idle users: active→nearby→other→gone */
-  private decayPresence(): void {
-    const now = Date.now();
-
-    for (const [userId, entry] of this.presenceMap.entries()) {
+  public decayPresence(now: number = Date.now()): void {
+    for (const [k, entry] of this.presenceMap.entries()) {
       const idle = now - entry.lastHeartbeat;
 
       if (idle > PresenceManager.GONE_TIMEOUT_MS) {
-        this.presenceMap.delete(userId);
+        this.presenceMap.delete(k);
       } else if (idle > PresenceManager.NEARBY_TIMEOUT_MS && entry.tier !== 'other') {
         entry.tier = 'other';
       } else if (idle > PresenceManager.ACTIVE_TIMEOUT_MS && entry.tier === 'active') {
@@ -120,9 +149,9 @@ export class PresenceManager {
     }
     // MVP2: live jitter — seeded commuters fluctuate to make hero count feel genuinely live
     if (Math.random() < 0.35) {
-      const seeded = Array.from(this.presenceMap.entries()).filter(([uid]) => uid.startsWith('seed_'));
+      const seeded = Array.from(this.presenceMap.values()).filter(e => e.userId.startsWith('seed_'));
       if (seeded.length) {
-        const [uid, e] = seeded[Math.floor(Math.random() * seeded.length)];
+        const e = seeded[Math.floor(Math.random() * seeded.length)];
         // flip between active/nearby occasionally
         if (e.tier === 'other' && Math.random() < 0.25) { e.tier = 'nearby'; e.lastHeartbeat = now - 3 * 60 * 1000; }
         else if (e.tier === 'nearby' && Math.random() < 0.5) { e.tier = 'active'; e.lastHeartbeat = now; }
@@ -140,7 +169,7 @@ export class PresenceManager {
 
   /** Seed presence entries for demo simulation */
   public seedPresence(userId: string, contextId: string, tier: PresenceTier): void {
-    this.presenceMap.set(userId, {
+    this.presenceMap.set(keyOf(userId, contextId), {
       userId,
       tier,
       lastHeartbeat: Date.now() - (

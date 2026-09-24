@@ -6,7 +6,8 @@ const config: CapacitorConfig = {
   webDir: 'dist',
   server: {
     androidScheme: 'https',
-    cleartext: true
+    // Plain HTTP only for local device testing: CAP_CLEARTEXT=true npx cap sync
+    cleartext: process.env.CAP_CLEARTEXT === 'true'
   },
   plugins: {
     PushNotifications: {
@@ -14,7 +15,7 @@ const config: CapacitorConfig = {
     },
     StatusBar: {
       style: 'DARK',
-      backgroundColor: '#070a12'
+      backgroundColor: '#0C0E11'
     }
   }
 };

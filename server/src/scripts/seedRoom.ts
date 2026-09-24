@@ -20,12 +20,13 @@ dotenv.config({ path: require('path').join(__dirname, '..', '..', '.env') });
 dotenv.config();
 import { AVATAR_PALETTE } from '../data/metroData';
 import { Persistence } from '../services/persistence';
+import { pool } from '../db/pool';
 import { RedisPresence, buildRoomId } from '../services/redisPresence';
 
 const ROOMS = [
-  buildRoomId({ station: 'rajiv_chowk', line: 'blue', direction: 'towards_noida' }),
-  buildRoomId({ station: 'rajiv_chowk', line: 'blue', direction: 'towards_dwarka' }),
-  buildRoomId({ station: 'barakhamba_road', line: 'blue', direction: 'towards_noida' })
+  buildRoomId({ station: 'rajiv_chowk', line: 'blue', direction: 'towards_noida_electronic_city_vaishali' }),
+  buildRoomId({ station: 'rajiv_chowk', line: 'blue', direction: 'towards_dwarka_sector_21' }),
+  buildRoomId({ station: 'barakhamba_road', line: 'blue', direction: 'towards_noida_electronic_city_vaishali' })
 ];
 
 /** 30 distinct travelers — the app's ICP: Delhi campus + young professionals. */
@@ -88,6 +89,9 @@ function buildProfile(seed: (typeof SEEDS)[number], i: number) {
 async function main() {
   const clear = process.argv.includes('--clear');
   const persistence = Persistence.getInstance();
+  // Postgres mode loads state asynchronously; seeding before that would be
+  // refused (and could otherwise overwrite real data).
+  await persistence.init();
 
   // The service's own client sets enableOfflineQueue:false so a down Redis fails
   // in ms instead of ~96s. That suits the long-lived server, which connects during
@@ -118,7 +122,9 @@ async function main() {
     }
   }
 
+  await persistence.flushNow();
   await presence.disconnect();
+  if (pool) await pool.end();
 }
 
 main().catch(err => {

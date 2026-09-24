@@ -159,4 +159,19 @@ export class RedisPresence {
   public async disconnect(): Promise<void> {
     await this.redis.quit();
   }
+
+  /** True when the client has a live connection (for /healthz). */
+  public isReady(): boolean {
+    return this.redis.status === 'ready';
+  }
+
+  /** Shutdown: close without waiting on a server that may be down. */
+  public async close(): Promise<void> {
+    try {
+      if (this.redis.status === 'ready') await this.redis.quit();
+      else this.redis.disconnect();
+    } catch {
+      this.redis.disconnect();
+    }
+  }
 }

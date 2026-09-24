@@ -1,135 +1,144 @@
 import React, { useState } from 'react';
-import { Bell, Share2, Clock, Check, Train } from 'lucide-react';
+import { BellIcon, BellRingingIcon, ShareNetworkIcon, CheckIcon, TrainSimpleIcon } from '@phosphor-icons/react';
 import { Button } from './Button';
-import { triggerHaptic } from '../../utils/nativeBridge';
+import { isNative, triggerHaptic } from '../../utils/nativeBridge';
+
+/**
+ * EmptyState: honest zero-state for a list or screen. Say what is empty, why,
+ * and give at most one or two real next steps. Never invent numbers.
+ * Left-aligned surface card with a squircle icon tile (Phosphor, 24px).
+ *
+ * Generic:
+ *   <EmptyState
+ *     icon={<ChatCircleIcon size={24} />}
+ *     title="No chats yet"
+ *     description="When someone accepts your request, your conversation shows up here."
+ *     action={{ label: 'Find people', onClick: goPeople }}
+ *   />
+ *
+ * Transit room preset (used by the People list when a room is empty):
+ *   <EmptyState lineName="Blue Line" stationName="Rajiv Chowk" direction="Towards Noida" />
+ */
+interface Action {
+  label: string;
+  onClick: () => void;
+  icon?: React.ReactNode;
+}
 
 interface EmptyStateProps {
+  icon?: React.ReactNode;
+  title?: string;
+  description?: React.ReactNode;
+  action?: Action;
+  secondaryAction?: Action;
+  /** Drop the card chrome (for use inside an existing card). */
+  bare?: boolean;
+
+  // ── transit room preset ──
   lineName?: string;
   stationName?: string;
   direction?: string;
   onBrowseOtherLines?: () => void;
+  /** Wire to a real notification opt-in. The button is hidden when absent. */
   onEnablePush?: () => void;
   pushEnabled?: boolean;
 }
 
-export const EmptyState: React.FC<EmptyStateProps> = ({
-  lineName = 'Blue Line',
-  stationName = 'Rajiv Chowk',
-  direction = 'Towards Noida',
+const PLAY_URL = 'https://play.google.com/store/apps/details?id=com.coride.delhimetro';
+
+export const EmptyState: React.FC<EmptyStateProps> = props => {
+  if (props.title) return <GenericEmpty {...props} />;
+  return <RoomEmpty {...props} />;
+};
+
+const GenericEmpty: React.FC<EmptyStateProps> = ({ icon, title, description, action, secondaryAction, bare }) => (
+  <div className={`${bare ? '' : 'empty-state-card '}animate-fade-in`} style={bare ? { display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 14, padding: '24px 4px' } : undefined}>
+    {icon && <div className="empty-state-icon" aria-hidden="true">{icon}</div>}
+    <div>
+      <h3 className="type-headline" style={{ color: 'var(--text-primary)' }}>{title}</h3>
+      {description && (
+        <p className="type-body" style={{ color: 'var(--text-secondary)', marginTop: 4, maxWidth: 360 }}>{description}</p>
+      )}
+    </div>
+    {(action || secondaryAction) && (
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 2 }}>
+        {action && <Button type="button" variant="secondary" icon={action.icon} onClick={action.onClick}>{action.label}</Button>}
+        {secondaryAction && <Button type="button" variant="ghost" icon={secondaryAction.icon} onClick={secondaryAction.onClick}>{secondaryAction.label}</Button>}
+      </div>
+    )}
+  </div>
+);
+
+const RoomEmpty: React.FC<EmptyStateProps> = ({
+  lineName,
+  stationName,
+  direction,
   onBrowseOtherLines,
   onEnablePush,
-  pushEnabled = false
+  pushEnabled = false,
 }) => {
-  const [copied, setCopied] = useState(false);
-  const [notified, setNotified] = useState(pushEnabled);
+  const [shareState, setShareState] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const where = [lineName, stationName].filter(Boolean).join(' · ');
 
   const handleShare = async () => {
-    triggerHaptic('medium');
-    const shareText = `🚇 I'm on Delhi Metro ${lineName} at ${stationName} (${direction}). Boarding soon? Join my carriage room on CoRide!`;
+    void triggerHaptic('medium');
+    const url = isNative ? PLAY_URL : window.location.origin;
+    const text = `I'm riding the Delhi Metro${lineName ? ` ${lineName}` : ''}${stationName ? ` from ${stationName}` : ''}. Join me on CoRide to meet people on this line.`;
     if (navigator.share) {
-      try {
-        await navigator.share({
-          title: 'CoRide — Live Metro Carriage',
-          text: shareText,
-          url: window.location.origin
-        });
-        return;
-      } catch {}
+      try { await navigator.share({ title: 'CoRide', text, url }); return; }
+      catch (e) { if ((e as DOMException)?.name === 'AbortError') return; }
     }
-    navigator.clipboard.writeText(`${shareText} ${window.location.origin}`);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2500);
-  };
-
-  const handleNotifyToggle = () => {
-    triggerHaptic('light');
-    setNotified(!notified);
-    onEnablePush?.();
+    try {
+      await navigator.clipboard.writeText(`${text} ${url}`);
+      setShareState('copied');
+    } catch {
+      setShareState('failed');
+    }
+    setTimeout(() => setShareState('idle'), 2500);
   };
 
   return (
-    <div className="empty-state-card animate-fade-in" style={{ margin: '14px 0' }}>
-      {/* Hero Icon */}
-      <div style={{
-        width: 64,
-        height: 64,
-        borderRadius: '50%',
-        background: 'rgba(37, 99, 235, 0.14)',
-        border: '2px solid rgba(37, 99, 235, 0.3)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        color: 'var(--signal-400)',
-        fontSize: 28
-      }}>
-        <Train size={32} />
-      </div>
-
-      <div style={{ textAlign: 'center' }}>
-        <h3 style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-primary)', margin: 0 }}>
-          You're the first on this service!
-        </h3>
-        <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 4, lineHeight: 1.4, maxWidth: 300 }}>
-          {lineName} • {stationName} ({direction}). The carriage room is live — co-travelers board at upcoming stations.
+    <div className="empty-state-card animate-fade-in" style={{ margin: '12px 0' }}>
+      <div className="empty-state-icon" aria-hidden="true"><TrainSimpleIcon size={24} /></div>
+      <div>
+        <h3 className="type-headline" style={{ color: 'var(--text-primary)' }}>You're the first one here</h3>
+        <p className="type-body" style={{ color: 'var(--text-secondary)', marginTop: 4, maxWidth: 360 }}>
+          No one else is in {where ? <strong style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{where}</strong> : 'this room'}
+          {direction ? ` (${direction})` : ''} right now. People show up here as they board. This list updates live.
         </p>
       </div>
 
-      {/* Actionable CTAs */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, width: '100%', maxWidth: 320, marginTop: 4 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%', marginTop: 2 }}>
+        {onEnablePush && (
+          <Button
+            type="button"
+            fullWidth
+            variant={pushEnabled ? 'tonal' : 'secondary'}
+            disabled={pushEnabled}
+            icon={pushEnabled ? <BellRingingIcon size={20} /> : <BellIcon size={20} />}
+            onClick={onEnablePush}
+          >
+            {pushEnabled ? 'Notifications on' : 'Notify me when someone joins'}
+          </Button>
+        )}
         <Button
-          variant="primary"
+          type="button"
+          variant={onEnablePush ? 'tonal' : 'secondary'}
           fullWidth
-          icon={notified ? <Check size={16} /> : <Bell size={16} />}
-          onClick={handleNotifyToggle}
-        >
-          {notified ? 'Boarding Alerts Active ✓' : 'Notify me when someone boards'}
-        </Button>
-
-        <Button
-          variant="secondary"
-          fullWidth
-          icon={copied ? <Check size={16} /> : <Share2 size={16} />}
+          icon={shareState === 'copied' ? <CheckIcon size={20} /> : <ShareNetworkIcon size={20} />}
           onClick={handleShare}
         >
-          {copied ? 'Link Copied to Clipboard!' : 'Invite a co-commuter / share'}
+          {shareState === 'copied' ? 'Invite link copied' : shareState === 'failed' ? "Couldn't copy. Try again" : 'Invite someone'}
         </Button>
       </div>
 
-      {/* Peak commute rush insight */}
-      <div style={{
-        width: '100%',
-        maxWidth: 320,
-        background: 'var(--bg-canvas)',
-        border: '1px solid var(--border-subtle)',
-        borderRadius: 'var(--radius-lg)',
-        padding: '10px 12px',
-        display: 'flex',
-        alignItems: 'center',
-        gap: 10,
-        marginTop: 6,
-        textAlign: 'left'
-      }}>
-        <Clock size={16} style={{ color: 'var(--amber-500)', flexShrink: 0 }} />
-        <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-          <strong style={{ color: 'var(--text-primary)', display: 'block' }}>Next Peak Commute Window</strong>
-          07:30 – 10:30 & 17:00 – 20:30 IST • 50+ commuters average
-        </div>
-      </div>
+      <p className="type-meta tnum" style={{ color: 'var(--text-muted)' }}>
+        Peak hours: 7:30–10:30 and 17:00–20:30
+      </p>
 
       {onBrowseOtherLines && (
-        <button
-          onClick={onBrowseOtherLines}
-          style={{
-            background: 'none',
-            border: 'none',
-            color: 'var(--accent)',
-            fontSize: 12,
-            fontWeight: 700,
-            cursor: 'pointer',
-            marginTop: 4
-          }}
-        >
-          Explore other metro lines →
+        <button type="button" className="link-btn" style={{ marginLeft: -10 }} onClick={onBrowseOtherLines}>
+          Try another line or station
         </button>
       )}
     </div>

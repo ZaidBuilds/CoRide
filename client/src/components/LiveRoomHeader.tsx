@@ -1,17 +1,19 @@
 import { useEffect, useState } from 'react';
-import { Radio, Users, Train } from 'lucide-react';
 import type { ContextRoom } from '../types';
+import { getStationById } from '../data/metroData';
+import { lineStyle } from '../utils/lineStyle';
+import { LinePill } from './ui/LinePill';
+import { PresenceStack } from './ui/PresenceStack';
+import { StationSign } from './ui/StationSign';
 
 interface Props {
   room: ContextRoom | null;
   compact?: boolean;
 }
 
-function shortDirection(dir?: string): string {
+function towardsName(dir?: string): string {
   if (!dir) return '';
-  const raw = dir.replace(/^Towards\s+/i, '').trim();
-  const first = raw.split(/[\/,]/)[0]?.trim() || raw;
-  return first.split(/\s+/)[0] || raw;
+  return dir.replace(/^Towards\s+/i, '').trim();
 }
 
 function formatISTNow(): string {
@@ -27,8 +29,13 @@ function formatISTNow(): string {
   }
 }
 
+/**
+ * The room you're in, as a platform sign: station, line pill, "Towards X",
+ * then who's here and the local time. The live dot only pulses when someone
+ * is actually here; an empty room reads as empty, not "Live".
+ */
 export const LiveRoomHeader: React.FC<Props> = ({ room, compact }) => {
-  const [now, setNow] = useState(formatISTNow());
+  const [now, setNow] = useState(formatISTNow);
 
   useEffect(() => {
     const id = setInterval(() => setNow(formatISTNow()), 30 * 1000);
@@ -37,47 +44,53 @@ export const LiveRoomHeader: React.FC<Props> = ({ room, compact }) => {
 
   if (!room) return null;
 
-  const dirShort = shortDirection(room.direction);
-  const line = room.lineName || 'Metro';
+  const towards = towardsName(room.direction);
+  const lineRef = room.lineId || room.lineColor || null;
   const count = room.userCount ?? room.users?.length ?? 0;
+  const people = (room.users || []).map(u => ({ id: u.id, name: u.pseudonym || u.username, avatarBg: u.avatarBg }));
+  const stationName = (room.stationName || '').replace(/\s*\(.*\)\s*$/, '') || room.lineName || 'Metro';
+  const hindi = room.stationId ? getStationById(room.stationId)?.hindiName : undefined;
 
   if (compact) {
     return (
-      <div style={{
-        display:'inline-flex', alignItems:'center', gap:8,
-        padding:'6px 12px', borderRadius:'var(--radius-full)',
-        background:'rgba(123,93,255,0.12)', border:'1px solid rgba(123,93,255,0.22)',
-        fontSize:12, fontWeight:700, color:'var(--accent-purple-text)'
-      }}>
-        <span style={{ width:8,height:8, borderRadius:'50%', background: room.lineColor || 'var(--accent-purple)', display:'inline-block', boxShadow:`0 0 6px ${room.lineColor}` }} />
-        {line} · {dirShort} · {now} — {count} online
-        <Radio size={12} className="animate-pulse-glow" style={{ color:'var(--presence-active)' }} />
+      <div
+        role="status"
+        className="type-label"
+        style={{
+          ...lineStyle(lineRef),
+          display: 'inline-flex', alignItems: 'center', gap: 8, minHeight: 36,
+          padding: '4px 14px 4px 6px', borderRadius: 'var(--radius-pill)',
+          background: 'var(--bg-surface)', color: 'var(--text-primary)'
+        }}
+      >
+        {lineRef && <LinePill line={lineRef} label={room.lineName || undefined} size="sm" />}
+        <span style={{ whiteSpace: 'nowrap' }}>{towards ? `Towards ${towards}` : stationName}</span>
+        <span aria-hidden="true" style={{ color: 'var(--text-muted)' }}>·</span>
+        {count > 0 && <span className="live-dot pulse" aria-hidden="true" />}
+        <span className="tnum" style={{ whiteSpace: 'nowrap' }}>{count} here</span>
       </div>
     );
   }
 
-  // Figma 02 purple card style
   return (
-    <div style={{
-      display:'flex', alignItems:'center', gap:12,
-      padding:'14px',
-      borderRadius:'var(--radius-xl)',
-      background:'linear-gradient(135deg, var(--bg-accent-wash-2) 0%, var(--bg-accent-wash) 100%)',
-      border:'1px solid var(--border-purple)',
-      boxShadow:'var(--shadow-md)'
-    }}>
-      <div style={{ width:40, height:40, borderRadius:'50%', background:'var(--accent-purple)', display:'flex', alignItems:'center', justifyContent:'center', color:'white', flexShrink:0 }}>
-        <Train size={20} />
+    <section
+      role="status"
+      aria-label={`${stationName}, ${room.lineName || 'Metro'}${towards ? `, towards ${towards}` : ''}. ${count} ${count === 1 ? 'person' : 'people'} here now.`}
+      className="card has-stub"
+      style={{ ...lineStyle(lineRef), ['--stack-ring' as string]: 'var(--bg-surface)' } as React.CSSProperties}
+    >
+      <StationSign
+        name={stationName}
+        hindiName={hindi}
+        lines={lineRef ? [lineRef] : []}
+        towards={towards || undefined}
+        size="compact"
+        as="h2"
+      />
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginTop: 14 }}>
+        <PresenceStack people={people} count={count} label="here now" live={count > 0} />
+        <span className="type-meta tnum" style={{ color: 'var(--text-muted)', flexShrink: 0 }}>{now} IST</span>
       </div>
-      <div style={{ flex:1, minWidth:0 }}>
-        <div style={{ fontSize:14, fontWeight:800, color:'var(--text-primary)', display:'flex', alignItems:'center', gap:6 }}>
-          {line} <span style={{ opacity:0.5 }}>•</span> {dirShort} <span style={{ opacity:0.5 }}>•</span> {now}
-        </div>
-        <div style={{ fontSize:12, color:'var(--accent-purple-text)', marginTop:2, display:'flex', alignItems:'center', gap:6 }}>
-          <Users size={12} /> {count} travelers online — Live
-        </div>
-      </div>
-      <div style={{ width:10,height:10, borderRadius:'50%', background:'var(--presence-active)', boxShadow:'0 0 8px var(--presence-active)', flexShrink:0 }} className="animate-pulse-glow" />
-    </div>
+    </section>
   );
 };

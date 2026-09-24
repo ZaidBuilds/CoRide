@@ -19,65 +19,61 @@ export interface CommuteBadgeInfo {
   description: string;
 }
 
+/**
+ * Tinted-chip colours derived from one semantic colour, so a badge reads in
+ * both light and dark themes: the fill/border are translucent washes of the
+ * colour and the label mixes it toward --text-primary for contrast.
+ */
+function tint(color: string) {
+  return {
+    bgColor: `color-mix(in srgb, ${color} 14%, transparent)`,
+    borderColor: `color-mix(in srgb, ${color} 34%, transparent)`,
+    textColor: `color-mix(in srgb, ${color} 55%, var(--text-primary))`,
+    dotColor: color
+  };
+}
+
 export const COMMUTE_BADGES: Record<CommuteRelationshipType, CommuteBadgeInfo> = {
   same_train: {
     type: 'same_train',
-    label: 'Same Train',
+    label: 'Same train',
     emoji: '🚇',
-    bgColor: 'rgba(56, 189, 248, 0.14)',
-    textColor: 'var(--presence-sameTrain, #38bdf8)',
-    borderColor: 'rgba(56, 189, 248, 0.32)',
-    dotColor: 'var(--presence-sameTrain, #38bdf8)',
-    description: 'Onboard the same train coach service right now'
+    ...tint('var(--presence-sameTrain, #38bdf8)'),
+    description: 'On the same train as you right now'
   },
   same_direction: {
     type: 'same_direction',
-    label: 'Same Line & Dir',
+    label: 'Same line & direction',
     emoji: '🔀',
-    bgColor: 'rgba(16, 185, 129, 0.14)',
-    textColor: 'var(--accent-emerald, #10b981)',
-    borderColor: 'rgba(16, 185, 129, 0.32)',
-    dotColor: '#10b981',
-    description: 'Traveling on this line in the same direction'
+    ...tint('var(--accent-emerald, #10b981)'),
+    description: 'Riding this line in the same direction'
   },
   same_station: {
     type: 'same_station',
-    label: 'At Station',
+    label: 'Same station',
     emoji: '🏛️',
-    bgColor: 'rgba(249, 115, 22, 0.14)',
-    textColor: '#fb923c',
-    borderColor: 'rgba(249, 115, 22, 0.32)',
-    dotColor: '#fb923c',
-    description: 'Waiting or transferring at the same station hub'
+    ...tint('var(--line-airport, #f97316)'),
+    description: 'At the same station as you'
   },
   nearby: {
     type: 'nearby',
     label: 'Nearby',
     emoji: '🟡',
-    bgColor: 'rgba(234, 179, 8, 0.14)',
-    textColor: 'var(--accent-amber, #eab308)',
-    borderColor: 'rgba(234, 179, 8, 0.32)',
-    dotColor: 'var(--presence-nearby, #eab308)',
-    description: 'In close proximity within the metro network'
+    ...tint('var(--presence-nearby, #d97706)'),
+    description: 'Close by on the metro network'
   },
   metro_friend: {
     type: 'metro_friend',
-    label: 'Metro Friend',
+    label: 'Friend',
     emoji: '👥',
-    bgColor: 'rgba(168, 85, 247, 0.14)',
-    textColor: 'var(--accent-purple-text, #a855f7)',
-    borderColor: 'rgba(168, 85, 247, 0.32)',
-    dotColor: '#a855f7',
-    description: 'Connected commuter friend in your network'
+    ...tint('var(--accent-purple, #7b5dff)'),
+    description: 'Someone you are connected with'
   },
   none: {
     type: 'none',
     label: 'Commuter',
     emoji: '🚆',
-    bgColor: 'rgba(255, 255, 255, 0.06)',
-    textColor: 'var(--text-secondary, #94a3b8)',
-    borderColor: 'rgba(255, 255, 255, 0.10)',
-    dotColor: '#94a3b8',
+    ...tint('var(--text-muted, #6b7382)'),
     description: 'Fellow Delhi Metro commuter'
   }
 };
@@ -143,4 +139,48 @@ export function getCommuteRelationship(
   }
 
   return COMMUTE_BADGES.none;
+}
+
+// ─── Location honesty (DESIGN §9) ───────────────────────────────────────────
+
+/** Minimum confidence to state "At <station>" / "On the train" without a question mark. */
+export const CONFIDENT_CONTEXT = 0.6;
+
+export interface ContextHeadline {
+  /** "At Rajiv Chowk", "On the Blue Line", "Near Karol Bagh?", "Where are you?" */
+  headline: string;
+  /** Meta line: the signal we used, e.g. "GPS · ±20 m", "Your pick", "Last check-in · 4 min ago". */
+  meta: string;
+  /** Offer one-tap confirm / change. */
+  needsConfirm: boolean;
+}
+
+type HeadlineInput = Pick<ContextResult, 'context' | 'confidence' | 'stationName' | 'lineName'> & {
+  source?: 'gps' | 'manual' | 'last_checkin' | 'schedule' | 'none';
+  between?: { fromStationName: string; toStationName: string } | null;
+  accuracyM?: number | null;
+  lastFixAt?: number | null;
+  stale?: boolean;
+};
+
+/** Words for a detected context that never claim more than the confidence supports. */
+export function describeContext(ctx: HeadlineInput | null, now: number = Date.now()): ContextHeadline {
+  if (!ctx || ctx.source === 'none' || !ctx.stationName) {
+    return { headline: 'Where are you?', meta: 'Pick your station', needsConfirm: true };
+  }
+  const sure = ctx.confidence >= CONFIDENT_CONTEXT && !ctx.stale;
+  let headline: string;
+  if (ctx.context === 'train' && sure) {
+    headline = ctx.between ? `On the ${ctx.lineName} · ${ctx.between.fromStationName} → ${ctx.between.toStationName}` : `On the ${ctx.lineName}`;
+  } else if (ctx.context === 'station' && sure) {
+    headline = `At ${ctx.stationName}`;
+  } else {
+    headline = `Near ${ctx.stationName}?`;
+  }
+  const ago = ctx.lastFixAt ? Math.max(0, Math.round((now - ctx.lastFixAt) / 60_000)) : null;
+  const meta = ctx.source === 'manual' ? 'Your pick'
+    : ctx.source === 'schedule' ? 'Estimated from train times'
+    : ctx.source === 'last_checkin' ? `Last check-in${ago !== null ? ` · ${ago <= 1 ? '1 min' : `${ago} min`} ago` : ''}`
+    : `GPS${ctx.accuracyM ? ` · ±${Math.round(ctx.accuracyM)} m` : ''}`;
+  return { headline, meta, needsConfirm: !sure && ctx.source !== 'manual' };
 }

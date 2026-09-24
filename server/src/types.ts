@@ -79,10 +79,15 @@ export const INTEREST_TAXONOMY: { id: string; label: string; emoji: string; cate
 ];
 
 export function isValidInterestTag(tag: string): boolean {
-  return INTEREST_TAXONOMY.some(t => t.id === tag.toLowerCase());
+  return typeof tag === 'string' && INTEREST_TAXONOMY.some(t => t.id === tag.toLowerCase());
 }
-export function sanitizeTags(tags: string[]): string[] {
-  const cleaned = tags.map(t => t.toLowerCase().trim()).filter(isValidInterestTag);
+export function sanitizeTags(tags: unknown): string[] {
+  // Untrusted input: tolerate non-arrays and non-string items instead of throwing.
+  if (!Array.isArray(tags)) return [];
+  const cleaned = tags
+    .filter((t): t is string => typeof t === 'string')
+    .map(t => t.toLowerCase().trim())
+    .filter(isValidInterestTag);
   return Array.from(new Set(cleaned)).slice(0, 5);
 }
 

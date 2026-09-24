@@ -1,14 +1,33 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+    <meta name="theme-color" content="#0C0E11" />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="description" content="CoRide: see who is riding your Delhi Metro line right now. Pseudonymous and live." />
+    <meta name="format-detection" content="telephone=no" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#08080F" />
-    <meta name="description" content="CoRide — find people travelling your metro line, right now." />
-    <title>CoRide — Live metro travel rooms</title>
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <title>CoRide · Delhi Metro</title>
+    <script>
+      // Resolve the theme before first paint (mirrors utils/theme.ts).
+      (function () {
+        var t = null;
+        try { t = localStorage.getItem('coride:theme'); } catch (e) {}
+        if (t !== 'light' && t !== 'dark') {
+          t = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+        }
+        document.documentElement.setAttribute('data-theme', t);
+        var m = document.querySelector('meta[name="theme-color"]');
+        if (m) m.setAttribute('content', t === 'light' ? '#ECEEEA' : '#0C0E11');
+      })();
+    </script>
   </head>
   <body>
+    <noscript>CoRide needs JavaScript to run.</noscript>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

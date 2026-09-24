@@ -47,16 +47,17 @@ services:
       PORT: 4000
       DATABASE_URL: postgres://coride:coride@postgres:5432/coride
       REDIS_URL: redis://redis:6379
+      # The image runs with NODE_ENV=production, which refuses to boot without
+      # a strong secret. Put AUTH_SECRET (openssl rand -base64 48) in ./.env.
+      AUTH_SECRET: ${AUTH_SECRET:?set AUTH_SECRET in .env (openssl rand -base64 48)}
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
       BEACHHEAD_LINE: ${BEACHHEAD_LINE:-blue}
       BEACHHEAD_STATIONS: ${BEACHHEAD_STATIONS:-}
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
     ports:
       - "4000:4000"
-    volumes:
-      - ./server/src:/app/src:ro
-      - ./server/package.json:/app/package.json:ro
-    command: sh -c "npm run build && node dist/index.js"
 
   web:
     build:

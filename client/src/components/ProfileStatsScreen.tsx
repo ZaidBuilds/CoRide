@@ -1,392 +1,267 @@
-import { useState } from 'react';
-import { ShieldCheck, UserX, Trash2, Edit3, EyeOff, ChevronRight, FileText, Lock } from 'lucide-react';
-import { ThemeToggle } from './ThemeToggle';
-import { triggerHaptic } from '../utils/nativeBridge';
+import { useEffect, useState, type ReactNode } from 'react';
+import {
+  ShieldCheckIcon, ProhibitIcon, TrashIcon, PencilSimpleIcon, ArrowSquareOutIcon, LockSimpleIcon,
+  FileTextIcon, UserMinusIcon, UsersThreeIcon, BookmarkSimpleIcon, WarningIcon, CircleHalfIcon, SunIcon, MoonIcon,
+} from '@phosphor-icons/react';
+import type { UserProfile } from '../types';
+import { INTEREST_TAXONOMY } from '../types';
+import { triggerHaptic, getAppVersion } from '../utils/nativeBridge';
 import { authHeaders } from '../utils/auth';
-
-const API = 'http://localhost:4000';
+import { getTheme, setTheme, type Theme } from '../utils/theme';
+import { API } from '../config';
+import { ConfirmDialog } from './safety/ConfirmDialog';
+import { IconTile, GroupLabel } from './safety/SettingsParts';
+import { ScreenHeader } from './ui/ScreenHeader';
+import { Avatar } from './ui/Avatar';
+import { Chip } from './ui/Chip';
+import { Button } from './ui/Button';
+import { ListGroup, ListRow } from './ui/ListRow';
+import { BrandMark } from './ui/BrandMark';
 
 interface Props {
-  user?: any;
+  user?: UserProfile | null;
   onEdit?: () => void;
   onOpenSafetyCenter?: () => void;
   onOpenBlockedUsers?: () => void;
+  /** Friends & requests (ConnectScreen). Row is hidden until wired. */
+  onOpenConnections?: () => void;
+  /** Saved commutes. Row is hidden until wired. */
+  onOpenSavedCommutes?: () => void;
   onAccountDeleted?: () => void;
 }
 
+const THEME_OPTIONS: { value: Theme; label: string; icon: typeof SunIcon }[] = [
+  { value: 'system', label: 'System', icon: CircleHalfIcon },
+  { value: 'light', label: 'Light', icon: SunIcon },
+  { value: 'dark', label: 'Dark', icon: MoonIcon },
+];
+
+/** A ListRow-shaped link that opens in the browser. */
+function LinkRow({ icon, title, subtitle, href }: { icon: ReactNode; title: string; subtitle?: string; href: string }) {
+  return (
+    <a className="list-row" href={href} target="_blank" rel="noopener noreferrer" aria-label={`${title} (opens in browser)`} style={{ textDecoration: 'none', cursor: 'pointer' }}>
+      <span className="row-lead">{icon}</span>
+      <span className="row-text">
+        <span className="row-title">{title}</span>
+        {subtitle && <span className="row-sub">{subtitle}</span>}
+      </span>
+      <span className="row-trail"><ArrowSquareOutIcon size={18} aria-hidden="true" /></span>
+    </a>
+  );
+}
+
+/**
+ * Profile tab: who you are on CoRide, then settings as grouped lists.
+ * Everything here is real: no stats, streaks or badges until the server can
+ * back them.
+ */
 export const ProfileStatsScreen: React.FC<Props> = ({
   user,
   onEdit,
   onOpenSafetyCenter,
   onOpenBlockedUsers,
-  onAccountDeleted
+  onOpenConnections,
+  onOpenSavedCommutes,
+  onAccountDeleted,
 }) => {
-  const [ghostMode, setGhostMode] = useState(() => {
-    return localStorage.getItem('coride_ghost_mode') === 'true';
+  const [theme, setThemeState] = useState<Theme>(() => {
+    try { return getTheme(); } catch { return 'system'; }
   });
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [appVersion, setAppVersion] = useState<string | null>(null);
 
-  const name = user?.pseudonym?.split('_')[0] || user?.username?.replace('@', '') || 'Commuter';
+  useEffect(() => {
+    let alive = true;
+    getAppVersion().then(v => { if (alive && v) setAppVersion(v); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
 
-  const handleGhostModeToggle = () => {
+  const displayName = user?.pseudonym || user?.username?.replace(/^@/, '') || 'Commuter';
+  const handle = user?.username?.replace(/^@/, '');
+  const tags = (user?.interestTags || [])
+    .map(id => INTEREST_TAXONOMY.find(t => t.id === id))
+    .filter((t): t is (typeof INTEREST_TAXONOMY)[number] => Boolean(t));
+
+  const chooseTheme = (value: Theme) => {
     triggerHaptic('light');
-    const next = !ghostMode;
-    setGhostMode(next);
-    localStorage.setItem('coride_ghost_mode', String(next));
+    try { setTheme(value); } catch { /* storage blocked: still applied for this session */ }
+    setThemeState(value);
+  };
+
+  const openDelete = () => {
+    triggerHaptic('medium');
+    setDeleteError(null);
+    setShowDeleteConfirm(true);
   };
 
   const handleDeleteAccount = async () => {
     if (!user) return;
     triggerHaptic('medium');
     setDeleting(true);
+    setDeleteError(null);
     try {
-      await fetch(`${API}/api/profile/${user.id}`, {
+      const res = await fetch(`${API}/api/profile/${encodeURIComponent(user.id)}`, {
         method: 'DELETE',
-        headers: authHeaders()
+        headers: authHeaders(),
       });
-      localStorage.clear();
+      if (!res.ok) {
+        // Nothing local is cleared: the server still holds the data, so the
+        // user must be able to retry from this same session.
+        if (res.status === 401 || res.status === 403) {
+          setDeleteError("We couldn't confirm this device owns the account. Close and reopen CoRide and try again, or use the web deletion form.");
+        } else {
+          setDeleteError(`The server couldn't delete your account (error ${res.status}). Nothing was removed. Please try again.`);
+        }
+        setDeleting(false);
+        return;
+      }
+      try { localStorage.clear(); } catch { /* ignore */ }
       onAccountDeleted?.();
       window.location.reload();
     } catch {
-      localStorage.clear();
-      window.location.reload();
-    } finally {
+      setDeleteError('No connection to CoRide. Nothing was deleted. Check your internet and try again.');
       setDeleting(false);
     }
   };
 
   return (
-    <div className="animate-fade-in" style={{ paddingBottom: 96, maxWidth: 520, margin: '0 auto' }}>
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-        <h1 style={{ fontSize: 22, fontWeight: 900, color: 'var(--text-primary)', margin: 0 }}>
-          Account & Safety
-        </h1>
-        <ThemeToggle />
-      </div>
+    <div className="animate-fade-in" style={{ paddingBottom: 16, maxWidth: 520, margin: '0 auto' }}>
+      <ScreenHeader title="Profile" size="large" />
 
-      {/* Identity Card */}
-      <div
-        style={{
-          background: 'var(--bg-card)',
-          border: '1px solid var(--border-card)',
-          borderRadius: 'var(--radius-xl)',
-          padding: 16,
-          display: 'flex',
-          gap: 14,
-          alignItems: 'center',
-          marginBottom: 16
-        }}
-      >
-        <div style={{ position: 'relative' }}>
-          <div
-            style={{
-              width: 64,
-              height: 64,
-              borderRadius: '50%',
-              background: user?.avatarBg || 'linear-gradient(135deg, var(--signal-500), var(--signal-600))',
-              border: '3px solid var(--border-subtle)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: 'white',
-              fontWeight: 800,
-              fontSize: 22
-            }}
-          >
-            {name[0]}
-          </div>
-        </div>
-
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 17, fontWeight: 800, color: 'var(--text-primary)' }}>
-            {user?.pseudonym || name}
-          </div>
-          <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-            @{user?.username?.replace('@', '') || ''}
-          </div>
-          {user?.ageBand && (
-            <span
-              style={{
-                display: 'inline-block',
-                marginTop: 4,
-                padding: '2px 8px',
-                borderRadius: 'var(--radius-pill)',
-                background: 'var(--bg-surface-raised)',
-                border: '1px solid var(--border-subtle)',
-                fontSize: 11,
-                color: 'var(--text-secondary)',
-                fontWeight: 600
-              }}
-            >
-              Age {user.ageBand}
-            </span>
-          )}
-        </div>
-
-        {onEdit && (
-          <button
-            onClick={() => {
-              triggerHaptic('light');
-              onEdit();
-            }}
-            className="press touch-target-44"
-            aria-label="Edit Profile"
-            style={{
-              background: 'var(--bg-surface-raised)',
-              border: '1px solid var(--border-subtle)',
-              borderRadius: '50%',
-              color: 'var(--text-primary)',
-              cursor: 'pointer'
-            }}
-          >
-            <Edit3 size={16} />
-          </button>
+      {/* Identity: exactly what other riders see */}
+      <section aria-label="Your public profile" style={{ padding: '8px 4px 28px' }}>
+        <Avatar name={displayName} seed={user?.id} bg={user?.avatarBg} size={88} />
+        <h2 className="type-display" style={{ color: 'var(--text-primary)', marginTop: 16, overflowWrap: 'anywhere' }}>{displayName}</h2>
+        {handle && <p className="type-body" style={{ color: 'var(--text-muted)' }}>@{handle}</p>}
+        {user?.vibeTagline && (
+          <p className="type-label" style={{ color: 'var(--text-secondary)', marginTop: 8 }}>{user.vibeTagline}</p>
         )}
-      </div>
+        {user?.bio ? (
+          <p className="type-body" style={{ color: 'var(--text-secondary)', marginTop: 8, overflowWrap: 'anywhere' }}>{user.bio}</p>
+        ) : (
+          <p className="type-body" style={{ color: 'var(--text-muted)', marginTop: 8 }}>
+            No bio yet. A line about you helps riders decide to say hi.
+          </p>
+        )}
+        {tags.length > 0 && (
+          <ul aria-label="Interests" style={{ listStyle: 'none', display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 16 }}>
+            {tags.map(t => <li key={t.id}><Chip>{t.label}</Chip></li>)}
+          </ul>
+        )}
+        {onEdit && (
+          <Button type="button" variant="tonal" icon={<PencilSimpleIcon size={20} />} onClick={onEdit} style={{ marginTop: 20 }}>
+            Edit profile
+          </Button>
+        )}
+      </section>
 
-      {/* Safety & UGC Section */}
-      <div style={{ marginBottom: 16 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8, paddingLeft: 4 }}>
-          Safety & Protection
-        </div>
-
-        <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)', overflow: 'hidden' }}>
-          <button
-            onClick={() => {
-              triggerHaptic('light');
-              onOpenSafetyCenter?.();
-            }}
-            className="press"
-            style={{
-              width: '100%',
-              padding: '14px 16px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 12,
-              background: 'none',
-              border: 'none',
-              borderBottom: '1px solid var(--border-subtle)',
-              color: 'var(--text-primary)',
-              textAlign: 'left',
-              cursor: 'pointer'
-            }}
-          >
-            <ShieldCheck size={20} style={{ color: 'var(--signal-400)' }} />
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 14, fontWeight: 700 }}>Safety Centre & Rules</div>
-              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Community guidelines & DMRC helpline</div>
-            </div>
-            <ChevronRight size={18} style={{ color: 'var(--text-muted)' }} />
-          </button>
-
-          <button
-            onClick={() => {
-              triggerHaptic('light');
-              onOpenBlockedUsers?.();
-            }}
-            className="press"
-            style={{
-              width: '100%',
-              padding: '14px 16px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 12,
-              background: 'none',
-              border: 'none',
-              color: 'var(--text-primary)',
-              textAlign: 'left',
-              cursor: 'pointer'
-            }}
-          >
-            <UserX size={20} style={{ color: 'var(--amber-500)' }} />
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 14, fontWeight: 700 }}>Blocked Commuters</div>
-              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Manage your blocked user list</div>
-            </div>
-            <ChevronRight size={18} style={{ color: 'var(--text-muted)' }} />
-          </button>
-        </div>
-      </div>
-
-      {/* Privacy Controls */}
-      <div style={{ marginBottom: 16 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8, paddingLeft: 4 }}>
-          Privacy Controls
-        </div>
-
-        <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)', padding: '14px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <EyeOff size={20} style={{ color: 'var(--text-secondary)' }} />
-            <div>
-              <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>Ghost Mode</div>
-              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Hide avatar pin from connected friends on map</div>
-            </div>
-          </div>
-          <input
-            type="checkbox"
-            checked={ghostMode}
-            onChange={handleGhostModeToggle}
-            aria-label="Toggle Ghost Mode"
-            style={{ width: 22, height: 22, accentColor: 'var(--signal-500)', cursor: 'pointer' }}
-          />
-        </div>
-      </div>
-
-      {/* Legal & Compliance (Separate Terms and Privacy) */}
-      <div style={{ marginBottom: 20 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8, paddingLeft: 4 }}>
-          Legal & Compliance
-        </div>
-
-        <div style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-lg)', overflow: 'hidden' }}>
-          <div
-            style={{
-              padding: '12px 16px',
-              borderBottom: '1px solid var(--border-subtle)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              fontSize: 13,
-              color: 'var(--text-secondary)'
-            }}
-          >
-            <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <FileText size={16} /> Terms of Use (Anti-Harassment)
-            </span>
-            <span style={{ color: 'var(--mint-500)', fontWeight: 600 }}>Accepted ✓</span>
-          </div>
-
-          <div
-            style={{
-              padding: '12px 16px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              fontSize: 13,
-              color: 'var(--text-secondary)'
-            }}
-          >
-            <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Lock size={16} /> Privacy Policy (No GPS Tracking)
-            </span>
-            <span style={{ color: 'var(--mint-500)', fontWeight: 600 }}>Active ✓</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Google Play Mandatory Account Deletion */}
-      <div style={{ background: 'rgba(220, 38, 38, 0.08)', border: '1px solid rgba(220, 38, 38, 0.25)', borderRadius: 'var(--radius-xl)', padding: 16 }}>
-        <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--rose-500)', marginBottom: 4 }}>
-          Account & Data Deletion
-        </div>
-        <p style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.4, margin: '0 0 12px' }}>
-          Permanently delete your commuter profile, mutual friend links, chat logs, and presence keys from all servers. This action cannot be undone.
-        </p>
-        <button
-          onClick={() => setShowDeleteConfirm(true)}
-          className="press btn-danger"
-          style={{
-            padding: '10px 16px',
-            borderRadius: 'var(--radius-pill)',
-            fontSize: 13,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            cursor: 'pointer'
-          }}
-        >
-          <Trash2 size={16} /> Delete My Commuter Account
-        </button>
-      </div>
-
-      {/* Delete Confirmation Modal */}
-      {showDeleteConfirm && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          className="animate-fade-in"
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(8, 9, 12, 0.8)',
-            zIndex: 100,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: 16
-          }}
-        >
-          <div
-            style={{
-              background: 'var(--bg-surface-raised)',
-              border: '1px solid var(--border-subtle)',
-              borderRadius: 'var(--radius-xl)',
-              padding: 20,
-              maxWidth: 360,
-              width: '100%',
-              textAlign: 'center'
-            }}
-          >
-            <div
-              style={{
-                width: 48,
-                height: 48,
-                borderRadius: '50%',
-                background: 'rgba(220, 38, 38, 0.15)',
-                color: 'var(--rose-500)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                margin: '0 auto 12px'
-              }}
-            >
-              <Trash2 size={24} />
-            </div>
-            <h3 style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-primary)', margin: '0 0 8px' }}>
-              Permanently Delete Account?
-            </h3>
-            <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '0 0 20px', lineHeight: 1.4 }}>
-              All identity records, saved commutes, friendships, and direct messages will be immediately purged.
-            </p>
-            <div style={{ display: 'flex', gap: 10 }}>
-              <button
-                onClick={() => setShowDeleteConfirm(false)}
-                className="press"
-                style={{
-                  flex: 1,
-                  padding: '12px',
-                  borderRadius: 'var(--radius-pill)',
-                  background: 'var(--bg-canvas)',
-                  border: '1px solid var(--border-subtle)',
-                  color: 'var(--text-primary)',
-                  fontWeight: 700,
-                  fontSize: 14,
-                  cursor: 'pointer'
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleDeleteAccount}
-                disabled={deleting}
-                className="press btn-danger"
-                style={{
-                  flex: 1,
-                  padding: '12px',
-                  borderRadius: 'var(--radius-pill)',
-                  fontWeight: 700,
-                  fontSize: 14,
-                  cursor: 'pointer'
-                }}
-              >
-                {deleting ? 'Deleting…' : 'Delete Now'}
-              </button>
-            </div>
-          </div>
-        </div>
+      {(onOpenConnections || onOpenSavedCommutes) && (
+        <section aria-labelledby="settings-commute">
+          <GroupLabel id="settings-commute">Commute</GroupLabel>
+          <ListGroup>
+            {onOpenConnections && (
+              <ListRow leading={<IconTile><UsersThreeIcon size={22} /></IconTile>} title="Friends & requests" subtitle="Accept requests, see your Metro friends" onClick={onOpenConnections} navigable />
+            )}
+            {onOpenSavedCommutes && (
+              <ListRow leading={<IconTile><BookmarkSimpleIcon size={22} /></IconTile>} title="Saved commutes" subtitle="Your usual routes, one tap to check in" onClick={onOpenSavedCommutes} navigable />
+            )}
+          </ListGroup>
+        </section>
       )}
+
+      <section aria-labelledby="settings-safety">
+        <GroupLabel id="settings-safety">Safety</GroupLabel>
+        <ListGroup>
+          {onOpenSafetyCenter && (
+            <ListRow leading={<IconTile><ShieldCheckIcon size={22} /></IconTile>} title="Safety Centre" subtitle="Helplines, reporting and community rules" onClick={onOpenSafetyCenter} navigable />
+          )}
+          {onOpenBlockedUsers && (
+            <ListRow leading={<IconTile><ProhibitIcon size={22} /></IconTile>} title="Blocked people" subtitle="See and undo blocks" onClick={onOpenBlockedUsers} navigable />
+          )}
+        </ListGroup>
+      </section>
+
+      <section aria-labelledby="settings-appearance">
+        <GroupLabel id="settings-appearance">Appearance</GroupLabel>
+        <div className="list-group" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div>
+            <div className="type-label" id="theme-label" style={{ color: 'var(--text-primary)' }}>Theme</div>
+            <div className="type-meta" style={{ color: 'var(--text-muted)', marginTop: 2 }}>System follows your phone's setting</div>
+          </div>
+          <div role="radiogroup" aria-labelledby="theme-label" className="segmented">
+            {THEME_OPTIONS.map(opt => {
+              const selected = theme === opt.value;
+              const Icon = opt.icon;
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={selected}
+                  onClick={() => chooseTheme(opt.value)}
+                  className={`segmented-option${selected ? ' selected' : ''}`}
+                >
+                  <Icon size={18} weight={selected ? 'fill' : 'regular'} aria-hidden="true" />
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+
+      <section aria-labelledby="settings-legal">
+        <GroupLabel id="settings-legal">Privacy & legal</GroupLabel>
+        <ListGroup>
+          <LinkRow icon={<IconTile><LockSimpleIcon size={22} /></IconTile>} title="Privacy policy" subtitle="What we collect and why" href={`${API}/privacy`} />
+          <LinkRow icon={<IconTile><FileTextIcon size={22} /></IconTile>} title="Terms of use" subtitle="Community rules and the 18+ requirement" href={`${API}/terms`} />
+          <LinkRow icon={<IconTile><UserMinusIcon size={22} /></IconTile>} title="Delete from the web" subtitle="How to delete if you lose this phone" href={`${API}/account-deletion`} />
+        </ListGroup>
+      </section>
+
+      {user && (
+        <ListGroup>
+          <ListRow
+            danger
+            leading={<IconTile danger><TrashIcon size={22} /></IconTile>}
+            title="Delete account"
+            subtitle="Erase your profile, friends and chats for good"
+            onClick={openDelete}
+          />
+        </ListGroup>
+      )}
+
+      <footer style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, padding: '8px 0 4px' }}>
+        <BrandMark size={24} wordmark />
+        <p className="type-meta" style={{ color: 'var(--text-muted)', textAlign: 'center' }}>
+          {appVersion && <><span className="tnum">Version {appVersion}</span> · </>}For Delhi Metro commuters · 18+
+        </p>
+      </footer>
+
+      <ConfirmDialog
+        open={showDeleteConfirm}
+        title="Delete your account?"
+        icon={<WarningIcon size={24} aria-hidden="true" />}
+        destructive
+        confirmLabel="Delete for good"
+        busyLabel="Deleting"
+        busy={deleting}
+        error={deleteError}
+        onCancel={() => { if (!deleting) setShowDeleteConfirm(false); }}
+        onConfirm={handleDeleteAccount}
+      >
+        <p>This can't be undone. We erase right away:</p>
+        <ul style={{ margin: '8px 0 0', paddingLeft: 20 }}>
+          <li>your profile, bio and interests</li>
+          <li>your friends, requests and blocks</li>
+          <li>your chats and saved commutes</li>
+        </ul>
+        <p style={{ marginTop: 8 }}>
+          Reports filed by or about you are kept for safety review, as our privacy policy explains.
+        </p>
+      </ConfirmDialog>
     </div>
   );
 };
