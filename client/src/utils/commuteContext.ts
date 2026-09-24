@@ -140,3 +140,47 @@ export function getCommuteRelationship(
 
   return COMMUTE_BADGES.none;
 }
+
+// ─── Location honesty (DESIGN §9) ───────────────────────────────────────────
+
+/** Minimum confidence to state "At <station>" / "On the train" without a question mark. */
+export const CONFIDENT_CONTEXT = 0.6;
+
+export interface ContextHeadline {
+  /** "At Rajiv Chowk", "On the Blue Line", "Near Karol Bagh?", "Where are you?" */
+  headline: string;
+  /** Meta line: the signal we used, e.g. "GPS · ±20 m", "Your pick", "Last check-in · 4 min ago". */
+  meta: string;
+  /** Offer one-tap confirm / change. */
+  needsConfirm: boolean;
+}
+
+type HeadlineInput = Pick<ContextResult, 'context' | 'confidence' | 'stationName' | 'lineName'> & {
+  source?: 'gps' | 'manual' | 'last_checkin' | 'schedule' | 'none';
+  between?: { fromStationName: string; toStationName: string } | null;
+  accuracyM?: number | null;
+  lastFixAt?: number | null;
+  stale?: boolean;
+};
+
+/** Words for a detected context that never claim more than the confidence supports. */
+export function describeContext(ctx: HeadlineInput | null, now: number = Date.now()): ContextHeadline {
+  if (!ctx || ctx.source === 'none' || !ctx.stationName) {
+    return { headline: 'Where are you?', meta: 'Pick your station', needsConfirm: true };
+  }
+  const sure = ctx.confidence >= CONFIDENT_CONTEXT && !ctx.stale;
+  let headline: string;
+  if (ctx.context === 'train' && sure) {
+    headline = ctx.between ? `On the ${ctx.lineName} · ${ctx.between.fromStationName} → ${ctx.between.toStationName}` : `On the ${ctx.lineName}`;
+  } else if (ctx.context === 'station' && sure) {
+    headline = `At ${ctx.stationName}`;
+  } else {
+    headline = `Near ${ctx.stationName}?`;
+  }
+  const ago = ctx.lastFixAt ? Math.max(0, Math.round((now - ctx.lastFixAt) / 60_000)) : null;
+  const meta = ctx.source === 'manual' ? 'Your pick'
+    : ctx.source === 'schedule' ? 'Estimated from train times'
+    : ctx.source === 'last_checkin' ? `Last check-in${ago !== null ? ` · ${ago <= 1 ? '1 min' : `${ago} min`} ago` : ''}`
+    : `GPS${ctx.accuracyM ? ` · ±${Math.round(ctx.accuracyM)} m` : ''}`;
+  return { headline, meta, needsConfirm: !sure && ctx.source !== 'manual' };
+}

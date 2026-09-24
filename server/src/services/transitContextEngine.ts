@@ -1,8 +1,19 @@
 import { v4 as uuidv4 } from 'uuid';
 import { DELHI_METRO_LINES, getActiveMetroLines } from '../data/metroData';
-import type { MetroStation, MetroLine, TrainScheduleInfo } from '../types';
-import { ScheduleEngine } from './scheduleEngine';
-import { PathTrackerEngine } from './pathTrackerEngine';
+import type { MetroLine, TrainScheduleInfo } from '../types';
+import { ScheduleEngine, stickyTrainSlot, trainSlot } from './scheduleEngine';
+import {
+  ContextSource,
+  Detection,
+  DetectInput,
+  EngineState,
+  Fix,
+  Movement,
+  MovementHint,
+  step
+} from './location/detectionEngine';
+import { DirectionKey, allStationEntries, getLineTopology, getStationEntry, indexFromTerminalA } from './location/topology';
+import { haversineM } from './location/geo';
 
 // ─── Input / Output Types ───
 
@@ -11,13 +22,30 @@ export interface ContextInput {
   timestamp: number;
   lat?: number;
   lng?: number;
+  /** Fix accuracy (68% radius, metres). */
+  accuracyM?: number;
+  /** When the device took the fix (ms). Defaults to `timestamp`. */
+  fixTimestamp?: number;
   cellTowerId?: string;
-  movementState: 'STILL' | 'WALKING' | 'IN_VEHICLE';
+  /** Activity-recognition hint. Measured speed wins over it. */
+  movementState?: MovementHint;
   speedKmh?: number;
   headingDegrees?: number;
   userConfirmedDirection?: string;
   routeHistory?: { lat: number; lng: number; t: number }[];
   userConfirmed?: boolean; // optional "Yes I'm on this train" tap
+  /** Explicit station pick (v2 clients). */
+  override?: { stationId: string; lineId?: string; direction?: string };
+  /** Confirm the current context as-is (v2 clients). */
+  confirm?: boolean;
+  /**
+   * Engine state bucket. Defaults to userId. Legacy clients that fire one
+   * "WALKING" and one "IN_VEHICLE" request per detect get a bucket each, so
+   * the forced movement of one cannot corrupt the other.
+   */
+  stateKey?: string;
+  /** Evaluate from scratch and keep no state (unauthenticated callers). */
+  ephemeral?: boolean;
 }
 
 export interface ConfidenceBreakdown {
@@ -38,16 +66,44 @@ export interface ContextResult {
   direction: string;
   context: 'station' | 'train' | 'nearby';
   confidence: number;    // 0–1 normalized
-  rawScore: number;      // 0–145 raw
+  rawScore: number;      // 0–145 raw (legacy; derived from confidence)
   trainId?: string;
   scheduleInfo?: TrainScheduleInfo;
   breakdown: ConfidenceBreakdown;
+  /** Plain-language explanation of what we used and how sure we are. */
   reason: string;
+
+  // ── v2 fields (additive) ──
+  /** Which signal the context rests on. */
+  source: ContextSource;
+  movement: Movement;
+  directionKey: DirectionKey;
+  /** False when `direction` is only the line's default guess. */
+  directionKnown: boolean;
+  /** Set while riding between two stations. */
+  between: Detection['between'];
+  /** 0–1 from `between.from` to `between.to`. */
+  progress: number | null;
+  /** Manual pick stays in force until this time (ms), unless the rider moves away. */
+  stickyUntil: number | null;
+  distanceM: number | null;
+  accuracyM: number | null;
+  speedKmh: number | null;
+  /** Position held from an earlier fix (no GPS now). */
+  held: boolean;
+  /** Held too long: only a last-seen hint. */
+  stale: boolean;
+  lastFixAt: number | null;
+  engineVersion: 2;
 }
+
+const STATE_IDLE_MS = 60 * 60_000;
 
 export class TransitContextEngine {
   private static instance: TransitContextEngine;
   private scheduleEngine = ScheduleEngine.getInstance();
+  private states = new Map<string, EngineState>();
+  private lastSweep = 0;
 
   private constructor() {}
 
@@ -58,262 +114,192 @@ export class TransitContextEngine {
     return TransitContextEngine.instance;
   }
 
-  /**
-   * Core method: evaluates raw sensor signals → returns context assignment
-   * with weighted confidence score.
-   */
+  /** Evaluate a detection request for a user and return the context. */
   public evaluate(input: ContextInput): ContextResult {
-    const breakdown: ConfidenceBreakdown = {
-      stationMatch: 0,
-      routeMatch: 0,
-      movementMatch: 0,
-      scheduleMatch: 0,
-      userConfirm: 0
-    };
+    const now = input.timestamp || Date.now();
+    this.sweep(now);
+    const key = input.stateKey || input.userId;
+    const lines = activeLines();
+    const activeIds = new Set(lines.map(l => l.id));
+    const lineFilter = activeIds.size === DELHI_METRO_LINES.length ? undefined : (id: string) => activeIds.has(id);
 
-    // ── Signal A: Station location match (+30) ──
-    const activeLines = getActiveMetroLines().length ? getActiveMetroLines() : DELHI_METRO_LINES;
-    let matchedStation: MetroStation | null = null;
-    let matchedLine: MetroLine = activeLines[0];
-    let stationDistanceM = Infinity;
+    const dInput: DetectInput = { now, movementHint: input.movementState, lineFilter };
 
-    // Try cell tower first
-    if (input.cellTowerId) {
-      for (const line of activeLines) {
-        const found = line.stations.find(s => s.cellTowerId === input.cellTowerId);
-        if (found) {
-          matchedStation = found;
-          matchedLine = line;
-          stationDistanceM = 50; // cell tower implies close proximity
-          break;
-        }
+    let fix: Fix | undefined;
+    if (input.lat !== undefined && input.lng !== undefined && Number.isFinite(input.lat) && Number.isFinite(input.lng)) {
+      fix = {
+        lat: input.lat,
+        lng: input.lng,
+        accuracyM: input.accuracyM,
+        speedMps: input.speedKmh !== undefined ? input.speedKmh / 3.6 : undefined,
+        headingDeg: input.headingDegrees,
+        t: input.fixTimestamp ?? now
+      };
+    }
+
+    if (input.override) {
+      dInput.override = input.override;
+    } else if (input.userConfirmed && fix) {
+      // Legacy manual pick: the client sends the picked station's own
+      // coordinates (+ a cell id) with userConfirmed. Turn that into a pick.
+      const picked = legacyPickedStation(fix, input.cellTowerId);
+      if (picked) {
+        dInput.override = { stationId: picked, direction: input.userConfirmedDirection };
+        fix = undefined; // the coordinates are the station's, not the rider's
+      } else {
+        dInput.confirm = true;
+      }
+    } else if (input.userConfirmed || input.confirm) {
+      dInput.confirm = true;
+    }
+    if (input.userConfirmedDirection && !dInput.override) {
+      const lineId = this.states.get(key)?.manual?.lineId || this.states.get(key)?.lineId;
+      if (lineId) dInput.directionOverride = { lineId, direction: input.userConfirmedDirection };
+    }
+    dInput.fix = fix;
+
+    const { state, detection } = step(input.ephemeral ? undefined : this.states.get(key), dInput);
+
+    // Cell tower only (no GPS, nothing known yet): a rough hint, never a claim.
+    let det = detection;
+    if (!det.stationId && input.cellTowerId) {
+      const cell = allStationEntries().find(e => e.station.cellTowerId === input.cellTowerId && (!lineFilter || lineFilter(e.line.id)));
+      if (cell) {
+        det = {
+          ...det,
+          stationId: cell.station.id,
+          lineId: cell.line.id,
+          direction: `Towards ${cell.line.terminalB}`,
+          confidence: 0.2,
+          reason: `No GPS yet. A rough network hint points to ${cell.station.name}. Pick your station to be sure.`
+        };
       }
     }
 
-    // Fall back to lat/lng nearest-station match
-    if (!matchedStation && input.lat !== undefined && input.lng !== undefined) {
-      let minDist = Infinity;
-      for (const line of activeLines) {
-        for (const st of line.stations) {
-          const d = this.haversine(input.lat, input.lng, st.lat, st.lng);
-          if (d < minDist) {
-            minDist = d;
-            matchedStation = st;
-            matchedLine = line;
-            stationDistanceM = d;
-          }
-        }
-      }
+    const result = this.toResult(det, state, now, lines);
+    if (!input.ephemeral) this.states.set(key, state);
+    return result;
+  }
+
+  /** One-tap direction flip, applied to every state bucket of this user. */
+  public overrideDirection(userId: string, lineId: string, direction: string, now = Date.now()): void {
+    for (const [k, prev] of this.states.entries()) {
+      if (k !== userId && !k.startsWith(`${userId}#`)) continue;
+      this.states.set(k, step(prev, { now, directionOverride: { lineId, direction } }).state);
     }
+    if (!this.states.has(userId)) this.states.set(userId, step(undefined, { now, directionOverride: { lineId, direction } }).state);
+  }
 
-    // Default fallback
-    if (!matchedStation) {
-      matchedStation = activeLines[0].stations[Math.floor(activeLines[0].stations.length / 2)] || DELHI_METRO_LINES[0].stations[6];
-      matchedLine = activeLines[0];
-      stationDistanceM = 200;
+  /** Drop a user's detection state (account deletion, sign-out). */
+  public forget(userId: string): void {
+    for (const k of Array.from(this.states.keys())) if (k === userId || k.startsWith(`${userId}#`)) this.states.delete(k);
+  }
+
+  private sweep(now: number): void {
+    if (now - this.lastSweep < 5 * 60_000) return;
+    this.lastSweep = now;
+    for (const [k, s] of this.states.entries()) if (now - s.updatedAt > STATE_IDLE_MS) this.states.delete(k);
+  }
+
+  private toResult(det: Detection, state: EngineState, now: number, lines: MetroLine[]): ContextResult {
+    // Nothing known at all: a neutral placeholder the client must not present as a location.
+    let stationId = det.stationId;
+    let lineId = det.lineId;
+    if (!stationId || !lineId) {
+      const fallbackLine = (det.lineId && lines.find(l => l.id === det.lineId)) || lines.find(l => l.stations.some(s => s.id === 'rajiv_chowk')) || lines[0];
+      const fallback = fallbackLine.stations.find(s => s.id === 'rajiv_chowk') || fallbackLine.stations[Math.floor(fallbackLine.stations.length / 2)];
+      stationId = fallback.id;
+      lineId = fallbackLine.id;
+      det = { ...det, direction: det.direction || `Towards ${fallbackLine.terminalB}` };
     }
+    const entry = getStationEntry(stationId)!;
+    const line = entry.line;
+    const topo = getLineTopology(line.id);
 
-    // Score station proximity: fused — cellTower + lat/lng agreement boosts
-    // MVP2: fused bonus if both signals agree on same station
-    let fusedBonus = 0;
-    if (input.cellTowerId && input.lat !== undefined && input.lng !== undefined && matchedStation) {
-      // verify lat/lng nearest also points to same station within 200m
-      let nearestViaGps: MetroStation | null = null;
-      let dMin = Infinity;
-      for (const line of activeLines) {
-        for (const st of line.stations) {
-          const d = this.haversine(input.lat, input.lng, st.lat, st.lng);
-          if (d < dMin) { dMin = d; nearestViaGps = st; }
-        }
-      }
-      if (nearestViaGps && nearestViaGps.id === matchedStation.id && dMin <= 250) fusedBonus = 5;
-    }
-    // Score station proximity: ≤100m = 30pts, ≤300m = 25pts, ≤500m = 15pts, ≤1000m = 8, ≤2000m=5
-    if (stationDistanceM <= 100) breakdown.stationMatch = Math.min(30, 30 + fusedBonus);
-    else if (stationDistanceM <= 300) breakdown.stationMatch = Math.min(30, 25 + fusedBonus);
-    else if (stationDistanceM <= 500) breakdown.stationMatch = 15 + Math.min(5, fusedBonus);
-    else if (stationDistanceM <= 1000) breakdown.stationMatch = 8;
-    else if (stationDistanceM <= 2000) breakdown.stationMatch = 3;
-    else breakdown.stationMatch = 0;
-    // clamp 0-30
-    breakdown.stationMatch = Math.max(0, Math.min(30, breakdown.stationMatch));
+    // Stable train identity for the ride (see scheduleEngine.trainSlot).
+    const idx = topo ? indexFromTerminalA(topo, stationId) : 0;
+    const slot = stickyTrainSlot(state.train, line.id, det.directionKey, trainSlot(idx, det.directionKey, now));
+    state.train = { lineId: line.id, key: det.directionKey, slot };
+    const scheduleInfo = this.scheduleEngine.getScheduleForStation(line.id, stationId, det.direction, new Date(now), {
+      directionKey: det.directionKey,
+      routeId: det.routeId,
+      slot
+    });
 
-    // ── Signal B: Movement pattern (+20) — MVP2: consistency check with speed ──
-    const speed = input.speedKmh ?? 0;
-    if (input.movementState === 'IN_VEHICLE') {
-      if (speed >= 15) breakdown.movementMatch = 20;
-      else if (speed >= 8) breakdown.movementMatch = 15;
-      else if (speed > 0) breakdown.movementMatch = 8; // IN_VEHICLE claimed but crawling — likely station
-      else breakdown.movementMatch = 12; // no speed data — assume vehicle
-    } else if (input.movementState === 'WALKING') {
-      if (speed >= 12) breakdown.movementMatch = 5; // WALKING but metro speed — inconsistent
-      else breakdown.movementMatch = 10;
-    } else { // STILL
-      if (speed >= 12) breakdown.movementMatch = 4; // STILL but moving fast — inconsistent
-      else breakdown.movementMatch = 5;
-    }
-
-    // ── Signal C: Route geometry match (+25) — MVP2: direction-aware ──
-    if (input.routeHistory && input.routeHistory.length >= 2) {
-      const routeScore = this.scoreRouteGeometry(input.routeHistory, matchedLine);
-      // direction consistency bonus/penalty if we can infer direction
-      const inferredDir = this.inferDirectionFromHistory(input.routeHistory, matchedLine);
-      let dirScore = routeScore;
-      if (inferredDir) dirScore = Math.min(25, routeScore + 3);
-      breakdown.routeMatch = dirScore;
-    } else if (input.movementState === 'IN_VEHICLE' && speed > 15) {
-      breakdown.routeMatch = 15;
-    } else if (input.movementState === 'IN_VEHICLE' && speed >= 8) {
-      breakdown.routeMatch = 8;
-    }
-
-    // ── Signal D+E: Schedule window match (+20) — real window check + direction inference ──
-    const pathTracker = PathTrackerEngine.getInstance();
-    const resolvedPath = pathTracker.updateAndResolvePath(
-      input.userId,
-      matchedStation,
-      matchedLine,
-      {
-        timestamp: input.timestamp,
-        headingDegrees: input.headingDegrees,
-        speedKmh: input.speedKmh,
-        userConfirmedDirection: input.userConfirmedDirection
-      }
-    );
-    const direction = resolvedPath.direction;
-    if (resolvedPath.isHighConfidence) {
-      breakdown.routeMatch = Math.min(25, Math.max(breakdown.routeMatch, 18));
-    }
-    const nowDate = input.timestamp ? new Date(input.timestamp) : new Date();
-    const scheduleInfo = this.scheduleEngine.getScheduleForStation(
-      matchedLine.id, matchedStation.id, direction, nowDate
-    );
-    breakdown.scheduleMatch = this.scheduleEngine.getScheduleMatchScore(nowDate);
-    // MVP2: stale signal decay — if routeHistory last point is >2min old, dampen schedule+route
-    if (input.routeHistory && input.routeHistory.length) {
-      const lastT = input.routeHistory[input.routeHistory.length - 1].t;
-      const ageMs = nowDate.getTime() - lastT;
-      if (ageMs > 120_000) {
-        breakdown.scheduleMatch = Math.max(3, breakdown.scheduleMatch - 5);
-        breakdown.routeMatch = Math.max(0, breakdown.routeMatch - 5);
-      }
-    }
-    // Overall timestamp staleness
-    const ageMsTotal = Date.now() - input.timestamp;
-    let timeDecay = 1;
-    if (ageMsTotal > 180_000) timeDecay = 0.92;
-    if (ageMsTotal > 600_000) timeDecay = 0.80;
-
-    // ── Signal F: User confirmation (+50) ──
-    if (input.userConfirmed) {
-      breakdown.userConfirm = 50;
-    }
-
-    // ── Compute total — apply time decay ──
-    const rawScore = breakdown.stationMatch + breakdown.routeMatch +
-      breakdown.movementMatch + breakdown.scheduleMatch + breakdown.userConfirm;
-    const decayedRaw = Math.round(rawScore * timeDecay);
-    const confidence = Math.min(decayedRaw / 145, 1.0);
-
-    // ── Determine context tier — MVP2: nearby as distinct low-confidence bucket ──
-    let context: 'station' | 'train' | 'nearby';
-    if (input.movementState === 'IN_VEHICLE' && confidence >= 0.5 && breakdown.stationMatch >= 8) {
-      context = 'train';
-    } else if (breakdown.stationMatch >= 18 && confidence >= 0.35) {
-      context = 'station';
-    } else {
-      context = 'nearby';
-    }
-
-    const reason = this.buildReasonString(context, matchedStation, matchedLine, breakdown, confidence);
-
+    const confidence = Math.round(det.confidence * 100) / 100;
     return {
       id: uuidv4(),
-      station: matchedStation.id,
-      stationName: matchedStation.name,
-      line: matchedLine.id,
-      lineName: matchedLine.name,
-      lineColor: matchedLine.color,
-      direction,
-      context,
-      confidence: Math.round(confidence * 100) / 100,
-      rawScore: decayedRaw,
+      station: stationId,
+      stationName: entry.station.name,
+      line: line.id,
+      lineName: line.name,
+      lineColor: line.color,
+      direction: det.direction,
+      context: det.context,
+      confidence,
+      rawScore: Math.round(confidence * 145),
       trainId: scheduleInfo.trainId,
       scheduleInfo,
-      breakdown,
-      reason
+      breakdown: legacyBreakdown(det, this.scheduleEngine.getScheduleMatchScore(new Date(now))),
+      reason: det.reason,
+      source: det.source,
+      movement: det.movement,
+      directionKey: det.directionKey,
+      directionKnown: det.directionKnown,
+      between: det.between,
+      progress: det.progress,
+      stickyUntil: det.stickyUntil,
+      distanceM: det.distanceM,
+      accuracyM: det.accuracyM,
+      speedKmh: det.speedKmh,
+      held: det.held,
+      stale: det.stale,
+      lastFixAt: det.lastFixAt,
+      engineVersion: 2
     };
   }
+}
 
-  private inferDirectionFromHistory(
-    history: { lat: number; lng: number; t: number }[],
-    line: MetroLine
-  ): string | null {
-    if (history.length < 2) return null;
-    const indices: number[] = [];
-    for (const p of history) {
-      let best = 0, bestD = Infinity;
-      for (let i = 0; i < line.stations.length; i++) {
-        const d = this.haversine(p.lat, p.lng, line.stations[i].lat, line.stations[i].lng);
-        if (d < bestD) { bestD = d; best = i; }
-      }
-      if (bestD <= 800) indices.push(best);
+let activeCache: { env: string; lines: MetroLine[] } | null = null;
+/** getActiveMetroLines() returns a new array per call when filtered; memoise by env. */
+function activeLines(): MetroLine[] {
+  const env = (process.env.BEACHHEAD_LINE || 'all').toLowerCase();
+  if (!activeCache || activeCache.env !== env) {
+    const l = getActiveMetroLines();
+    activeCache = { env, lines: l.length ? l : DELHI_METRO_LINES };
+  }
+  return activeCache.lines;
+}
+
+/**
+ * Older clients check in by sending the picked station's coordinates with
+ * userConfirmed and a cell id (the real one, or `TOWER_DMRC_<STATION_ID>`).
+ */
+function legacyPickedStation(fix: Fix, cellTowerId?: string): string | null {
+  const near = allStationEntries().filter(e => haversineM(fix.lat, fix.lng, e.station.lat, e.station.lng) <= 60);
+  if (!near.length) return null;
+  if (cellTowerId) {
+    const byCell = near.find(e => e.station.cellTowerId === cellTowerId);
+    if (byCell) return byCell.station.id;
+    const m = /^TOWER_DMRC_(.+)$/.exec(cellTowerId);
+    if (m) {
+      const id = m[1].toLowerCase();
+      if (getStationEntry(id)) return id;
     }
-    if (indices.length < 2) return null;
-    const first = indices[0], last = indices[indices.length - 1];
-    if (last > first) return `Towards ${line.terminalB}`;
-    if (last < first) return `Towards ${line.terminalA}`;
-    return null;
   }
+  return near[0].station.id;
+}
 
-  private scoreRouteGeometry(
-    history: { lat: number; lng: number; t: number }[],
-    line: MetroLine
-  ): number {
-    // Check if route history follows known metro line station sequence
-    let matchCount = 0;
-    for (const point of history) {
-      for (const st of line.stations) {
-        const d = this.haversine(point.lat, point.lng, st.lat, st.lng);
-        if (d < 500) {
-          matchCount++;
-          break;
-        }
-      }
-    }
-    const ratio = matchCount / history.length;
-    // movement monotonic bonus: if points move sequentially along line, boost
-    let seqBonus = 0;
-    if (history.length >= 3) {
-      const inferred = this.inferDirectionFromHistory(history, line);
-      if (inferred) seqBonus = 3;
-    }
-    return Math.min(25, Math.round(ratio * 22) + seqBonus);
-  }
-
-  private buildReasonString(
-    context: string,
-    station: MetroStation,
-    line: MetroLine,
-    breakdown: ConfidenceBreakdown,
-    confidence: number
-  ): string {
-    const parts: string[] = [];
-    if (breakdown.stationMatch >= 20) parts.push(`Near ${station.name} (cell tower fix)`);
-    if (breakdown.movementMatch >= 15) parts.push('IN_VEHICLE motion detected');
-    if (breakdown.routeMatch >= 15) parts.push('Route follows metro geometry');
-    if (breakdown.scheduleMatch >= 15) parts.push('Within train schedule window');
-    if (breakdown.userConfirm > 0) parts.push('User confirmed');
-    return `${context.toUpperCase()}: ${parts.join(' + ')} → ${Math.round(confidence * 100)}% confidence`;
-  }
-
-  private haversine(lat1: number, lon1: number, lat2: number, lon2: number): number {
-    const R = 6371e3;
-    const φ1 = (lat1 * Math.PI) / 180;
-    const φ2 = (lat2 * Math.PI) / 180;
-    const Δφ = ((lat2 - lat1) * Math.PI) / 180;
-    const Δλ = ((lon2 - lon1) * Math.PI) / 180;
-    const a = Math.sin(Δφ / 2) ** 2 + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) ** 2;
-    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  }
+/** The legacy 0–145 breakdown, reconstructed from the new detection for old clients. */
+function legacyBreakdown(det: Detection, scheduleMatch: number): ConfidenceBreakdown {
+  const stationMatch = det.source === 'manual' ? 30
+    : det.context === 'station' ? Math.round(18 + 12 * det.confidence)
+    : det.context === 'train' ? 20 : Math.round(15 * det.confidence);
+  return {
+    stationMatch: Math.max(0, Math.min(30, stationMatch)),
+    routeMatch: det.directionKnown ? 20 : 5,
+    movementMatch: det.movement === 'in_vehicle' ? 20 : det.movement === 'walking' ? 10 : 5,
+    scheduleMatch,
+    userConfirm: det.source === 'manual' ? 50 : 0
+  };
 }

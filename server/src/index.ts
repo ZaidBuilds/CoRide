@@ -614,6 +614,7 @@ app.delete('/api/profile/:userId', async (req, res) => {
 
     pushSubscriptions.delete(userId);
     roomManager.forgetProfile(userId);
+    contextEngine.forget(userId);
     moderation.forgetUser(userId);
     profileBonusGranted.delete(userId);
 
@@ -721,14 +722,12 @@ app.post('/api/commute/patterns/:userId/:patternId/use', (req, res) => {
   const pat = commuteService.markUsed(me, req.params.patternId);
   if (!pat) return res.status(404).json({ error: 'Pattern not found' });
   // also create context detection for one-tap
+  // A saved commute is a manual pick of its station/line/direction.
   const ctx = contextEngine.evaluate({
     userId: me,
     timestamp: Date.now(),
-    cellTowerId: undefined as any,
-    lat: undefined as any,
-    lng: undefined as any,
     movementState: 'WALKING',
-    userConfirmed: true
+    override: pat.stationId ? { stationId: pat.stationId, lineId: pat.lineId, direction: pat.direction } : undefined
   });
   // override to pattern's station/line
   const room = roomManager.getOrCreateFromContext({ ...ctx, station: pat.stationId, stationName: pat.stationName, line: pat.lineId, lineName: pat.lineName, lineColor: pat.lineColor, direction: pat.direction } as any);
@@ -876,6 +875,13 @@ app.post('/api/admin/resolve/:reportId', (req, res) => {
 
 // ── Transit Context Engine: auto-detect ──
 const MOVEMENT_STATES = ['STILL', 'WALKING', 'IN_VEHICLE'];
+/**
+ * Body (all optional): lat, lng, accuracyM, fixAt (ms), speedKmh,
+ * headingDegrees, movementState (hint), cellTowerId, userConfirmed,
+ * userConfirmedDirection. v2 clients send `v: 2` and may add
+ * `override: { stationId, lineId?, direction? }` or `confirm: true`; they get
+ * both rooms back in `rooms` and one engine state per user.
+ */
 app.post('/api/context/detect', (req, res) => {
   const b = req.body || {};
   // Identity from the token. Legacy clients without one fall back to the body
@@ -883,35 +889,59 @@ app.post('/api/context/detect', (req, res) => {
   const me = actorId(req);
   if (!me && STRICT_AUTH) return res.status(401).json({ error: 'Sign-in required.' });
   const userId = me || (isId(b.userId) ? b.userId : 'anonymous');
+  const v2 = b.v === 2;
+  const now = Date.now();
 
-  const routeHistory = Array.isArray(b.routeHistory)
-    ? b.routeHistory
-        .slice(-50)
-        .filter((p: any) => p && typeof p === 'object')
-        .map((p: any) => ({ lat: Number(p.lat), lng: Number(p.lng), t: Number(p.t) }))
-        .filter((p: any) => Number.isFinite(p.lat) && Number.isFinite(p.lng) && Number.isFinite(p.t))
+  const movementState = MOVEMENT_STATES.includes(b.movementState) ? b.movementState : undefined;
+  // A fix time from the device, clamped: never in the future, at most 10 min old.
+  const fixAt = finiteOrUndef(b.fixAt, now - 10 * 60_000, now + 5_000);
+  const override = v2 && b.override && typeof b.override === 'object' && typeof b.override.stationId === 'string' && SLUG_RE.test(b.override.stationId)
+    ? {
+        stationId: b.override.stationId,
+        lineId: typeof b.override.lineId === 'string' && SLUG_RE.test(b.override.lineId) ? b.override.lineId : undefined,
+        direction: optString(b.override.direction, 80) || undefined
+      }
     : undefined;
 
   const ctx = contextEngine.evaluate({
     userId,
-    timestamp: Date.now(),
+    // Legacy clients fire a WALKING and an IN_VEHICLE request per detect with
+    // forced speeds; keep those streams apart so neither corrupts the other.
+    stateKey: v2 ? userId : `${userId}#legacy:${movementState || 'IN_VEHICLE'}`,
+    // Unauthenticated callers share the 'anonymous' id: never keep state for them.
+    ephemeral: userId === 'anonymous',
+    timestamp: now,
     lat: finiteOrUndef(b.lat, -90, 90),
     lng: finiteOrUndef(b.lng, -180, 180),
+    accuracyM: finiteOrUndef(b.accuracyM, 0, 100_000),
+    fixTimestamp: fixAt !== undefined ? Math.min(fixAt, now) : undefined,
     cellTowerId: typeof b.cellTowerId === 'string' ? b.cellTowerId.slice(0, 64) : undefined,
-    movementState: MOVEMENT_STATES.includes(b.movementState) ? b.movementState : 'IN_VEHICLE',
+    // Legacy default stays IN_VEHICLE; v2 treats a missing hint as "no hint".
+    movementState: v2 ? movementState : (movementState || 'IN_VEHICLE'),
     speedKmh: finiteOrUndef(b.speedKmh, 0, 400),
-    routeHistory: routeHistory && routeHistory.length ? routeHistory : undefined,
     userConfirmed: !!b.userConfirmed,
+    confirm: v2 && b.confirm === true,
+    override,
     headingDegrees: finiteOrUndef(b.headingDegrees, 0, 360),
     userConfirmedDirection: optString(b.userConfirmedDirection, 80) || undefined
   });
 
-  // Create/find the room for this context
-  const room = roomManager.getOrCreateFromContext(ctx);
+  if (!v2) {
+    // Create/find the room for this context
+    const room = roomManager.getOrCreateFromContext(ctx);
+    return res.json({ context: ctx, room: roomManager.serializeRoom(room.id) });
+  }
 
+  // v2: one call returns both rooms. The station room is the current (or
+  // last) station's lounge; the train room is the train being ridden, or the
+  // next one in the detected direction while waiting on the platform.
+  const stationRoom = roomManager.getOrCreateFromContext({ ...ctx, context: 'station' });
+  const trainRoom = roomManager.getOrCreateFromContext({ ...ctx, context: 'train' });
+  const primary = ctx.context === 'train' ? trainRoom : stationRoom;
   res.json({
     context: ctx,
-    room: roomManager.serializeRoom(room.id)
+    room: roomManager.serializeRoom(primary.id),
+    rooms: { station: roomManager.serializeRoom(stationRoom.id), train: roomManager.serializeRoom(trainRoom.id) }
   });
 });
 
@@ -927,15 +957,11 @@ app.post('/api/context/direction-override', (req, res) => {
 
   const tracker = PathTrackerEngine.getInstance();
   tracker.setDirectionOverride(me, lineId, dir);
+  contextEngine.overrideDirection(me, lineId, dir);
 
-  // Evaluate updated context with confirmed direction
-  const ctx = contextEngine.evaluate({
-    userId: me,
-    timestamp: Date.now(),
-    movementState: 'IN_VEHICLE',
-    userConfirmed: true,
-    userConfirmedDirection: dir
-  });
+  // Re-evaluate from the rider's own state (no fix): keeps their station
+  // instead of the old fallback to an arbitrary default station.
+  const ctx = contextEngine.evaluate({ userId: me, timestamp: Date.now() });
 
   const room = roomManager.getOrCreateFromContext(ctx);
 
@@ -1383,12 +1409,26 @@ io.on('connection', (socket) => {
   // ── Presence Heartbeat — MVP2: keep live, touch TTL ──
   on('heartbeat', ({ roomId }: { roomId?: string }) => {
     const userId: string | null = socket.data.userId;
-    if (!userId || !inRoom(roomId)) return;
+    if (!userId || !isSocketRoomId(roomId)) return;
+    if (!socket.rooms.has(roomId)) {
+      // After a reconnect the new socket is in no rooms and the client does
+      // not re-join context rooms. Re-join here (same rights as join_room)
+      // so presence self-heals instead of silently lapsing.
+      if (isPresenceRoomId(roomId) || !roomManager.getRoom(roomId) || !socket.data.profile) return;
+      socket.join(roomId);
+    }
     if (isPresenceRoomId(roomId)) {
       redisPresence.heartbeat(userId, roomId).catch(logRedisFailure('heartbeat'));
     } else {
-      presence.heartbeat(userId, roomId, socket.id);
-      roomManager.touchRoom(roomId);
+      // Re-adds the member if a ghost sweep dropped them while backgrounded.
+      const profile: UserProfile | null = socket.data.profile;
+      const readded = profile
+        ? roomManager.touchMember(roomId, profile, socket.id)
+        : (presence.heartbeat(userId, roomId, socket.id), roomManager.touchRoom(roomId), false);
+      if (readded) {
+        const serialized = roomManager.serializeRoom(roomId);
+        if (serialized) io.to(roomId).emit('room_updated', serialized);
+      }
     }
     broadcastPresence(roomId, userId);
   });
@@ -1752,15 +1792,19 @@ io.on('connection', (socket) => {
       unregisterSocket(socket.id);
       socketEventLimiter.reset(socket.id);
 
-      // Redis-presence rooms the socket joined — drop membership + broadcast leave.
+      // Redis-presence rooms the socket joined — drop membership + broadcast
+      // leave, unless another socket of the same user (second tab, or a
+      // reconnect that landed before this disconnect) is still in that room.
       const pRooms = socketPresenceRooms.get(socket.id);
+      socketPresenceRooms.delete(socket.id);
       if (pRooms && pRooms.size > 0) {
         const pUserId: string | null = socket.data.userId;
+        const others = pUserId ? Array.from(userIdToSocketIds.get(pUserId) || []) : [];
         for (const rid of pRooms) {
-          if (pUserId) redisPresence.leaveRoom(pUserId, rid).catch(logRedisFailure('leave'));
+          const stillThere = others.some(sid => socketPresenceRooms.get(sid)?.has(rid));
+          if (pUserId && !stillThere) redisPresence.leaveRoom(pUserId, rid).catch(logRedisFailure('leave'));
           broadcastPresence(rid, null);
         }
-        socketPresenceRooms.delete(socket.id);
       }
 
       const { userId, roomIds, leaveMessages } = roomManager.disconnectSocket(socket.id);
@@ -1784,6 +1828,12 @@ io.on('connection', (socket) => {
 // ────────────────────────────────────────
 setInterval(() => {
   try {
+    // Members whose app stopped heartbeating (backgrounded, killed, lost
+    // network) leave the room after MEMBER_TTL_MS even if the socket lingers.
+    for (const rid of roomManager.sweepGhosts()) {
+      const serialized = roomManager.serializeRoom(rid);
+      if (serialized) io.to(rid).emit('room_updated', serialized);
+    }
     for (const room of roomManager.getAllRooms()) {
       const serialized = roomManager.serializeRoom(room.id);
       if (!serialized) continue;

@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { BroadcastIcon as Radio, XIcon as X, BellIcon as Bell, MapPinIcon as MapPin } from '@phosphor-icons/react';
-import type { Socket } from 'socket.io-client';
 import { useSocket } from './hooks/useSocket';
 import { setToken, getToken, authHeaders } from './utils/auth';
 import { DiscoveryScreen } from './components/DiscoveryScreen';
@@ -26,6 +25,7 @@ import { LiveTrackingScreen } from './components/LiveTrackingScreen';
 import { ProfileStatsScreen } from './components/ProfileStatsScreen';
 import { RoomScreen } from './components/RoomScreen';
 import { useCommuteNotifications } from './hooks/useCommuteNotifications';
+import { useLocationContext } from './hooks/useLocationContext';
 import { track } from './utils/analytics';
 import { SafetyCenterScreen } from './components/safety/SafetyCenterScreen';
 import { BlockedUsersScreen } from './components/safety/BlockedUsersScreen';
@@ -107,20 +107,14 @@ export function App() {
   const [showOffline, setShowOffline] = useState(false);
   const [pushBannerDismissed, setPushBannerDismissed] = useState(() => lsGet('coride_push_banner_dismissed') === new Date().toISOString().slice(0, 10));
 
-  const routeHistoryRef = useRef<{ lat: number; lng: number; t: number }[]>([]);
-  const lastPosRef = useRef<{ lat: number; lng: number } | null>(null);
-  const speedRef = useRef<number | undefined>(undefined);
-  const firstFixRef = useRef(false);
   const nudgedRef = useRef(false);
   const scrollMemo = useRef<Record<string, number>>({});
   const userRef = useRef<UserProfile | null>(null);
   const roomsRef = useRef<{ station: ContextRoom | null; train: ContextRoom | null }>({ station: null, train: null });
-  const manualRef = useRef(false);
   const pendingRequestRef = useRef(0);
   useEffect(() => {
     userRef.current = user;
     roomsRef.current = { station: stationRoom, train: trainRoom };
-    manualRef.current = hasManualOverride;
   });
 
   const { permission: pushPermission, isLive: commuteLive, requestPermission: requestPush } = useCommuteNotifications(!!user);
@@ -202,53 +196,6 @@ export function App() {
   }, [canGoBack, navKey]);
 
   // ─── Bootstrap ────────────────────────────────────────────────────────────
-  /** Resolves true when both rooms were detected and joined. */
-  const detect = useCallback(async (activeSocket: Socket, profile: UserProfile, opts?: { userConfirmed?: boolean; userConfirmedDirection?: string; overrideCellTowerId?: string; overrideLat?: number; overrideLng?: number }): Promise<boolean> => {
-    try {
-      const lastPos = lastPosRef.current;
-      const routeHistory = routeHistoryRef.current.length >= 2 ? routeHistoryRef.current : undefined;
-      const geoSpeed = speedRef.current;
-      const hasCellTower = !lastPos && !opts?.overrideCellTowerId;
-      const cellTower = opts?.overrideCellTowerId ? opts.overrideCellTowerId : hasCellTower ? 'TOWER_DMRC_RC_CP' : undefined;
-      const lat = opts?.overrideLat ?? lastPos?.lat;
-      const lng = opts?.overrideLng ?? lastPos?.lng;
-      const basePayload: Record<string, unknown> = {
-        userId: profile.id,
-        cellTowerId: cellTower,
-        routeHistory,
-        userConfirmed: !!opts?.userConfirmed
-      };
-      if (lat !== undefined) basePayload.lat = lat;
-      if (lng !== undefined) basePayload.lng = lng;
-      if (opts?.userConfirmedDirection) basePayload.userConfirmedDirection = opts.userConfirmedDirection;
-      const stationRes = await fetch(`${API}/api/context/detect`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeaders() },
-        body: JSON.stringify({ ...basePayload, movementState: 'WALKING', speedKmh: geoSpeed && geoSpeed < 8 ? geoSpeed : 3 })
-      });
-      if (!stationRes.ok) throw new Error(`detect ${stationRes.status}`);
-      const stationData = await stationRes.json();
-      setStationRoom(stationData.room);
-      activeSocket.emit('join_room', { roomId: stationData.room.id, user: profile });
-      const trainRes = await fetch(`${API}/api/context/detect`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeaders() },
-        body: JSON.stringify({ ...basePayload, movementState: 'IN_VEHICLE', speedKmh: geoSpeed && geoSpeed >= 8 ? geoSpeed : 42 })
-      });
-      if (!trainRes.ok) throw new Error(`detect ${trainRes.status}`);
-      const trainData = await trainRes.json();
-      setContext(trainData.context);
-      setTrainRoom(trainData.room);
-      activeSocket.emit('join_room', { roomId: trainData.room.id, user: profile });
-      track('context_detected', profile.id, { context: trainData.context, confidence: trainData.context.confidence, station: trainData.context.stationName, routeHistoryLen: routeHistory?.length || 0 });
-      track('travelers_seen', profile.id, { station: trainData.context.stationName, stationCount: stationData.room.userCount, trainCount: trainData.room.userCount });
-      return true;
-    } catch (err) {
-      console.error('Detection error:', err);
-      return false;
-    }
-  }, []);
-
   const leaveCurrentRooms = useCallback(() => {
     const u = userRef.current;
     if (!u) return;
@@ -268,7 +215,6 @@ export function App() {
       if (token) setToken(token); // signed device token → authenticates every request
       setUser(profile);
       lsSet(PROFILE_KEY, JSON.stringify(profile));
-      void detect(socket, profile);
       track('session_start', profile.id, { stationHint: 'auto' });
       track('activated_user', profile.id, {});
     };
@@ -307,7 +253,7 @@ export function App() {
     };
     void run();
     return () => { cancelled = true; };
-  }, [bootAttempt, detect, socket]);
+  }, [bootAttempt, socket]);
 
   // ─── Socket listeners ─────────────────────────────────────────────────────
   const refreshUnread = useCallback(() => {
@@ -503,36 +449,39 @@ export function App() {
   };
 
   // ─── Location (only after the user agreed in the disclosure) ──────────────
+  // GPS watch, throttled detect, visibility pause and manual picks live in the
+  // hook; the server engine owns hysteresis, direction and confidence.
+  const loc = useLocationContext({ enabled: locationEnabled, userId: user?.id });
+
+  // Permission revoked in system settings after onboarding: remember it.
   useEffect(() => {
-    if (!locationEnabled || !('geolocation' in navigator)) return;
-    const watchId = navigator.geolocation.watchPosition(
-      pos => {
-        const { latitude, longitude, speed } = pos.coords;
-        lastPosRef.current = { lat: latitude, lng: longitude };
-        routeHistoryRef.current.push({ lat: latitude, lng: longitude, t: Date.now() });
-        if (routeHistoryRef.current.length > 8) routeHistoryRef.current.shift();
-        if (speed !== null && speed !== undefined) speedRef.current = speed * 3.6;
-        // First real fix: re-detect so the user lands in the right room
-        // instead of the no-location default.
-        if (!firstFixRef.current) {
-          firstFixRef.current = true;
-          const u = userRef.current;
-          if (u && !manualRef.current) {
-            leaveCurrentRooms();
-            void detect(socket, u);
-          }
-        }
-      },
-      err => {
-        if (err.code === err.PERMISSION_DENIED) {
-          lsSet(ONBOARDING_KEYS.locationChoice, 'denied');
-          setLocationEnabled(false);
-        }
-      },
-      { enableHighAccuracy: false, maximumAge: 30000, timeout: 15000 }
-    );
-    return () => navigator.geolocation.clearWatch(watchId);
-  }, [locationEnabled, detect, leaveCurrentRooms, socket]);
+    if (loc.status === 'denied') {
+      lsSet(ONBOARDING_KEYS.locationChoice, 'denied');
+      setLocationEnabled(false);
+    }
+  }, [loc.status]);
+
+  useEffect(() => { if (loc.context) setContext(loc.context); }, [loc.context]);
+
+  // Rooms follow the detected context: leave a room when its id changes, join the new one.
+  useEffect(() => {
+    const u = userRef.current;
+    if (!u) return;
+    const next = loc.rooms;
+    const cur = roomsRef.current;
+    for (const kind of ['station', 'train'] as const) {
+      const nextRoom = next[kind];
+      const curRoom = cur[kind];
+      if (!nextRoom || nextRoom.id === curRoom?.id) continue;
+      if (curRoom) socket.emit('leave_room', { roomId: curRoom.id, userId: u.id });
+      socket.emit('join_room', { roomId: nextRoom.id, user: u });
+    }
+    if (next.station) setStationRoom(next.station);
+    if (next.train) setTrainRoom(next.train);
+    if (loc.context) {
+      track('context_detected', u.id, { context: loc.context, confidence: loc.context.confidence, station: loc.context.stationName, source: loc.context.source });
+    }
+  }, [loc.rooms]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Low-confidence detection → suggest picking the station, once per session.
   useEffect(() => {
@@ -546,38 +495,17 @@ export function App() {
   // ─── Actions ──────────────────────────────────────────────────────────────
   const handleStationPicked = (station: { id: string; name: string; lat: number; lng: number; cellTowerId?: string }) => {
     if (!user) return;
-    leaveCurrentRooms();
     setHasManualOverride(true);
     setShowStationPicker(false);
     showToast(`Station set to ${station.name}`);
-    void detect(socket, user, {
-      userConfirmed: true,
-      overrideCellTowerId: station.cellTowerId,
-      overrideLat: station.lat,
-      overrideLng: station.lng
-    });
+    void loc.override(station.id);
     track('manual_context_confirm', user.id, { stationId: station.id, stationName: station.name });
   };
 
   const handleHeroCheckIn = async (lineId: string, stationId: string, direction: string) => {
     if (!user) throw new Error('Still signing you in — try again in a moment.');
-    leaveCurrentRooms();
-    let stationLat = 28.6328;
-    let stationLng = 77.2197;
-    let stationName = stationId;
-    const stObj = DELHI_METRO_LINES.find(l => l.id === lineId)?.stations.find(s => s.id === stationId);
-    if (stObj) {
-      stationLat = stObj.lat;
-      stationLng = stObj.lng;
-      stationName = stObj.name;
-    }
-    const ok = await detect(socket, user, {
-      userConfirmed: true,
-      userConfirmedDirection: direction || undefined,
-      overrideLat: stationLat,
-      overrideLng: stationLng,
-      overrideCellTowerId: `TOWER_DMRC_${stationId.toUpperCase()}`
-    });
+    const stationName = DELHI_METRO_LINES.find(l => l.id === lineId)?.stations.find(s => s.id === stationId)?.name || stationId;
+    const ok = await loc.override(stationId, lineId, direction || undefined);
     // CheckInScreen shows this error instead of a false "Checked in".
     if (!ok) throw new Error("Couldn't check you in. Check your connection and try again.");
     setHasManualOverride(true);
@@ -590,11 +518,11 @@ export function App() {
 
   const handleUseCommute = async (pattern: { id: string; stationId: string; stationName: string; lineId?: string; lineName?: string; lineColor?: string; direction?: string }, roomFromServer?: ContextRoom) => {
     if (!user) return;
-    leaveCurrentRooms();
     showToast(`Joining ${pattern.stationName}`);
     track('commute_pattern_used', user.id, { patternId: pattern.id, station: pattern.stationName });
     setHasManualOverride(true);
     if (roomFromServer) {
+      leaveCurrentRooms();
       if (roomFromServer.type === 'station') {
         setStationRoom(roomFromServer);
         setContext({ stationName: pattern.stationName, lineName: pattern.lineName, lineColor: pattern.lineColor, direction: pattern.direction, confidence: 0.95, breakdown: { stationMatch: 30, routeMatch: 25, movementMatch: 10, scheduleMatch: 20, userConfirm: 50 }, rawScore: 135, station: pattern.stationId, line: pattern.lineId, id: '', reason: 'Saved commute' } as unknown as ContextResult);
@@ -605,10 +533,7 @@ export function App() {
       goTab('people');
       return;
     }
-    const station = { lat: 28.6328, lng: 77.2197, cellTowerId: `TOWER_DMRC_${pattern.stationId.toUpperCase()}` };
-    const found = DELHI_METRO_LINES.flatMap(l => l.stations).find(s => s.id === pattern.stationId) as { lat: number; lng: number; cellTowerId?: string } | undefined;
-    if (found) { station.lat = found.lat; station.lng = found.lng; if (found.cellTowerId) station.cellTowerId = found.cellTowerId; }
-    void detect(socket, user, { userConfirmed: true, overrideCellTowerId: station.cellTowerId, overrideLat: station.lat, overrideLng: station.lng });
+    void loc.override(pattern.stationId, pattern.lineId, pattern.direction);
     goTab('people');
   };
 
@@ -668,9 +593,17 @@ export function App() {
   useEffect(() => {
     if (!user) return;
     let meaningfulSent = false;
-    const id = setInterval(() => {
+    // Heartbeat only while visible: a backgrounded app drops out of the room
+    // after the server's presence TTL (90 s) instead of lingering as a ghost,
+    // and a heartbeat on resume puts it straight back.
+    const beat = () => {
+      if (document.visibilityState !== 'visible') return;
       if (stationRoom) socket.emit('heartbeat', { userId: user.id, roomId: stationRoom.id });
       if (trainRoom) socket.emit('heartbeat', { userId: user.id, roomId: trainRoom.id });
+    };
+    document.addEventListener('visibilitychange', beat);
+    const id = setInterval(() => {
+      beat();
       if (!meaningfulSent) {
         const room = trainRoom || stationRoom;
         const cnt = room?.userCount || room?.users.length || 0;
@@ -688,7 +621,7 @@ export function App() {
         track('meaningful_live_session', user.id, { roomId: room.id, count: cnt, type: room.type, durationSec: 90, fallback: true });
       }
     }, 90 * 1000);
-    return () => { clearInterval(id); clearTimeout(t2); };
+    return () => { clearInterval(id); clearTimeout(t2); document.removeEventListener('visibilitychange', beat); };
   }, [socket, user, stationRoom?.id, trainRoom?.id, stationRoom?.userCount, trainRoom?.userCount]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
