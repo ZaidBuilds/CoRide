@@ -3,8 +3,8 @@ import { ShieldCheck, UserX, Trash2, Edit3, EyeOff, ChevronRight, FileText, Lock
 import { ThemeToggle } from './ThemeToggle';
 import { triggerHaptic } from '../utils/nativeBridge';
 import { authHeaders } from '../utils/auth';
+import { API } from '../config';
 
-const API = 'http://localhost:4000';
 
 interface Props {
   user?: any;
@@ -41,16 +41,17 @@ export const ProfileStatsScreen: React.FC<Props> = ({
     triggerHaptic('medium');
     setDeleting(true);
     try {
-      await fetch(`${API}/api/profile/${user.id}`, {
+      const res = await fetch(`${API}/api/profile/${user.id}`, {
         method: 'DELETE',
         headers: authHeaders()
       });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       localStorage.clear();
       onAccountDeleted?.();
       window.location.reload();
     } catch {
-      localStorage.clear();
-      window.location.reload();
+      // Keep the local session so the user can retry — the server still holds their data.
+      window.alert('Could not delete your account right now. Check your connection and try again.');
     } finally {
       setDeleting(false);
     }
@@ -258,21 +259,25 @@ export const ProfileStatsScreen: React.FC<Props> = ({
             <span style={{ color: 'var(--mint-500)', fontWeight: 600 }}>Accepted ✓</span>
           </div>
 
-          <div
+          <a
+            href={`${API}/privacy`}
+            target="_blank"
+            rel="noopener noreferrer"
             style={{
               padding: '12px 16px',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
               fontSize: 13,
-              color: 'var(--text-secondary)'
+              color: 'var(--text-secondary)',
+              textDecoration: 'none'
             }}
           >
             <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Lock size={16} /> Privacy Policy (No GPS Tracking)
+              <Lock size={16} /> Privacy Policy
             </span>
-            <span style={{ color: 'var(--mint-500)', fontWeight: 600 }}>Active ✓</span>
-          </div>
+            <ChevronRight size={16} />
+          </a>
         </div>
       </div>
 

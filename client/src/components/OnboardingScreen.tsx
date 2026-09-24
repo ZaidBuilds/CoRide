@@ -5,8 +5,9 @@ import { INTEREST_TAXONOMY } from '../types';
 import { Button } from './ui/Button';
 import { PermissionPrimer } from './onboarding/PermissionPrimer';
 import { triggerHaptic } from '../utils/nativeBridge';
+import { authHeaders } from '../utils/auth';
+import { API } from '../config';
 
-const API = 'http://localhost:4000';
 
 interface Props {
   user: UserProfile;
@@ -79,7 +80,7 @@ export const OnboardingScreen: React.FC<Props> = ({
     try {
       const res = await fetch(`${API}/api/profile/${user.id}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({
           pseudonym: pseudonym.trim(),
           interestTags: tags,

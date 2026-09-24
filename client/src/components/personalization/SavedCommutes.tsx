@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Clock, MapPin, Trash2, Zap, Star } from 'lucide-react';
 import type { CommutePattern } from '../../types';
+import { API } from '../../config';
 
-const API = 'http://localhost:4000';
 
 interface Props {
   userId: string;

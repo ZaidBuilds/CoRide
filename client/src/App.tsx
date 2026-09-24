@@ -42,8 +42,8 @@ import type {
   DirectMessage,
   FriendEntry
 } from './types';
+import { API } from './config';
 
-const API = 'http://localhost:4000';
 
 type View = 'home' | 'people' | 'discover' | 'liveTracking' | 'chat' | 'chats' | 'connect' | 'profile' | 'friends' | 'room' | 'safetyCenter' | 'blockedUsers';
 
@@ -98,7 +98,7 @@ export function App() {
     if (stored) {
       try {
         const parsed: UserProfile = JSON.parse(stored);
-        fetch(`${API}/api/auth/restore/${parsed.id}`)
+        fetch(`${API}/api/auth/restore/${parsed.id}`, { headers: authHeaders() })
           .then(r => r.ok ? r.json() : Promise.reject())
           .then(d => initWithProfile(d.profile, d.token))
           .catch(() => { initWithProfile(parsed); });

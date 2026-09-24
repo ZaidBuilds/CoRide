@@ -1,8 +1,9 @@
 FROM node:20-alpine AS base
 WORKDIR /app
 COPY package.json package-lock.json* ./
-RUN npm ci --only=production 2>/dev/null || npm i
+# Full install: the TypeScript build needs devDependencies.
+RUN npm ci
 COPY . .
-RUN npm run build
+RUN npm run build && npm prune --omit=dev
 EXPOSE 4000
 CMD ["node", "dist/index.js"]

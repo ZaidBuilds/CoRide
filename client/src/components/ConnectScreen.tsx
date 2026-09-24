@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react';
 import { X, Check } from 'lucide-react';
 import type { UserProfile } from '../types';
 import type { Socket } from 'socket.io-client';
+import { API } from '../config';
 
-const API = 'http://localhost:4000';
 
 interface Props {
   currentUser: UserProfile;

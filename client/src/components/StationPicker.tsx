@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { MapPin, Check, Search, Navigation, Shield } from 'lucide-react';
 import type { MetroLine, MetroStation } from '../types';
+import { API } from '../config';
 
-const API = 'http://localhost:4000';
 
 interface Props {
   onConfirm: (station: MetroStation, line: MetroLine) => void;

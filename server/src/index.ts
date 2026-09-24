@@ -34,6 +34,10 @@ const io = new SocketIOServer(server, {
 app.use(cors());
 app.use(express.json());
 
+// Public legal pages. Google Play needs a reachable privacy-policy URL and a
+// web URL where users can request account deletion without the app.
+app.use(express.static(path.join(__dirname, '..', 'public'), { extensions: ['html'] }));
+
 const PORT = process.env.PORT || 4000;
 const contextEngine = TransitContextEngine.getInstance();
 const roomManager = RoomManager.getInstance();
@@ -277,6 +281,9 @@ app.get('/api/profile/:userId', (req, res) => {
 
 // Update profile — optional public enhancements (bio, tags, college, avatar, etc.)
 app.patch('/api/profile/:userId', (req, res) => {
+  if (actorId(req) !== req.params.userId) {
+    return res.status(403).json({ error: 'Not authorized to edit this profile.' });
+  }
   const existing = persistence.getProfile(req.params.userId) || roomManager.getUserProfile(req.params.userId);
   if (!existing) return res.status(404).json({ error: 'Profile not found' });
   const { pseudonym, bio, collegeOrTag, interestTags, avatarBg, avatarId, languages, favoriteStationId, favoriteLineId, vibeTagline } = req.body;
@@ -305,27 +312,25 @@ app.patch('/api/profile/:userId', (req, res) => {
 app.delete('/api/profile/:userId', (req, res) => {
   const userId = req.params.userId;
   const caller = actorId(req);
-  if (caller && caller !== userId) {
+  if (!caller) return res.status(401).json({ error: 'Sign-in required.' });
+  if (caller !== userId) {
     return res.status(403).json({ error: 'Not authorized to delete this account.' });
   }
 
   try {
+    connectionManager.purgeUser(userId);
+
     const store = persistence.load();
-    if (store.profiles) {
-      delete store.profiles[userId];
+    if (store.profiles) delete store.profiles[userId];
+    // Chat threads, read markers and saved commutes belong to the account too —
+    // the in-app copy promises they are erased.
+    for (const key of Object.keys(store.directMessages || {})) {
+      if (key.split('::').includes(userId)) delete store.directMessages[key];
     }
-    if (store.friendships) {
-      delete store.friendships[userId];
-      for (const fid of Object.keys(store.friendships)) {
-        store.friendships[fid] = (store.friendships[fid] || []).filter(id => id !== userId);
-      }
+    for (const key of Object.keys(store.reads || {})) {
+      if (key.split('::').includes(userId)) delete store.reads[key];
     }
-    if (store.blocks) {
-      delete store.blocks[userId];
-      for (const bid of Object.keys(store.blocks)) {
-        store.blocks[bid] = (store.blocks[bid] || []).filter(id => id !== userId);
-      }
-    }
+    if (store.commutePatterns) delete store.commutePatterns[userId];
     persistence.save(store);
 
     const rmProfiles: any = (roomManager as any).userProfiles;
@@ -433,8 +438,13 @@ app.get('/api/auth/random-profile', (_req, res) => {
   res.json({ profile, token: signToken(profile.id), avatarPalette: AVATAR_PALETTE });
 });
 
-// Restore existing profile (for retention after reload)
+// Restore existing profile (for retention after reload). The caller must already
+// hold this user's signed token — user ids are public (room lists expose them),
+// so minting a token from a bare id would let anyone take over any account.
 app.get('/api/auth/restore/:userId', (req, res) => {
+  if (actorId(req) !== req.params.userId) {
+    return res.status(401).json({ error: 'Not authorized to restore this profile.' });
+  }
   const profile = persistence.getProfile(req.params.userId) || roomManager.getUserProfile(req.params.userId);
   if (profile) {
     res.json({ profile, token: signToken(profile.id), restored: true });
@@ -517,6 +527,11 @@ app.get('/api/admin/reports', (_req, res) => {
 });
 
 app.post('/api/admin/resolve/:reportId', (req, res) => {
+  // Moderator-only. Disabled entirely unless ADMIN_TOKEN is configured.
+  const adminToken = process.env.ADMIN_TOKEN;
+  if (!adminToken || req.header('x-admin-token') !== adminToken) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
   const store = persistence.load();
   const r = (store.reports || []).find((x: any) => x.id === req.params.reportId);
   if (r) {

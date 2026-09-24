@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DirectMessage } from '../types';
 import { authHeaders } from '../utils/auth';
+import { API } from '../config';
 
-const API = 'http://localhost:4000';
 const POLL_MS = 5000;
 
 interface ChatMessagesApi {

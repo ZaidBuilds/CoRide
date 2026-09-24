@@ -104,6 +104,18 @@ export class ConnectionManager {
     return ConnectionManager.instance;
   }
 
+  /** Account deletion: drop every friendship, block and request touching userId. */
+  public purgeUser(userId: string): void {
+    this.friendships.delete(userId);
+    for (const set of this.friendships.values()) set.delete(userId);
+    this.blocks.delete(userId);
+    for (const set of this.blocks.values()) set.delete(userId);
+    for (const [id, r] of this.requests.entries()) {
+      if (r.fromUserId === userId || r.toUserId === userId) this.requests.delete(id);
+    }
+    this.persistToDisk();
+  }
+
   // ─── Connection Requests ───
 
   public sendRequest(

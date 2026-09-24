@@ -12,6 +12,8 @@ dist/
 .env
 server/.env
 client/.env
+client/.env.*
+!client/.env.example
 *.local
 
 # Runtime data (ephemeral) — keep examples

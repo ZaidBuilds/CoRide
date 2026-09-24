@@ -2,8 +2,8 @@ import { useState, useEffect } from 'react';
 import { ArrowLeft, Unlock, ShieldAlert } from 'lucide-react';
 import { authHeaders } from '../../utils/auth';
 import { triggerHaptic } from '../../utils/nativeBridge';
+import { API } from '../../config';
 
-const API = 'http://localhost:4000';
 
 interface BlockedUser {
   id: string;

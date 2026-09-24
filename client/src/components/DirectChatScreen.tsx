@@ -7,8 +7,8 @@ import { ReportSheet } from './ReportSheet';
 import { enqueueMessage, getQueuedMessages } from '../utils/offlineQueue';
 import { triggerHaptic } from '../utils/nativeBridge';
 import { authHeaders } from '../utils/auth';
+import { API } from '../config';
 
-const API = 'http://localhost:4000';
 
 interface Peer {
   id: string;

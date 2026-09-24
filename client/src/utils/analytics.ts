@@ -1,4 +1,4 @@
-const API = 'http://localhost:4000';
+import { API } from '../config';
 
 export function track(event: string, userId?: string, payload?: Record<string, any>) {
   const uid = userId || (() => {

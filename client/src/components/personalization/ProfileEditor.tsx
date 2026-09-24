@@ -2,8 +2,9 @@ import { useState } from 'react';
 import { X, Save, Sparkles } from 'lucide-react';
 import type { UserProfile } from '../../types';
 import { INTEREST_TAXONOMY } from '../../types';
+import { authHeaders } from '../../utils/auth';
+import { API } from '../../config';
 
-const API = 'http://localhost:4000';
 
 interface Props {
   user: UserProfile;
@@ -30,7 +31,7 @@ export const ProfileEditor: React.FC<Props> = ({ user, onClose, onSaved }) => {
     try {
       const r = await fetch(`${API}/api/profile/${user.id}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({
           pseudonym, bio, collegeOrTag: college, interestTags: tags, languages: langs, vibeTagline: vibe
         })

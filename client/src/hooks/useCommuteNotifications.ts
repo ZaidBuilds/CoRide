@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
+import { API } from '../config';
 
-const API = 'http://localhost:4000';
 const LS_KEY = 'coride_push_prompted';
 const LS_LAST_PUSH = 'coride_last_push_day';
 

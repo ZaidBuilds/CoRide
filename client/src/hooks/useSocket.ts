@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
+import { API } from '../config';
 
-const API = 'http://localhost:4000';
 
 /**
  * Connection lifecycle for the socket. States:

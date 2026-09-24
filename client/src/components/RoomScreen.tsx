@@ -8,8 +8,8 @@ import { ProfileSheet } from './ProfileSheet';
 import { ProfileSheetContent } from './ProfileSheetContent';
 import { ProfileSheetActions } from './ProfileSheetActions';
 import { ReportSheet } from './ReportSheet';
+import { API } from '../config';
 
-const API = 'http://localhost:4000';
 const POLL_INTERVAL_MS = 15000;
 
 interface PresetRoom {

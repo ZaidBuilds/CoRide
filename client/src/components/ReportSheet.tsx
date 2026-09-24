@@ -3,8 +3,8 @@ import { Check } from 'lucide-react';
 import { ProfileSheet } from './ProfileSheet';
 import type { RoomPresenceTraveler } from '../types';
 import { authHeaders } from '../utils/auth';
+import { API } from '../config';
 
-const API = 'http://localhost:4000';
 
 // Values must match the server's REPORT_CATEGORIES exactly.
 const CATEGORIES: { value: string; label: string }[] = [
