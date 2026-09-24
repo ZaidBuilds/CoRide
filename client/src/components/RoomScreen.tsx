@@ -591,7 +591,7 @@ export const RoomScreen: React.FC<Props> = ({
           </div>
         )}
         <p className="type-meta" style={{ color: 'var(--text-muted)', marginTop: 8 }}>
-          You picked this platform. Others see the station and line, never your location.
+          Riders here see your station and line, never your exact location.
         </p>
       </section>
 

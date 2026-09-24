@@ -15,6 +15,7 @@ import { describeContext } from '../utils/commuteContext';
 import type { UserProfile, ContextRoom, RankedTraveler, ContextResult } from '../types';
 import type { LocationContext } from '../hooks/useLocationContext';
 import type { EngagementSnapshot } from '../types/engagement';
+import { presenceRoomId } from '../utils/presenceRoom';
 
 /** CoRide peaks on the evening commute as much as the morning; the greeting follows the clock. */
 function greetingFor(hour: number): string {
@@ -60,14 +61,6 @@ const GAME_TITLES: Record<string, string> = {
 };
 
 const TIER_WORD: Record<string, string> = { active: 'Here now', nearby: 'Nearby', other: 'Earlier' };
-
-/** Presence-room id (`station:line:direction`) for the live context, as RoomScreen expects. */
-function presenceRoomId(room: ContextRoom | null): string | undefined {
-  if (!room?.stationId || !room.lineId || !room.direction) return undefined;
-  const slug = (s: string, max: number) => s.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, max);
-  const id = `${slug(room.stationId, 40)}:${slug(room.lineId, 30)}:${slug(room.direction, 40)}`;
-  return /^[a-z0-9_]{1,40}:[a-z0-9_]{1,30}:[a-z0-9_]{1,40}$/.test(id) ? id : undefined;
-}
 
 function firstName(pseudonym: string): string {
   return pseudonym.split('_')[0] || pseudonym;

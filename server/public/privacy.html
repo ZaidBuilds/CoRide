@@ -18,7 +18,7 @@ explains what we collect, why, and how to delete it.</p>
 <table>
 <tr><th>Data</th><th>Why</th><th>Kept</th></tr>
 <tr><td>Pseudonym, avatar, interest tags, optional bio</td><td>Your public commuter profile shown to other riders</td><td>Until you delete your account</td></tr>
-<tr><td>Approximate / precise location (only while the app is open)</td><td>To detect which station, line and direction you are on. Coordinates are processed in real time and are <strong>not stored</strong> on our servers.</td><td>Not stored</td></tr>
+<tr><td>Approximate / precise location (only while the app is open)</td><td>To detect which station, line and direction you are on. Your last few readings are kept only in server memory, for up to one hour, so detection stays steady between stations. They are <strong>never written to disk, logged or shown to anyone</strong>.</td><td>Up to 1 hour in memory, then discarded</td></tr>
 <tr><td>Current station room (presence)</td><td>To show you as "riding now" to others in the same room</td><td>Expires about 60 seconds after you leave or close the app</td></tr>
 <tr><td>Messages with people you have connected with</td><td>To deliver your chats</td><td>Until either participant deletes their account</td></tr>
 <tr><td>Connections, blocks and saved commutes</td><td>Core app features</td><td>Until you delete your account</td></tr>

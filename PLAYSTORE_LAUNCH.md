@@ -83,7 +83,7 @@ For every later upload, raise `versionCode` in `client/android/app/build.gradle`
 
 | Data type | Collected | Shared | Optional | Purpose |
 |---|---|---|---|---|
-| Location: approximate + precise | Yes (processed, not stored) | No | Yes (manual station picker works without it) | App functionality |
+| Location: approximate + precise | Yes (kept in server memory up to 1 hour, never written to disk) | No | Yes (manual station picker works without it) | App functionality |
 | Personal info: other (pseudonym, bio, interest tags) | Yes | No | No | App functionality |
 | Messages: other in-app messages | Yes | No | Yes | App functionality |
 | App activity: app interactions | Yes | No | No | Analytics |
@@ -91,9 +91,10 @@ For every later upload, raise `versionCode` in `client/android/app/build.gradle`
 
 Encrypted in transit: **Yes** (HTTPS). Users can request deletion: **Yes**.
 
-**Store listing:** app name, short description (80 chars), full description,
-512×512 icon, 1024×500 feature graphic, and at least 2 phone screenshots.
-Say in the description that it's for Delhi Metro and that users are pseudonymous.
+**Store listing:** everything is ready in `store/`:
+- `store/LISTING.md`: app name, short and full description (checked against Play's limits), category, Data safety and content rating answers
+- `store/icon-512.png` and `store/feature-graphic-1024x500.png`
+- `store/screenshots/`: 8 phone screenshots at 1080×1920
 
 ## Phase 4 — Test tracks
 

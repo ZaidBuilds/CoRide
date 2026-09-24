@@ -24,9 +24,9 @@ import { pool } from '../db/pool';
 import { RedisPresence, buildRoomId } from '../services/redisPresence';
 
 const ROOMS = [
-  buildRoomId({ station: 'rajiv_chowk', line: 'blue', direction: 'towards_noida' }),
-  buildRoomId({ station: 'rajiv_chowk', line: 'blue', direction: 'towards_dwarka' }),
-  buildRoomId({ station: 'barakhamba_road', line: 'blue', direction: 'towards_noida' })
+  buildRoomId({ station: 'rajiv_chowk', line: 'blue', direction: 'towards_noida_electronic_city_vaishali' }),
+  buildRoomId({ station: 'rajiv_chowk', line: 'blue', direction: 'towards_dwarka_sector_21' }),
+  buildRoomId({ station: 'barakhamba_road', line: 'blue', direction: 'towards_noida_electronic_city_vaishali' })
 ];
 
 /** 30 distinct travelers — the app's ICP: Delhi campus + young professionals. */

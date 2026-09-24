@@ -48,6 +48,7 @@ import type {
   RankedTraveler
 } from './types';
 import { API } from './config';
+import { presenceRoomId } from './utils/presenceRoom';
 
 /**
  * App shell + navigation.
@@ -574,6 +575,21 @@ export function App() {
   };
 
   // ─── Room upkeep: heartbeat, engagement, ranking ──────────────────────────
+  // Keep the user present in their platform room (station:line:direction) in
+  // the background, so Home's rider count and the Room list agree even for
+  // riders who never open the Room screen. RoomScreen leaves the room when it
+  // closes, so re-join whenever we come back from it.
+  const ambientPresenceId = presenceRoomId(trainRoom) || presenceRoomId(stationRoom);
+  const joinedPresenceRef = useRef<string | null>(null);
+  const inRoomView = view === 'room';
+  useEffect(() => {
+    if (!user || !socketConnected) return;
+    const prev = joinedPresenceRef.current;
+    if (prev && prev !== ambientPresenceId) socket.emit('leave_room', { roomId: prev });
+    if (ambientPresenceId && !inRoomView) socket.emit('join_room', { roomId: ambientPresenceId });
+    joinedPresenceRef.current = ambientPresenceId ?? null;
+  }, [socket, user, socketConnected, ambientPresenceId, inRoomView]);
+
   useEffect(() => {
     if (!user) return;
     let meaningfulSent = false;
@@ -584,6 +600,7 @@ export function App() {
       if (document.visibilityState !== 'visible') return;
       if (stationRoom) socket.emit('heartbeat', { userId: user.id, roomId: stationRoom.id });
       if (trainRoom) socket.emit('heartbeat', { userId: user.id, roomId: trainRoom.id });
+      if (ambientPresenceId) socket.emit('heartbeat', { roomId: ambientPresenceId });
     };
     document.addEventListener('visibilitychange', beat);
     const id = setInterval(() => {
@@ -606,7 +623,7 @@ export function App() {
       }
     }, 90 * 1000);
     return () => { clearInterval(id); clearTimeout(t2); document.removeEventListener('visibilitychange', beat); };
-  }, [socket, user, stationRoom?.id, trainRoom?.id, stationRoom?.userCount, trainRoom?.userCount]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [socket, user, stationRoom?.id, trainRoom?.id, stationRoom?.userCount, trainRoom?.userCount, ambientPresenceId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const ids = [stationRoom?.id, trainRoom?.id].filter(Boolean) as string[];
