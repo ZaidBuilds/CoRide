@@ -238,7 +238,8 @@ export function useChatMessages(
       });
     let cancelled = false;
     let adoptedApplied = false;
-    fetchMessages(false).then(() => {
+    // fetchMessages only sets state after its request resolves.
+    void Promise.resolve().then(() => (cancelled ? false : fetchMessages(false))).then(() => {
       if (cancelled) return;
       markRead();
       adoptedApplied = true;

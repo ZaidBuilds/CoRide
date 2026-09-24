@@ -78,7 +78,7 @@ export const SavedCommutes: React.FC<Props> = ({ userId, onUse }) => {
         </h3>
         <button onClick={()=>setShowAdd(!showAdd)} style={{ fontSize:11, padding:'6px 10px', borderRadius:'var(--radius-full)', background: showAdd?'var(--bg-surface)':'var(--accent-indigo)', color: showAdd?'var(--text-secondary)':'white', border:'1px solid var(--border-subtle)', cursor:'pointer' }}>{showAdd?'Close':'＋ Add'}</button>
       </div>
-      <p style={{ fontSize:11, color:'var(--text-muted)', marginBottom:10 }}>One-tap repeat entry — saves line + station + direction + time. Network grows as you repeat.</p>
+      <p style={{ fontSize:11, color:'var(--text-muted)', marginBottom:10 }}>Save your usual line, station and time to check in with one tap.</p>
 
       {showAdd && (
         <div style={{ display:'flex', flexDirection:'column', gap:8, padding:10, borderRadius:'var(--radius-md)', background:'var(--bg-surface)', border:'1px solid var(--border-subtle)', marginBottom:10 }}>

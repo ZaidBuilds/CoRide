@@ -32,16 +32,20 @@ production application (~day 16) → review (1–7 days).
 ## Phase 1 — Host the backend (you, ~1 day)
 
 1. Deploy `server/` (Dockerfile) to Render, Railway or Fly.io with a **custom HTTPS domain**.
-2. Set env vars:
-   - `AUTH_SECRET`: a long random string (`openssl rand -hex 32`). Changing it later logs everyone out.
-   - `ADMIN_TOKEN`: a random string, for resolving reports.
-   - `REDIS_URL`: a managed Redis (Upstash free tier works). Presence needs it.
-   - **Do not set `DATABASE_URL` yet.** Postgres mode only writes; `load()` returns
-     an empty store, so all data disappears on restart. Use JSON-file mode on a
-     **persistent disk/volume** mounted at `server/dist/data`.
-3. Check `https://<your-api>/privacy` and `/account-deletion` open in a browser.
-4. In `server/public/privacy.html` and `account-deletion.html`, confirm the contact
-   email is the one you want public.
+2. Set env vars (full list with comments in `server/.env.example`):
+   - `NODE_ENV=production`. The server then refuses to start without a strong `AUTH_SECRET`.
+   - `AUTH_SECRET`: at least 32 random characters (`openssl rand -base64 48`). Changing it later logs everyone out.
+   - `ADMIN_TOKEN`: a random string, for moderator routes (`x-admin-token` header).
+   - `REDIS_URL`: a managed Redis (Upstash free tier works). Live presence needs it; without it, room routes return 503 instead of crashing.
+   - Storage, pick one:
+     - `DATABASE_URL` (managed Postgres). State loads at boot, and the server refuses to start if Postgres is unreachable.
+     - `DATA_DIR` on a **persistent disk/volume**.
+
+     Both run as **one instance only**: don't scale to 2+ replicas.
+   - `CORS_ORIGINS`: only needed if you also host the web client. The Android app's origins are always allowed.
+   - Once this build is live on every tester's phone, set `STRICT_AUTH=1`.
+3. Check that `https://<your-api>/healthz`, `/privacy`, `/terms` and `/account-deletion` all respond.
+4. Check that the contact email in those pages is the one you want public.
 
 ## Phase 2 — Build the signed AAB (you, ~1 hour)
 
@@ -104,7 +108,14 @@ Say in the description that it's for Delhi Metro and that users are pseudonymous
 
 - Identity is an anonymous device token. Reinstalling the app loses the account,
   with no way to recover it. Add Google Sign-In or phone OTP before scaling.
-- `/api/commute/patterns*` routes still trust `userId` from the URL or body (low impact: saved commutes only).
-- `/api/context/detect` and `/api/analytics/event` accept any `userId`.
-- There is no moderator screen. Reports are stored and you resolve them with `curl -H "x-admin-token: …"`.
-- JSON-file persistence is single-instance only. Finish the Postgres `load()` before running more than one server.
+- **Android Back button** closes the app from every screen until you run
+  `cd client && npm i @capacitor/app && npx cap sync android`. The back handling
+  is already written; the plugin switches it on.
+- **Launcher icon and splash** are still Capacitor defaults. Generate them with
+  `npx @capacitor/assets generate` before the store listing.
+- There is no moderator screen. Reports are stored, and you resolve them with `curl -H "x-admin-token: …"`.
+- Room chat in a live room isn't stored, so people who join late see an empty chat.
+  DMs load the last 50 messages, with no paging yet.
+- No "seen" receipts in DMs yet.
+- One server instance only (both storage modes).
+- Check the Safety Centre helpline numbers (112, 1091, DMRC 155370, CISF 155655) before launch.

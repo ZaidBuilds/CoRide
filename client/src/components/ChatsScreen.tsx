@@ -107,7 +107,8 @@ export const ChatsScreen: React.FC<Props> = ({ friends, onSelect, socket = null 
 
   // Load on mount, refresh while visible, and whenever the page comes back.
   useEffect(() => {
-    load();
+    // All state updates in load() happen after its fetch resolves.
+    void Promise.resolve().then(load);
     const id = setInterval(() => {
       if (document.visibilityState === 'visible') load();
     }, REFRESH_MS);
@@ -147,7 +148,7 @@ export const ChatsScreen: React.FC<Props> = ({ friends, onSelect, socket = null 
   const totalUnread = rows.reduce((n, c) => n + c.unread, 0);
 
   return (
-    <div className="animate-fade-in" style={{ paddingBottom: 86 }}>
+    <div className="animate-fade-in">
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 12, minHeight: 48 }}>
         <h1 style={{ fontSize: 24, fontWeight: 900, margin: 0, color: 'var(--text-primary)' }}>
           Chats
@@ -176,7 +177,7 @@ export const ChatsScreen: React.FC<Props> = ({ friends, onSelect, socket = null 
         >
           <WifiOff size={15} style={{ color: 'var(--status-warning)', flexShrink: 0 }} />
           <span style={{ flex: 1 }}>{error}</span>
-          <button onClick={manualRefresh} className="press" style={{ minHeight: 40, padding: '0 10px', background: 'none', border: 'none', color: 'var(--accent-purple-text)', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+          <button onClick={manualRefresh} className="press" style={{ minHeight: 40, padding: '0 10px', background: 'none', border: 'none', color: 'var(--accent-text)', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
             Retry
           </button>
         </div>
@@ -208,7 +209,7 @@ export const ChatsScreen: React.FC<Props> = ({ friends, onSelect, socket = null 
             aria-hidden="true"
             style={{
               width: 56, height: 56, borderRadius: '50%', margin: '0 auto 12px',
-              background: 'var(--bg-surface-raised)', color: 'var(--accent-purple-text)',
+              background: 'var(--bg-surface-raised)', color: 'var(--accent-text)',
               display: 'flex', alignItems: 'center', justifyContent: 'center'
             }}
           >
@@ -261,7 +262,7 @@ export const ChatsScreen: React.FC<Props> = ({ friends, onSelect, socket = null 
                         {name}
                       </span>
                       {c.lastMessage && (
-                        <span style={{ fontSize: 12, flexShrink: 0, fontWeight: unread ? 700 : 500, color: unread ? 'var(--accent-purple-text)' : 'var(--text-muted)' }}>
+                        <span style={{ fontSize: 12, flexShrink: 0, fontWeight: unread ? 700 : 500, color: unread ? 'var(--accent-text)' : 'var(--text-muted)' }}>
                           {relativeTime(c.lastMessage.timestamp)}
                         </span>
                       )}
@@ -301,7 +302,7 @@ export const ChatsScreen: React.FC<Props> = ({ friends, onSelect, socket = null 
       )}
 
       <div style={{ marginTop: 14, background: 'var(--bg-card)', border: '1px solid var(--border-card)', borderRadius: 'var(--radius-lg)', padding: 12, display: 'flex', gap: 10, alignItems: 'center' }}>
-        <div aria-hidden="true" style={{ width: 36, height: 36, borderRadius: '50%', background: 'var(--bg-surface-raised)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--accent-purple-text)', flexShrink: 0 }}>
+        <div aria-hidden="true" style={{ width: 36, height: 36, borderRadius: '50%', background: 'var(--bg-surface-raised)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--accent-text)', flexShrink: 0 }}>
           <Lock size={16} />
         </div>
         <div>

@@ -5,7 +5,8 @@ import type { UserProfile, RoomPresenceTraveler } from '../types';
 import { useChatMessages, useKeyboardSafeHeight, MAX_MESSAGE_LENGTH } from '../hooks/useChatMessages';
 import { MessageList, ChatComposer, type ChatListItem } from './MessageList';
 import { ReportSheet } from './ReportSheet';
-import { triggerHaptic } from '../utils/nativeBridge';
+import { triggerHaptic, pushBackHandler } from '../utils/nativeBridge';
+import { Toast } from './ui/Toast';
 import { authHeaders } from '../utils/auth';
 import { API } from '../config';
 
@@ -33,22 +34,34 @@ export function DirectChatScreen({ currentUser, peer, onBack, onBlocked, socket 
   const [showBlockConfirm, setShowBlockConfirm] = useState(false);
   const [blocking, setBlocking] = useState(false);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const dismissToast = useCallback(() => setToastMsg(null), []);
   const [online, setOnline] = useState(() => typeof navigator === 'undefined' ? true : navigator.onLine);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
-  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const blockedViaReport = useRef(false);
   const keyboardHeight = useKeyboardSafeHeight();
 
   const name = peer.pseudonym || peer.username?.replace(/^@/, '') || 'Friend';
   const initials = name.slice(0, 2).toUpperCase();
 
-  const showToast = useCallback((msg: string) => {
-    setToastMsg(msg);
-    if (toastTimer.current) clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToastMsg(null), 3000);
-  }, []);
-  useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []);
+  const showToast = useCallback((msg: string) => setToastMsg(msg), []);
+
+  // A blocked thread is over: let the parent close it (and refresh its lists)
+  // when it handles blocks, otherwise just go back.
+  const leaveAfterBlock = useCallback(() => {
+    if (onBlocked) onBlocked(peer.id);
+    else onBack?.();
+  }, [onBlocked, onBack, peer.id]);
+
+  // Android back closes the menu / dialog first.
+  useEffect(() => {
+    if (!showMenu) return;
+    return pushBackHandler(() => { setShowMenu(false); return true; });
+  }, [showMenu]);
+  useEffect(() => {
+    if (!showBlockConfirm) return;
+    return pushBackHandler(() => { setShowBlockConfirm(false); return true; });
+  }, [showBlockConfirm]);
 
   useEffect(() => {
     const on = () => setOnline(true);
@@ -112,8 +125,7 @@ export function DirectChatScreen({ currentUser, peer, onBack, onBlocked, socket 
       });
       if (!res.ok) throw new Error();
       setShowBlockConfirm(false);
-      onBlocked?.(peer.id);
-      onBack?.();
+      leaveAfterBlock();
     } catch {
       showToast(`Couldn't block ${name}. Try again.`);
     } finally {
@@ -139,7 +151,7 @@ export function DirectChatScreen({ currentUser, peer, onBack, onBlocked, socket 
           alignItems: 'center',
           gap: 8,
           padding: '8px 8px 8px 4px',
-          paddingTop: 'calc(8px + env(safe-area-inset-top))',
+          paddingTop: 'calc(8px + var(--safe-top))',
           borderRadius: 0,
           borderLeft: 'none',
           borderRight: 'none',
@@ -238,7 +250,7 @@ export function DirectChatScreen({ currentUser, peer, onBack, onBlocked, socket 
             {!online ? "You're offline — messages will send when you reconnect." : error}
           </span>
           {online && (
-            <button onClick={refresh} className="press" aria-label="Retry loading messages" style={{ ...menuItem, width: 'auto', padding: '0 12px', color: 'var(--accent-purple-text)' }}>
+            <button onClick={refresh} className="press" aria-label="Retry loading messages" style={{ ...menuItem, width: 'auto', padding: '0 12px', color: 'var(--accent-text)' }}>
               <RefreshCw size={15} /> Retry
             </button>
           )}
@@ -306,10 +318,7 @@ export function DirectChatScreen({ currentUser, peer, onBack, onBlocked, socket 
         onBlocked={() => { blockedViaReport.current = true; }}
         onReported={() => {
           setShowReportSheet(false);
-          if (blockedViaReport.current) {
-            onBlocked?.(peer.id);
-            onBack?.();
-          }
+          if (blockedViaReport.current) leaveAfterBlock();
         }}
       />
 
@@ -393,6 +402,9 @@ export function DirectChatScreen({ currentUser, peer, onBack, onBlocked, socket 
                 disabled={blocking}
                 className="press btn-danger"
                 style={{
+                  background: 'var(--danger-fill)',
+                  color: '#fff',
+                  border: 'none',
                   flex: 1,
                   minHeight: 48,
                   borderRadius: 'var(--radius-pill)',
@@ -408,30 +420,7 @@ export function DirectChatScreen({ currentUser, peer, onBack, onBlocked, socket 
         </div>
       )}
 
-      {/* Toast */}
-      {toastMsg && (
-        <div
-          role="status"
-          aria-live="polite"
-          className="glass animate-fade-in"
-          style={{
-            position: 'fixed',
-            bottom: 'calc(88px + env(safe-area-inset-bottom))',
-            left: '50%',
-            transform: 'translateX(-50%)',
-            padding: '10px 18px',
-            borderRadius: 'var(--radius-full)',
-            color: 'var(--text-primary)',
-            fontSize: 14,
-            fontWeight: 700,
-            zIndex: 110,
-            boxShadow: 'var(--shadow-lg)',
-            maxWidth: 'calc(100vw - 32px)'
-          }}
-        >
-          {toastMsg}
-        </div>
-      )}
+      <Toast message={toastMsg} onDismiss={dismissToast} aboveNav={false} />
     </div>
   );
 }

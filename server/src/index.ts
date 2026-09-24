@@ -1624,7 +1624,9 @@ io.on('connection', (socket) => {
       socket.emit('error_message', { error: 'Join the room to start a game.' });
       return;
     }
-    const chk = moderation.preCheck(profile.id, 'message', type);
+    // Mute + rate limit only: the game type isn't user text, so the duplicate-
+    // message spam filter would block starting the same game a third time.
+    const chk = moderation.preCheck(profile.id, 'message');
     if (!chk.allowed) return socket.emit('moderation_action', { type: 'rate_limited', message: chk.message });
     const r = engagement.createGame(roomId, type as any, profile);
     if (!r.ok) return socket.emit('error_message', { error: r.error });

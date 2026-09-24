@@ -172,7 +172,7 @@ export function MessageList({
               ...(m.accent ? {
                 background: 'var(--bg-surface-raised)',
                 border: '1px solid var(--border-purple)',
-                color: 'var(--accent-purple-text)'
+                color: 'var(--accent-text)'
               } : {})
             }}
           >
@@ -357,7 +357,7 @@ const chipBtn: React.CSSProperties = {
   padding: '0 12px',
   background: 'none',
   border: 'none',
-  color: 'var(--accent-purple-text)',
+  color: 'var(--accent-text)',
   fontSize: 13,
   fontWeight: 700,
   display: 'inline-flex',
@@ -436,7 +436,7 @@ export function ChatComposer({
         gap: 8,
         alignItems: 'flex-end',
         padding: '8px 8px 8px 12px',
-        paddingBottom: safeAreaBottom ? 'calc(8px + env(safe-area-inset-bottom))' : 8,
+        paddingBottom: safeAreaBottom ? 'calc(8px + var(--safe-bottom))' : 8,
         borderTop: '1px solid var(--border-card)',
         background: 'var(--bg-elevated)',
         flexShrink: 0

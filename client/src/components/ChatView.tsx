@@ -254,7 +254,7 @@ export const ChatView: React.FC<Props> = ({ room, currentUser, onSendMessage, on
         style={{
           display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0,
           padding: '8px 12px 8px 4px',
-          paddingTop: 'calc(8px + env(safe-area-inset-top))',
+          paddingTop: 'calc(8px + var(--safe-top))',
           borderRadius: 0, borderLeft: 'none', borderRight: 'none', borderTop: 'none',
           borderBottom: '1px solid var(--border-card)'
         }}
@@ -299,7 +299,7 @@ export const ChatView: React.FC<Props> = ({ room, currentUser, onSendMessage, on
             border: '1px solid var(--border-purple)', display: 'flex', gap: 8, alignItems: 'center'
           }}
         >
-          <Pin size={16} aria-hidden="true" style={{ color: 'var(--accent-purple-text)', flexShrink: 0 }} />
+          <Pin size={16} aria-hidden="true" style={{ color: 'var(--accent-text)', flexShrink: 0 }} />
           <div style={{ flex: 1, fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.4, padding: '6px 0' }}>
             <strong style={{ color: 'var(--text-primary)' }}>Room rules:</strong> be kind, no spam, and don't share personal info.
           </div>
@@ -391,7 +391,7 @@ export const ChatView: React.FC<Props> = ({ room, currentUser, onSendMessage, on
 
       <div
         style={{
-          padding: '2px 0 4px', paddingBottom: keyboardHeight ? 4 : 'calc(4px + env(safe-area-inset-bottom))',
+          padding: '2px 0 4px', paddingBottom: keyboardHeight ? 4 : 'calc(4px + var(--safe-bottom))',
           textAlign: 'center', fontSize: 11, color: 'var(--text-muted)', background: 'var(--bg-elevated)',
           display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, flexShrink: 0
         }}

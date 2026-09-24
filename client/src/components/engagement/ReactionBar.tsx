@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { SmilePlus } from 'lucide-react';
+import { pushBackHandler } from '../../utils/nativeBridge';
 
 /** Must match the server's allow-list in the reaction_toggle handler. */
 const EMOJIS = ['❤️','😂','🔥','👏','😮','🙏','👍','☕','🎧','🚇'] as const;
@@ -43,7 +44,12 @@ export const ReactionBar: React.FC<Props> = ({ counts = {}, myReactions = [], on
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
     document.addEventListener('pointerdown', onDown);
     document.addEventListener('keydown', onKey);
-    return () => { document.removeEventListener('pointerdown', onDown); document.removeEventListener('keydown', onKey); };
+    const popBack = pushBackHandler(() => { close(); return true; });
+    return () => {
+      document.removeEventListener('pointerdown', onDown);
+      document.removeEventListener('keydown', onKey);
+      popBack();
+    };
   }, [open, onDismiss]);
 
   return (

@@ -98,7 +98,7 @@ export const WordChainPanel: React.FC<Props> = ({ game, currentUser, socket, roo
               gap: 6,
               fontSize: 12,
               fontWeight: 700,
-              color: turn ? 'var(--accent-purple-text)' : 'var(--text-secondary)'
+              color: turn ? 'var(--accent-text)' : 'var(--text-secondary)'
             }}>
               <span aria-hidden="true" style={{ width: 18, height: 18, borderRadius: 6, background: p.avatarBg, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 11 }}>{p.pseudonym[0]}</span>
               {p.pseudonym}

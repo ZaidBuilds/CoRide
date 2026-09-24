@@ -56,7 +56,7 @@ export const LiveRoomHeader: React.FC<Props> = ({ room, compact }) => {
           display: 'inline-flex', alignItems: 'center', gap: 8,
           padding: '6px 12px', borderRadius: 'var(--radius-full)',
           background: 'var(--bg-surface)', border: '1px solid var(--border-purple)',
-          fontSize: 12, fontWeight: 700, color: 'var(--accent-purple-text)'
+          fontSize: 12, fontWeight: 700, color: 'var(--accent-text)'
         }}
       >
         <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: '50%', background: room.lineColor || 'var(--accent-purple)', display: 'inline-block' }} />

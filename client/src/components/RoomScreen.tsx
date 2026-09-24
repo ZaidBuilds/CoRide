@@ -10,6 +10,8 @@ import { ProfileSheetContent } from './ProfileSheetContent';
 import { ProfileSheetActions } from './ProfileSheetActions';
 import { ReportSheet } from './ReportSheet';
 import { ChatView } from './ChatView';
+import { Toast } from './ui/Toast';
+import { pushBackHandler } from '../utils/nativeBridge';
 import { API } from '../config';
 import { getLineById, getStationById } from '../data/metroData';
 
@@ -118,12 +120,8 @@ export const RoomScreen: React.FC<Props> = ({
   const [sheetTraveler, setSheetTraveler] = useState<RoomPresenceTraveler | null>(null);
   const [reportTraveler, setReportTraveler] = useState<RoomPresenceTraveler | null>(null);
   const [toast, setToast] = useState<string | null>(null);
-  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const showToast = useCallback((msg: string) => {
-    setToast(msg);
-    if (toastTimer.current) clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToast(null), 3000);
-  }, []);
+  const showToast = useCallback((msg: string) => setToast(msg), []);
+  const dismissToast = useCallback(() => setToast(null), []);
 
   const handleBlock = async (traveler: RoomPresenceTraveler) => {
     const name = traveler.pseudonym || traveler.username.replace(/^@/, '');
@@ -140,7 +138,7 @@ export const RoomScreen: React.FC<Props> = ({
       if (!res.ok) throw new Error();
       showToast(`Blocked ${name}`);
     } catch {
-      showToast(`Couldn't block ${name} — try again`);
+      showToast(`Couldn't block ${name}. Try again.`);
       fetchRoomData(activeRoomId, true); // restore the list if the block failed
     }
   };
@@ -353,6 +351,12 @@ export const RoomScreen: React.FC<Props> = ({
     };
   }, [socket, activeRoomId, currentUser?.id]);
 
+  // Android back / browser back closes the chat before leaving the room.
+  useEffect(() => {
+    if (!chatOpen) return;
+    return pushBackHandler(() => { setChatOpen(false); return true; });
+  }, [chatOpen]);
+
   const openChat = () => {
     setUnseenChat(0);
     setChatOpen(true);
@@ -412,7 +416,7 @@ export const RoomScreen: React.FC<Props> = ({
   };
 
   return (
-    <div className="animate-fade-in" style={{ paddingBottom: 86 }}>
+    <div className="animate-fade-in">
       {/* Nav bar — large title collapses into the compact one on scroll */}
       <div className={`nav-bar${collapsed ? ' collapsed' : ''}`}>
         <div className="nav-bar-top">
@@ -503,7 +507,7 @@ export const RoomScreen: React.FC<Props> = ({
                 <span className="row-sub">{preset.direction}</span>
               </span>
               {isActive && (
-                <Check size={16} style={{ color: 'var(--accent-purple-text)', flexShrink: 0 }} />
+                <Check size={16} style={{ color: 'var(--accent-text)', flexShrink: 0 }} />
               )}
             </button>
           );
@@ -552,7 +556,7 @@ export const RoomScreen: React.FC<Props> = ({
               </span>
             </div>
             <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 2, display: 'flex', alignItems: 'center', gap: 4 }}>
-              <MapPin size={13} style={{ color: 'var(--accent-purple-text)' }} />
+              <MapPin size={13} style={{ color: 'var(--accent-text)' }} />
               {activePreset.direction}
             </div>
           </div>
@@ -651,7 +655,7 @@ export const RoomScreen: React.FC<Props> = ({
       {/* Section Heading with count */}
       <div className="section-head" style={{ marginBottom: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <Users size={16} style={{ color: 'var(--accent-purple-text)' }} />
+          <Users size={16} style={{ color: 'var(--accent-text)' }} />
           <h3>Travelers here{data ? ` (${data.travelers.length})` : ''}</h3>
         </div>
         <button
@@ -791,7 +795,7 @@ export const RoomScreen: React.FC<Props> = ({
                         style={{
                           fontSize: 10,
                           fontWeight: 700,
-                          color: 'var(--accent-purple-text)',
+                          color: 'var(--accent-text)',
                           background: 'var(--bg-surface)',
                           padding: '1px 6px',
                           borderRadius: 999,
@@ -947,21 +951,8 @@ export const RoomScreen: React.FC<Props> = ({
         }}
       />
 
-      {/* Confirmation toast — glass pill, announced to screen readers */}
-      {toast && (
-        <div
-          role="status"
-          aria-live="polite"
-          className="glass animate-fade-in"
-          style={{
-            position: 'fixed', bottom: 'calc(96px + env(safe-area-inset-bottom))', left: '50%',
-            transform: 'translateX(-50%)', padding: '10px 18px', borderRadius: 'var(--radius-full)',
-            color: 'var(--text-primary)', fontSize: 13, fontWeight: 700, zIndex: 70, whiteSpace: 'nowrap'
-          }}
-        >
-          {toast}
-        </div>
-      )}
+      {/* Confirmation toast — hidden while the full-screen chat is up */}
+      {!chatOpen && <Toast message={toast} onDismiss={dismissToast} />}
     </div>
   );
 };

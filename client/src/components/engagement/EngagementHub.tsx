@@ -140,7 +140,7 @@ export const EngagementHub: React.FC<Props> = ({ room, snapshot, currentUser, so
         <>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <h3 style={{ fontSize: 15, fontWeight: 900, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 6, margin: 0 }}>
-              <Gamepad2 size={17} aria-hidden="true" style={{ color: 'var(--accent-purple-text)' }} /> Quick games
+              <Gamepad2 size={17} aria-hidden="true" style={{ color: 'var(--accent-text)' }} /> Quick games
             </h3>
             <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{room.userCount} in room</span>
           </div>
