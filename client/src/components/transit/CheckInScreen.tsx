@@ -247,7 +247,8 @@ export const CheckInScreen: React.FC<CheckInScreenProps> = ({
                     <span lang="hi" className="type-hi type-meta" style={{ display: 'block', color: 'var(--text-muted)' }}>{selectedStation.hindiName}</span>
                   )}
                   {stationLines.length > 1 && (
-                    <span style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 8 }}>
+                    <span style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 4, marginTop: 8 }}>
+                      <span className="type-meta" style={{ color: 'var(--text-muted)', marginRight: 2 }}>Change for</span>
                       {stationLines.slice(1).map(l => <LinePill key={l.id} line={l} size="sm" />)}
                     </span>
                   )}

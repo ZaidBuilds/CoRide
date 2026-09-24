@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Gamepad2, Users, Zap, Timer, Trophy, LogOut, RotateCcw } from 'lucide-react';
+import type { ReactNode } from 'react';
+import {
+  ArrowCounterClockwiseIcon, ChatTextIcon, LightningIcon, QuestionIcon, SignOutIcon, TextAaIcon, TimerIcon, TrophyIcon, UsersIcon
+} from '@phosphor-icons/react';
 import type { EngagementSnapshot, GameType } from '../../types/engagement';
 import type { UserProfile, ContextRoom } from '../../types';
 import type { Socket } from 'socket.io-client';
@@ -8,15 +11,17 @@ import { TwentyQuestionsPanel } from './TwentyQuestionsPanel';
 import { TriviaPanel } from './TriviaPanel';
 import { PromptWall } from './PromptWall';
 import { ReactionBar } from './ReactionBar';
+import { Avatar } from '../ui/Avatar';
+import { Button } from '../ui/Button';
+import { Card } from '../ui/Card';
 
-type GameCard = { type: GameType; label: string; hindi: string; icon: string; desc: string; time: string; players: string; color: string };
+type GameCard = { type: GameType; label: string; hindi: string; icon: ReactNode; desc: string; time: string; players: string };
 
-// Line colours double as game accents — they're defined for both themes.
 const CARDS: GameCard[] = [
-  { type: 'word_chain', label: 'Word Chain', hindi: 'शब्द श्रृंखला', icon: '🔤', desc: 'Last letter → new word', time: '2–4 min', players: '2–8', color: 'var(--line-green)' },
-  { type: 'twenty_q', label: '20 Questions', hindi: '20 सवाल', icon: '❓', desc: 'Guess the secret', time: '3–5 min', players: '2–6', color: 'var(--line-yellow)' },
-  { type: 'trivia', label: 'Fast Trivia', hindi: 'त्वरित प्रश्न', icon: '⚡', desc: '5 questions · 15s each', time: '2 min', players: '1–8', color: 'var(--line-violet)' },
-  { type: 'prompt', label: 'Prompt Wall', hindi: 'विचार दीवार', icon: '💬', desc: 'Share in 40 characters', time: '4 min', players: '2+', color: 'var(--line-pink)' }
+  { type: 'word_chain', label: 'Word Chain', hindi: 'शब्द श्रृंखला', icon: <TextAaIcon size={22} />, desc: 'Last letter starts the next word', time: '2–4 min', players: '2–8' },
+  { type: 'twenty_q', label: '20 Questions', hindi: '20 सवाल', icon: <QuestionIcon size={22} />, desc: 'Yes or no questions to guess the secret', time: '3–5 min', players: '2–6' },
+  { type: 'trivia', label: 'Fast Trivia', hindi: 'त्वरित प्रश्न', icon: <LightningIcon size={22} />, desc: '5 questions, 15s each', time: '2 min', players: '1–8' },
+  { type: 'prompt', label: 'Prompt Wall', hindi: 'विचार दीवार', icon: <ChatTextIcon size={22} />, desc: 'Answer a prompt in 40 characters', time: '4 min', players: '2+' }
 ];
 
 const GAME_LABEL: Record<GameType, string> = {
@@ -63,7 +68,7 @@ export const EngagementHub: React.FC<Props> = ({ room, snapshot, currentUser, so
     const onMod = (p: { message?: string }) => fail(p?.message || 'Slow down a little and try again.');
     socket.on('error_message', onErr);
     socket.on('moderation_action', onMod);
-    const t = setTimeout(() => fail('No response — check your connection and try again.'), START_TIMEOUT_MS);
+    const t = setTimeout(() => fail('No response. Check your connection and try again.'), START_TIMEOUT_MS);
     return () => {
       clearTimeout(t);
       socket.off('error_message', onErr);
@@ -90,38 +95,46 @@ export const EngagementHub: React.FC<Props> = ({ room, snapshot, currentUser, so
     .filter(([, ids]) => ids.includes(currentUser.id))
     .map(([e]) => e);
 
+  const liveGame = active && active.status !== 'finished';
+
   return (
-    <section aria-label="Room activities" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+    <section aria-label="Room activities" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       {/* Leaderboard strip */}
       {snapshot && snapshot.leaderboard.length > 0 && (
         <div
           aria-label="Top players in this room"
-          style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 'var(--radius-md)', background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', overflowX: 'auto' }}
+          role="group"
+          style={{ display: 'flex', alignItems: 'center', gap: 8, overflowX: 'auto', scrollbarWidth: 'none', paddingBottom: 2 }}
         >
-          <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 800, display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
-            <Trophy size={13} aria-hidden="true" /> Top
+          <span className="type-meta" style={{ color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+            <TrophyIcon size={16} aria-hidden="true" /> Top
           </span>
-          {snapshot.leaderboard.slice(0, 5).map(p => (
-            <span
-              key={p.userId}
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 10px', borderRadius: 'var(--radius-full)',
-                background: 'var(--bg-elevated)',
-                border: `1px solid ${p.userId === currentUser.id ? 'var(--accent-purple)' : 'var(--border-subtle)'}`,
-                fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap', color: 'var(--text-primary)'
-              }}
-            >
-              <span aria-hidden="true" style={{ width: 16, height: 16, borderRadius: 4, background: p.avatarBg, display: 'inline-block' }} />
-              {p.pseudonym} <span style={{ color: 'var(--text-muted)' }}>{p.score}</span>
-            </span>
-          ))}
+          {snapshot.leaderboard.slice(0, 5).map(p => {
+            const me = p.userId === currentUser.id;
+            return (
+              <span
+                key={p.userId}
+                className="type-label"
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 12px 4px 4px', borderRadius: 'var(--radius-pill)',
+                  background: me ? 'var(--ink)' : 'var(--bg-surface)',
+                  color: me ? 'var(--ink-inverse)' : 'var(--text-primary)',
+                  whiteSpace: 'nowrap', flexShrink: 0
+                }}
+              >
+                <Avatar name={p.pseudonym} seed={p.userId} bg={p.avatarBg} size={24} />
+                {me ? 'You' : p.pseudonym}
+                <span className="tnum" style={{ opacity: 0.72 }}>{p.score}</span>
+              </span>
+            );
+          })}
         </div>
       )}
 
       {/* Quick reaction to the room */}
-      <div style={{ padding: '10px 12px', borderRadius: 'var(--radius-lg)', background: 'var(--bg-card)', border: '1px solid var(--border-card)' }}>
-        <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-          <Zap size={14} aria-hidden="true" style={{ color: 'var(--status-warning)' }} /> React to the room
+      <Card padding="12px 16px">
+        <div className="type-label" style={{ color: 'var(--text-secondary)', marginBottom: 6 }}>
+          React to the room
         </div>
         <ReactionBar
           targetId={room.id}
@@ -131,70 +144,77 @@ export const EngagementHub: React.FC<Props> = ({ room, snapshot, currentUser, so
           myReactions={myRoomReactions}
           onToggle={(emoji) => onReaction(room.id, emoji, 'profile', room.id)}
         />
-        {snapshot?.activityFeed.slice(-3).reverse().map(a => (
-          <div key={a.id} style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>• {a.text}</div>
-        ))}
-      </div>
+        {snapshot && snapshot.activityFeed.length > 0 && (
+          <ul style={{ listStyle: 'none', margin: '12px 0 0', padding: '8px 0 0', borderTop: '1px solid var(--border-subtle)', display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {snapshot.activityFeed.slice(-3).reverse().map(a => (
+              <li key={a.id} className="type-meta" style={{ color: 'var(--text-muted)' }}>{a.text}</li>
+            ))}
+          </ul>
+        )}
+      </Card>
 
       {!showingGame ? (
         <>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <h3 style={{ fontSize: 15, fontWeight: 900, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 6, margin: 0 }}>
-              <Gamepad2 size={17} aria-hidden="true" style={{ color: 'var(--accent-text)' }} /> Quick games
-            </h3>
-            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{room.userCount} in room</span>
-          </div>
-          <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '-6px 0 0' }}>
-            Ice-breakers for when the chat is quiet. Learn in seconds, done in a few minutes.
+          <p className="type-meta" style={{ color: 'var(--text-secondary)' }}>
+            Ice-breakers for a quiet ride. Learn in seconds, done in a few minutes.
+            {room.userCount > 0 && <span className="tnum"> {room.userCount} here now.</span>}
           </p>
 
           {!connected && (
-            <div role="status" style={{ fontSize: 13, color: 'var(--text-secondary)', padding: '8px 12px', borderRadius: 'var(--radius-md)', background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)' }}>
-              Games need a live connection. Reconnecting…
+            <div role="status" className="type-meta" style={{ color: 'var(--text-secondary)', padding: '12px 16px', borderRadius: 'var(--radius-card)', background: 'var(--bg-surface)', boxShadow: 'inset 4px 0 0 var(--status-warn)' }}>
+              Games need a live connection. Reconnecting.
             </div>
           )}
           {startError && (
-            <div role="alert" style={{ fontSize: 13, color: 'var(--status-danger)', padding: '8px 12px', borderRadius: 'var(--radius-md)', background: 'var(--bg-surface)', border: '1px solid var(--status-danger)' }}>
+            <div role="alert" className="type-meta" style={{ color: 'var(--text-primary)', padding: '12px 16px', borderRadius: 'var(--radius-card)', background: 'var(--bg-surface)', boxShadow: 'inset 4px 0 0 var(--status-danger)' }}>
               {startError}
             </div>
           )}
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
             {CARDS.map(c => {
               const isStarting = starting === c.type;
+              const inert = !connected || !!starting;
               return (
                 <button
                   key={c.type}
+                  type="button"
                   onClick={() => create(c.type)}
-                  disabled={!connected || !!starting}
+                  disabled={inert}
                   aria-label={`Start ${c.label}: ${c.desc}, ${c.players} players, about ${c.time}`}
                   aria-busy={isStarting || undefined}
-                  className="press"
+                  className="card pressable"
                   style={{
                     textAlign: 'left',
-                    padding: 12,
-                    minHeight: 132,
-                    borderRadius: 'var(--radius-lg)',
-                    background: 'var(--bg-surface)',
-                    border: '1px solid var(--border-subtle)',
+                    minHeight: 148,
+                    border: 'none',
                     color: 'var(--text-primary)',
-                    cursor: !connected || starting ? 'default' : 'pointer',
-                    opacity: !connected || (starting && !isStarting) ? 0.55 : 1,
+                    font: 'inherit',
+                    cursor: inert ? 'default' : 'pointer',
+                    opacity: !connected || (starting && !isStarting) ? 0.5 : 1,
                     display: 'flex',
                     flexDirection: 'column',
-                    gap: 4,
-                    position: 'relative',
-                    overflow: 'hidden'
+                    alignItems: 'flex-start',
+                    gap: 2
                   }}
                 >
-                  <span aria-hidden="true" style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: c.color }} />
-                  <span aria-hidden="true" style={{ fontSize: 22 }}>{c.icon}</span>
-                  <span style={{ fontSize: 14, fontWeight: 800, lineHeight: 1.2 }}>{isStarting ? 'Starting…' : c.label}</span>
-                  <span lang="hi" style={{ fontSize: 12, color: 'var(--text-muted)' }}>{c.hindi}</span>
-                  <span style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.3 }}>{c.desc}</span>
-                  <span aria-hidden="true" style={{ display: 'flex', gap: 8, marginTop: 'auto', fontSize: 12, color: 'var(--text-muted)' }}>
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}><Users size={11} /> {c.players}</span>
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}><Timer size={11} /> {c.time}</span>
+                  <span
+                    aria-hidden="true"
+                    style={{
+                      width: 40, height: 40, borderRadius: 'var(--radius-squircle)', marginBottom: 10,
+                      background: isStarting ? 'var(--ink)' : 'var(--bg-tonal)',
+                      color: isStarting ? 'var(--ink-inverse)' : 'var(--text-primary)',
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center'
+                    }}
+                  >
+                    {c.icon}
+                  </span>
+                  <span className="type-label" style={{ fontSize: 15 }}>{isStarting ? 'Starting' : c.label}</span>
+                  <span lang="hi" className="type-meta" style={{ color: 'var(--text-muted)' }}>{c.hindi}</span>
+                  <span className="type-meta" style={{ color: 'var(--text-secondary)', marginTop: 4 }}>{c.desc}</span>
+                  <span aria-hidden="true" className="type-meta tnum" style={{ display: 'flex', gap: 10, marginTop: 'auto', paddingTop: 8, color: 'var(--text-muted)' }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><UsersIcon size={14} /> {c.players}</span>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><TimerIcon size={14} /> {c.time}</span>
                   </span>
                 </button>
               );
@@ -202,31 +222,30 @@ export const EngagementHub: React.FC<Props> = ({ room, snapshot, currentUser, so
           </div>
         </>
       ) : (
-        <div className="glass-panel" style={{ padding: 14, borderRadius: 'var(--radius-lg)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 10 }}>
-            <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--text-muted)', letterSpacing: '0.04em', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span
-                aria-hidden="true"
-                style={{ width: 7, height: 7, borderRadius: '50%', background: active.status === 'finished' ? 'var(--presence-other)' : 'var(--presence-active)' }}
-              />
-              {active.status === 'finished' ? 'Finished' : 'Live'} · {active.players.length} playing
+        <Card>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 12 }}>
+            <span className="type-meta tnum" style={{ fontWeight: 560, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 8 }}>
+              {liveGame
+                ? <span className="live-dot pulse" aria-hidden="true" />
+                : <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--text-muted)' }} />}
+              {liveGame ? 'Live' : 'Finished'} · {active.players.length} playing
             </span>
             <div style={{ display: 'flex', gap: 6 }}>
               {active.status === 'finished' ? (
-                <button onClick={() => setDismissedGameId(active.gameId)} className="btn-primary press" style={gameBtn}>
-                  <RotateCcw size={15} aria-hidden="true" /> New game
-                </button>
+                <Button type="button" variant="secondary" size="sm" icon={<ArrowCounterClockwiseIcon size={18} />} onClick={() => setDismissedGameId(active.gameId)}>
+                  New game
+                </Button>
               ) : (
                 <>
                   {!isInGame && (
-                    <button onClick={join} disabled={!connected} className="btn-primary press" style={gameBtn}>
+                    <Button type="button" variant="secondary" size="sm" onClick={join} disabled={!connected}>
                       Join
-                    </button>
+                    </Button>
                   )}
                   {isInGame && (
-                    <button onClick={leave} className="btn-secondary press" style={gameBtn} aria-label={`Leave ${GAME_LABEL[active.type]}`}>
-                      <LogOut size={15} aria-hidden="true" /> Leave
-                    </button>
+                    <Button type="button" variant="tonal" size="sm" icon={<SignOutIcon size={18} />} onClick={leave} aria-label={`Leave ${GAME_LABEL[active.type]}`}>
+                      Leave
+                    </Button>
                   )}
                 </>
               )}
@@ -237,20 +256,8 @@ export const EngagementHub: React.FC<Props> = ({ room, snapshot, currentUser, so
           {active.type === 'twenty_q' && <TwentyQuestionsPanel game={active} currentUser={currentUser} socket={socket} roomId={room.id} />}
           {active.type === 'trivia' && <TriviaPanel game={active} currentUser={currentUser} socket={socket} roomId={room.id} />}
           {active.type === 'prompt' && <PromptWall game={active} currentUser={currentUser} socket={socket} roomId={room.id} reactions={snapshot?.reactions || {}} onReaction={(tid, emoji) => onReaction(tid, emoji, 'submission', room.id)} />}
-        </div>
+        </Card>
       )}
     </section>
   );
-};
-
-const gameBtn: React.CSSProperties = {
-  minHeight: 48,
-  padding: '0 14px',
-  borderRadius: 'var(--radius-full)',
-  fontWeight: 800,
-  fontSize: 13,
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 6,
-  cursor: 'pointer'
 };

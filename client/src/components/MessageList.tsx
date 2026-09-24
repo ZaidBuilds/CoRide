@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { AlertCircle, Check, ChevronDown, Clock, RotateCw, Send, Trash2 } from 'lucide-react';
+import {
+  ArrowClockwiseIcon, CaretDownIcon, CheckIcon, ClockIcon, PaperPlaneRightIcon, TrashIcon, WarningCircleIcon
+} from '@phosphor-icons/react';
+import { Avatar } from './ui/Avatar';
+import { Skeleton } from './ui/Skeleton';
 
 /** One row in a conversation — DMs and room chat both map into this. */
 export interface ChatListItem {
@@ -16,7 +20,7 @@ export interface ChatListItem {
   error?: string;
   /** Centered system line (joins, game events). */
   system?: boolean;
-  /** Tint a system line with the accent (game alerts). */
+  /** Tint a system line (game alerts). */
   accent?: boolean;
 }
 
@@ -45,6 +49,9 @@ interface Props {
 const GROUP_WINDOW_MS = 5 * 60 * 1000;
 /** Distance from the bottom that still counts as "at the bottom". */
 const STICKY_PX = 96;
+/** Bubble radius and the tail corner (DESIGN: 18 with a 6 tail). */
+const R = 18;
+const TAIL = 6;
 
 function timeLabel(ms: number): string {
   return new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -71,8 +78,23 @@ function prefersReducedMotion(): boolean {
   try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return false; }
 }
 
+/** Time + delivery status, printed inside the bubble (WhatsApp-style). */
+function BubbleMeta({ m, isMe }: { m: ChatListItem; isMe: boolean }) {
+  return (
+    <>
+      <span className="tnum">{timeLabel(m.timestamp)}</span>
+      {isMe && m.status === 'sent' && <><CheckIcon size={14} weight="bold" aria-hidden="true" /><span className="sr-only">Sent</span></>}
+      {isMe && m.status === 'sending' && <><ClockIcon size={13} aria-hidden="true" /><span className="sr-only">Sending</span></>}
+      {isMe && m.status === 'queued' && <><ClockIcon size={13} aria-hidden="true" /><span className="sr-only">Waiting for connection</span></>}
+      {isMe && m.status === 'failed' && <><WarningCircleIcon size={14} aria-hidden="true" /><span className="sr-only">Not sent</span></>}
+    </>
+  );
+}
+
 /**
  * Conversation thread shared by 1:1 and room chat.
+ *
+ * Own bubbles are ink, theirs are surface; no line colour, no gradients.
  *
  * Owns its scroll container and the stick-to-bottom rules chat apps use:
  * - first paint jumps straight to the newest message;
@@ -149,12 +171,15 @@ export function MessageList({
     const next = items[i + 1];
     if (!prev || !sameDay(prev.timestamp, m.timestamp)) {
       rows.push(
-        <div key={`day_${m.key}`} role="separator" style={{ display: 'flex', justifyContent: 'center', margin: '14px 0 8px' }}>
-          <span style={{
-            fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)',
-            background: 'var(--bg-surface-raised)', border: '1px solid var(--border-subtle)',
-            padding: '4px 12px', borderRadius: 'var(--radius-full)'
-          }}>
+        <div key={`day_${m.key}`} role="separator" style={{ display: 'flex', justifyContent: 'center', margin: '16px 0 8px' }}>
+          <span
+            className="type-meta"
+            style={{
+              fontWeight: 560, color: 'var(--text-secondary)',
+              background: 'var(--bg-surface)',
+              padding: '4px 12px', borderRadius: 'var(--radius-pill)'
+            }}
+          >
             {dayLabel(m.timestamp)}
           </span>
         </div>
@@ -165,15 +190,16 @@ export function MessageList({
       rows.push(
         <div key={m.key} style={{ display: 'flex', justifyContent: 'center', margin: '8px 0' }}>
           <div
-            className="chat-bubble system"
+            className="type-meta"
             style={{
-              borderRadius: 'var(--radius-full)',
+              maxWidth: '88%',
+              textAlign: 'center',
               overflowWrap: 'anywhere',
-              ...(m.accent ? {
-                background: 'var(--bg-surface-raised)',
-                border: '1px solid var(--border-purple)',
-                color: 'var(--accent-text)'
-              } : {})
+              padding: m.accent ? '6px 12px' : '2px 12px',
+              borderRadius: 'var(--radius-pill)',
+              color: m.accent ? 'var(--text-primary)' : 'var(--text-muted)',
+              background: m.accent ? 'var(--bg-tonal)' : 'transparent',
+              fontWeight: m.accent ? 560 : 480
             }}
           >
             {m.content}
@@ -192,10 +218,11 @@ export function MessageList({
     const showAvatar = showSenders && !isMe;
     const failed = m.status === 'failed';
     const pendingish = m.status === 'sending' || m.status === 'queued';
-    // Tail only on the last bubble of a run, like every chat app.
+    // The sender-side bottom corner is the tail; corners that join a run tighten too.
     const radius = isMe
-      ? `16px ${groupedWithPrev ? 6 : 16}px ${groupedWithNext ? 6 : 4}px 16px`
-      : `${groupedWithPrev ? 6 : 16}px 16px 16px ${groupedWithNext ? 6 : 4}px`;
+      ? `${R}px ${groupedWithPrev ? TAIL : R}px ${TAIL}px ${R}px`
+      : `${groupedWithPrev ? TAIL : R}px ${R}px ${R}px ${TAIL}px`;
+    const tappable = !!onBubbleTap && !pendingish && !failed;
 
     rows.push(
       <div
@@ -205,92 +232,86 @@ export function MessageList({
           flexDirection: isMe ? 'row-reverse' : 'row',
           alignItems: 'flex-end',
           gap: 8,
-          marginTop: groupedWithPrev ? 2 : 10
+          marginTop: groupedWithPrev ? 2 : 12
         }}
       >
         {showAvatar && (
-          <div aria-hidden="true" style={{ width: 32, flexShrink: 0 }}>
-            {!groupedWithNext && (
-              <div
-                className="avatar"
-                style={{ width: 32, height: 32, fontSize: 12, boxShadow: 'none', background: m.senderAvatarBg || 'var(--accent-purple)' }}
-              >
-                {(m.senderName || '?').replace(/^@/, '').charAt(0).toUpperCase()}
-              </div>
-            )}
+          <div aria-hidden="true" style={{ width: 28, flexShrink: 0 }}>
+            {!groupedWithNext && <Avatar name={m.senderName} seed={m.senderId} bg={m.senderAvatarBg} size={28} />}
           </div>
         )}
-        <div style={{ maxWidth: '78%', minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start' }}>
+        <div style={{ maxWidth: '80%', minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start' }}>
           {showName && (
-            <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', margin: '0 12px 3px' }}>
+            <span className="type-meta" style={{ fontWeight: 600, color: 'var(--text-secondary)', margin: '0 12px 4px' }}>
               {m.senderName}
             </span>
           )}
           <div
-            className={`chat-bubble ${isMe ? 'outgoing' : 'incoming'}`}
-            {...(onBubbleTap && !pendingish && !failed ? {
+            {...(tappable ? {
+              role: 'button',
               tabIndex: 0,
-              onClick: () => onBubbleTap(m),
+              'aria-label': `${isMe ? 'Your message' : `Message from ${m.senderName || 'them'}`}: ${m.content}. Tap to react`,
+              onClick: () => onBubbleTap!(m),
               onKeyDown: (e: React.KeyboardEvent) => {
-                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onBubbleTap(m); }
+                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onBubbleTap!(m); }
               }
             } : {})}
+            className="type-body"
             style={{
-              cursor: onBubbleTap && !pendingish && !failed ? 'pointer' : undefined,
+              position: 'relative',
+              cursor: tappable ? 'pointer' : undefined,
               maxWidth: '100%',
+              padding: '8px 12px 8px 14px',
               borderRadius: radius,
+              background: isMe ? 'var(--ink)' : 'var(--bg-surface)',
+              color: isMe ? 'var(--ink-inverse)' : 'var(--text-primary)',
               whiteSpace: 'pre-wrap',
               overflowWrap: 'anywhere',
               wordBreak: 'break-word',
-              opacity: pendingish ? 0.8 : 1,
-              ...(failed ? { outline: '2px solid var(--status-danger)', outlineOffset: 2 } : {})
+              opacity: pendingish ? 0.72 : 1,
+              ...(failed ? { boxShadow: '0 0 0 2px var(--bg-base), 0 0 0 4px var(--status-danger)' } : {})
             }}
           >
             {m.content}
+            {/* Invisible twin reserves room on the last line; the real meta sits in that corner. */}
             <span
+              aria-hidden="true"
+              className="type-meta"
+              style={{ display: 'inline-flex', gap: 3, visibility: 'hidden', marginLeft: 10, fontSize: 12 }}
+            >
+              <BubbleMeta m={m} isMe={isMe} />
+            </span>
+            <span
+              className="type-meta"
               style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 3,
-                fontSize: 11, lineHeight: '14px', marginTop: 2, marginRight: -4, opacity: 0.75,
-                whiteSpace: 'nowrap'
+                position: 'absolute', right: 10, bottom: 5,
+                display: 'inline-flex', alignItems: 'center', gap: 3,
+                fontSize: 12, lineHeight: '16px', whiteSpace: 'nowrap',
+                color: isMe ? 'var(--ink-inverse)' : 'var(--text-muted)',
+                opacity: isMe ? 0.72 : 1
               }}
             >
-              {timeLabel(m.timestamp)}
-              {isMe && m.status === 'sent' && <><Check size={13} aria-hidden="true" /><span className="sr-only">Sent</span></>}
-              {isMe && m.status === 'sending' && <><Clock size={12} aria-hidden="true" /><span className="sr-only">Sending</span></>}
-              {isMe && m.status === 'queued' && <><Clock size={12} aria-hidden="true" /><span className="sr-only">Waiting for connection</span></>}
-              {isMe && failed && <><AlertCircle size={13} aria-hidden="true" /><span className="sr-only">Not sent</span></>}
+              <BubbleMeta m={m} isMe={isMe} />
             </span>
           </div>
           {isMe && m.status === 'queued' && (
-            <span style={{ fontSize: 11, color: 'var(--text-muted)', margin: '3px 6px 0' }}>
-              Waiting for connection…
+            <span className="type-meta" style={{ color: 'var(--text-muted)', margin: '4px 6px 0' }}>
+              Waiting for connection
             </span>
           )}
           {failed && (
-            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 4, marginTop: 2 }}>
-              <span role="alert" style={{ fontSize: 12, color: 'var(--status-danger)', fontWeight: 600, padding: '0 4px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 0, marginTop: 2 }}>
+              <span role="alert" className="type-meta" style={{ color: 'var(--danger-text)', fontWeight: 560, padding: '0 8px 0 4px' }}>
                 {m.error || 'Not sent.'}
               </span>
               {onRetry && (
-                <button
-                  type="button"
-                  onClick={() => onRetry(m.key)}
-                  aria-label="Retry sending message"
-                  className="press"
-                  style={chipBtn}
-                >
-                  <RotateCw size={14} /> Retry
+                <button type="button" onClick={() => onRetry(m.key)} aria-label="Retry sending message" className="press" style={chipBtn}>
+                  <ArrowClockwiseIcon size={16} aria-hidden="true" /> Retry
                 </button>
               )}
               {onDiscard && (
-                <button
-                  type="button"
-                  onClick={() => onDiscard(m.key)}
-                  aria-label="Delete unsent message"
-                  className="press"
-                  style={{ ...chipBtn, color: 'var(--text-secondary)' }}
-                >
-                  <Trash2 size={14} /> Delete
+                <button type="button" onClick={() => onDiscard(m.key)} aria-label="Delete unsent message" className="press" style={{ ...chipBtn, color: 'var(--text-secondary)' }}>
+                  <TrashIcon size={16} aria-hidden="true" /> Delete
                 </button>
               )}
             </div>
@@ -314,7 +335,7 @@ export function MessageList({
           flex: 1, minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain',
           WebkitOverflowScrolling: 'touch',
           display: 'flex', flexDirection: 'column',
-          padding: '8px 12px 12px'
+          padding: '8px 12px 16px'
         }}
       >
         {/* Pushes a short thread to the bottom, next to the composer. */}
@@ -335,17 +356,17 @@ export function MessageList({
         <button
           type="button"
           onClick={() => { scrollToBottom(true); setUnseen(0); }}
-          className="press glass"
+          className="press type-label"
           aria-label={`${unseen} new ${unseen === 1 ? 'message' : 'messages'}, jump to latest`}
           style={{
             position: 'absolute', bottom: 12, left: '50%', transform: 'translateX(-50%)',
-            minHeight: 40, padding: '0 16px', borderRadius: 'var(--radius-full)',
+            minHeight: 40, padding: '0 16px', borderRadius: 'var(--radius-pill)',
             display: 'inline-flex', alignItems: 'center', gap: 6,
-            fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', cursor: 'pointer',
-            border: '1px solid var(--border-subtle)', boxShadow: 'var(--shadow-lg)'
+            background: 'var(--ink)', color: 'var(--ink-inverse)', cursor: 'pointer',
+            border: 'none', boxShadow: 'var(--shadow-float)'
           }}
         >
-          <ChevronDown size={16} /> {unseen} new
+          <CaretDownIcon size={16} weight="bold" aria-hidden="true" /> <span className="tnum">{unseen}</span> new
         </button>
       )}
     </div>
@@ -354,26 +375,34 @@ export function MessageList({
 
 const chipBtn: React.CSSProperties = {
   minHeight: 48,
-  padding: '0 12px',
+  padding: '0 10px',
   background: 'none',
   border: 'none',
-  color: 'var(--accent-text)',
-  fontSize: 13,
-  fontWeight: 700,
+  color: 'var(--text-primary)',
+  fontSize: 14,
+  fontWeight: 600,
   display: 'inline-flex',
   alignItems: 'center',
   gap: 6,
-  cursor: 'pointer'
+  cursor: 'pointer',
+  borderRadius: 'var(--radius-pill)'
 };
 
 function LoadingBubbles() {
-  const widths = ['55%', '40%', '62%', '35%'];
+  const rows: { w: string; me: boolean }[] = [
+    { w: '58%', me: false }, { w: '42%', me: false }, { w: '50%', me: true }, { w: '36%', me: false }, { w: '62%', me: true }
+  ];
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: '8px 0' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '8px 0' }}>
       <span className="sr-only">Loading messages</span>
-      {widths.map((w, i) => (
-        <div key={i} aria-hidden="true" style={{ display: 'flex', justifyContent: i % 2 ? 'flex-end' : 'flex-start' }}>
-          <div className="skeleton" style={{ width: w, height: 40, borderRadius: 16 }} />
+      {rows.map((r, i) => (
+        <div key={i} style={{ display: 'flex', justifyContent: r.me ? 'flex-end' : 'flex-start' }}>
+          <Skeleton
+            width={r.w}
+            height={40}
+            delayMs={i * 90}
+            borderRadius={r.me ? `${R}px ${R}px ${TAIL}px ${R}px` : `${R}px ${R}px ${R}px ${TAIL}px`}
+          />
         </div>
       ))}
     </div>
@@ -399,11 +428,12 @@ interface ComposerProps {
 const COMPOSER_MAX_HEIGHT = 120;
 
 /**
- * Auto-growing message box + round send button. Send is disabled while the
- * draft is blank; a counter appears as the draft nears the limit. Enter
- * sends on hardware keyboards, inserts a newline on touch keyboards (as in
- * Android chat apps). The send button never steals focus, so the soft
- * keyboard stays up between messages.
+ * Auto-growing pill input on --bg-sunken + a round Signal Lime send button
+ * (the one lime element on a chat screen; tonal while there's nothing to
+ * send). A counter appears as the draft nears the limit. Enter sends on
+ * hardware keyboards, inserts a newline on touch keyboards (as in Android
+ * chat apps). The send button never steals focus, so the soft keyboard stays
+ * up between messages.
  */
 export function ChatComposer({
   value, onChange, onSend, ariaLabel, placeholder = 'Message', maxLength,
@@ -437,8 +467,8 @@ export function ChatComposer({
         alignItems: 'flex-end',
         padding: '8px 8px 8px 12px',
         paddingBottom: safeAreaBottom ? 'calc(8px + var(--safe-bottom))' : 8,
-        borderTop: '1px solid var(--border-card)',
-        background: 'var(--bg-elevated)',
+        borderTop: '1px solid var(--border-subtle)',
+        background: 'var(--bg-surface)',
         flexShrink: 0
       }}
     >
@@ -465,10 +495,10 @@ export function ChatComposer({
             width: '100%',
             minHeight: 48,
             maxHeight: COMPOSER_MAX_HEIGHT,
-            padding: '12px 16px',
+            padding: '12px 18px',
             borderRadius: 24,
-            background: 'var(--bg-input)',
-            border: '1px solid var(--border-subtle)',
+            background: 'var(--bg-sunken)',
+            border: '1px solid transparent',
             color: 'var(--text-primary)',
             fontSize: 16,
             lineHeight: '22px',
@@ -481,9 +511,10 @@ export function ChatComposer({
           <span
             id={`${id}-count`}
             aria-live="polite"
+            className="type-meta tnum"
             style={{
-              position: 'absolute', right: 14, top: -18, fontSize: 11, fontWeight: 700,
-              color: remaining <= 20 ? 'var(--status-danger)' : 'var(--text-muted)'
+              position: 'absolute', right: 16, top: -20, fontWeight: 560,
+              color: remaining <= 20 ? 'var(--danger-text)' : 'var(--text-muted)'
             }}
           >
             {remaining === 0 ? `Limit reached (${maxLength})` : `${remaining} left`}
@@ -500,18 +531,18 @@ export function ChatComposer({
           width: 48,
           height: 48,
           borderRadius: '50%',
-          background: canSend ? 'linear-gradient(135deg, var(--signal-500), var(--signal-600))' : 'var(--bg-surface-raised)',
-          border: canSend ? 'none' : '1px solid var(--border-subtle)',
-          color: canSend ? 'var(--text-on-accent)' : 'var(--text-muted)',
+          background: canSend ? 'var(--signal)' : 'var(--bg-tonal)',
+          border: 'none',
+          color: canSend ? 'var(--ink-fixed)' : 'var(--text-muted)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           flexShrink: 0,
-          cursor: canSend ? 'pointer' : 'not-allowed',
-          transition: 'background var(--dur-micro) var(--ease-enter)'
+          cursor: canSend ? 'pointer' : 'default',
+          transition: 'background-color var(--dur-micro) var(--ease-standard), color var(--dur-micro) var(--ease-standard)'
         }}
       >
-        <Send size={20} aria-hidden="true" />
+        <PaperPlaneRightIcon size={22} weight={canSend ? 'fill' : 'regular'} aria-hidden="true" />
       </button>
     </form>
   );

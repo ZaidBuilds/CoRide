@@ -1,59 +1,36 @@
 import React from 'react';
 import { Skeleton } from '../ui/Skeleton';
 
+/**
+ * Loading placeholder for the rider feed, shaped like the rider card
+ * (DESIGN §5): surface card with a line stub, squircle avatar, name and
+ * tagline, interest chips, one pill action. Inherits --line from the screen.
+ */
 export const CarriageFeedSkeleton: React.FC = () => {
   return (
-    <div role="status" aria-busy="true" style={{ display: 'flex', flexDirection: 'column', gap: 12, width: '100%' }}>
-      <span className="sr-only">Loading travelers</span>
+    <div role="status" aria-busy="true" style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }}>
+      <span className="sr-only">Loading riders</span>
       {[0, 1, 2].map((idx) => {
         const delay = idx * 150;
         return (
           <div
             key={idx}
             aria-hidden="true"
-            className="traveler-card"
-            style={{
-              padding: '14px',
-              gap: 12,
-              cursor: 'default',
-              pointerEvents: 'none'
-            }}
+            className="card has-stub"
+            style={{ display: 'flex', alignItems: 'flex-start', gap: 12, opacity: 1 - idx * 0.18 }}
           >
-            {/* 48dp Avatar Placeholder */}
-            <Skeleton
-              width={52}
-              height={52}
-              borderRadius="50%"
-              delayMs={delay}
-              style={{ flexShrink: 0 }}
-            />
+            <Skeleton width={48} height={48} borderRadius="var(--radius-squircle)" delayMs={delay} />
 
-            {/* Middle Content Placeholders */}
-            <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {/* Name & Badge Row */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Skeleton width={110} height={16} borderRadius={4} delayMs={delay + 50} />
-                <Skeleton width={70} height={18} borderRadius={999} delayMs={delay + 75} />
-              </div>
-
-              {/* Bio / Commute Route Row */}
-              <Skeleton width="75%" height={12} borderRadius={4} delayMs={delay + 100} />
-
-              {/* Tags Row */}
-              <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
-                <Skeleton width={56} height={20} borderRadius={999} delayMs={delay + 125} />
-                <Skeleton width={64} height={20} borderRadius={999} delayMs={delay + 150} />
+            <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 2 }}>
+              <Skeleton width="46%" height={16} delayMs={delay + 50} />
+              <Skeleton width="78%" height={12} delayMs={delay + 100} />
+              <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+                <Skeleton width={64} height={28} borderRadius="var(--radius-pill)" delayMs={delay + 125} />
+                <Skeleton width={72} height={28} borderRadius="var(--radius-pill)" delayMs={delay + 150} />
               </div>
             </div>
 
-            {/* 48dp Connect Action Placeholder */}
-            <Skeleton
-              width={48}
-              height={48}
-              borderRadius="50%"
-              delayMs={delay + 200}
-              style={{ flexShrink: 0 }}
-            />
+            <Skeleton width={92} height={40} borderRadius="var(--radius-pill)" delayMs={delay + 200} style={{ alignSelf: 'center' }} />
           </div>
         );
       })}

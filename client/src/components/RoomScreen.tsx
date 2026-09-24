@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Train, ArrowLeft, RefreshCw, Users, AlertTriangle, UserPlus, Check, MapPin, MessageCircle } from 'lucide-react';
+import { ArrowLeftIcon, ArrowClockwiseIcon, ChatCircleDotsIcon, CheckIcon, UserPlusIcon, WarningCircleIcon } from '@phosphor-icons/react';
 import type { Socket } from 'socket.io-client';
 import type { UserProfile, RoomPresenceTraveler, RoomPresenceResponse, RoomMessage, ContextRoom } from '../types';
-import type { ReactionState } from '../types/engagement';
+import type { ReactionState, EngagementSnapshot } from '../types/engagement';
 import { INTEREST_TAXONOMY } from '../types';
 import { authHeaders } from '../utils/auth';
 import { ProfileSheet } from './ProfileSheet';
@@ -11,11 +11,25 @@ import { ProfileSheetActions } from './ProfileSheetActions';
 import { ReportSheet } from './ReportSheet';
 import { ChatView } from './ChatView';
 import { Toast } from './ui/Toast';
+import { Avatar } from './ui/Avatar';
+import { Button } from './ui/Button';
+import { Chip } from './ui/Chip';
+import { EmptyState } from './ui/EmptyState';
+import { IconButton } from './ui/IconButton';
+import { LineRail } from './ui/LineRail';
+import { ListGroup, ListRow } from './ui/ListRow';
+import { PresenceStack } from './ui/PresenceStack';
+import { Skeleton } from './ui/Skeleton';
+import { StationSign } from './ui/StationSign';
+import { EngagementHub } from './engagement/EngagementHub';
+import { lineStyle } from '../utils/lineStyle';
 import { pushBackHandler } from '../utils/nativeBridge';
 import { API } from '../config';
 import { getLineById, getStationById } from '../data/metroData';
 
 const POLL_INTERVAL_MS = 15000;
+/** Riders listed before "Show all". */
+const RIDERS_PREVIEW = 6;
 
 interface PresetRoom {
   id: string;
@@ -85,12 +99,38 @@ function roomFromId(id: string): PresetRoom {
     line: lineName,
     direction,
     label: `${stationName} · ${lineName} · ${direction}`,
-    color: line?.color || 'var(--accent-purple)'
+    color: line?.color || 'var(--ink)'
   };
 }
 
-function tagMeta(id: string) {
-  return INTEREST_TAXONOMY.find(t => t.id === id) || { emoji: '✨', label: id };
+function tagLabel(id: string): string {
+  return INTEREST_TAXONOMY.find(t => t.id === id)?.label || titleCase(id);
+}
+
+const baseName = (n: string) => n.replace(/\s*\(.*\)\s*$/, '').trim().toLowerCase();
+
+/** Does a direction slug ("towards_noida") point at this terminal ("Noida Electronic City / Vaishali")? */
+function towardsTerminal(dirSlug: string, terminal: string): boolean {
+  const d = dirSlug.replace(/^towards_/, '');
+  if (!d) return false;
+  return terminal.split('/').map(t => slug(t)).some(t => t && (t.startsWith(d) || d.startsWith(t)));
+}
+
+/**
+ * The real stops around this platform, ordered in the direction of travel
+ * (so "next" is always to the right). Unknown line/station → no rail.
+ */
+function railFor(roomId: string, stationName: string) {
+  const [stationId = '', lineId = '', dirSlug = ''] = roomId.split(':');
+  const line = getLineById(lineId);
+  if (!line) return null;
+  let stops = line.stations;
+  let idx = stops.findIndex(s => s.id === stationId);
+  if (idx < 0) idx = stops.findIndex(s => baseName(s.name) === baseName(stationName));
+  if (idx < 0) return null;
+  const toA = towardsTerminal(dirSlug, line.terminalA) && !towardsTerminal(dirSlug, line.terminalB);
+  if (toA) { stops = [...stops].reverse(); idx = stops.length - 1 - idx; }
+  return { stops: stops.map(s => ({ id: s.id, name: s.name.replace(/\s*\(.*\)\s*$/, '') })), index: idx, line };
 }
 
 interface Props {
@@ -170,6 +210,8 @@ export const RoomScreen: React.FC<Props> = ({
   const [roomTyping, setRoomTyping] = useState<{ userId: string; pseudonym: string }[]>([]);
   const [roomReactions, setRoomReactions] = useState<Record<string, ReactionState>>({});
   const [unseenChat, setUnseenChat] = useState(0);
+  const [engagementSnap, setEngagementSnap] = useState<EngagementSnapshot | null>(null);
+  const [showAllRiders, setShowAllRiders] = useState(false);
   const chatOpenRef = useRef(false);
   useEffect(() => { chatOpenRef.current = chatOpen; }, [chatOpen]);
 
@@ -187,6 +229,8 @@ export const RoomScreen: React.FC<Props> = ({
     setRoomReactions({});
     setUnseenChat(0);
     setChatOpen(false);
+    setEngagementSnap(null);
+    setShowAllRiders(false);
   }
   // Responses for a room we've since left are ignored.
   const activeRoomRef = useRef(activeRoomId);
@@ -258,7 +302,12 @@ export const RoomScreen: React.FC<Props> = ({
   // Polling setup: 15 seconds — the REST/Redis fallback used whenever the
   // socket isn't connected. When connected, presence_updated events drive
   // refreshes instead, so a live session never polls the API.
+  // Which room this screen is in right now. Cleanup defers its REST leave a
+  // tick and skips it if the effect re-ran for the same room (socket
+  // connecting, StrictMode), so a late leave can't evict us after the rejoin.
+  const inRoomRef = useRef<string | null>(null);
   useEffect(() => {
+    inRoomRef.current = activeRoomId;
     // Initial fetch & heartbeat
     fetchRoomData(activeRoomId);
     sendHeartbeat(activeRoomId);
@@ -287,7 +336,9 @@ export const RoomScreen: React.FC<Props> = ({
     return () => {
       if (pollTimerRef.current) clearInterval(pollTimerRef.current);
       document.removeEventListener('visibilitychange', onVis);
-      sendLeave(activeRoomId);
+      inRoomRef.current = null;
+      const leaving = activeRoomId;
+      setTimeout(() => { if (inRoomRef.current !== leaving) sendLeave(leaving); }, 0);
     };
   }, [activeRoomId, fetchRoomData, sendHeartbeat, sendLeave, socket, socketConnected]);
 
@@ -357,6 +408,18 @@ export const RoomScreen: React.FC<Props> = ({
     return pushBackHandler(() => { setChatOpen(false); return true; });
   }, [chatOpen]);
 
+  // Games + room reactions for this platform. The server keeps a snapshot per
+  // room and pushes engagement_updated to members; ask for it once on join.
+  useEffect(() => {
+    if (!socket) return;
+    const onEngagement = (snap: EngagementSnapshot) => {
+      if (snap?.roomId === activeRoomId) setEngagementSnap(snap);
+    };
+    socket.on('engagement_updated', onEngagement);
+    if (socketConnected) socket.emit('fetch_engagement', { roomId: activeRoomId });
+    return () => { socket.off('engagement_updated', onEngagement); };
+  }, [socket, socketConnected, activeRoomId]);
+
   const openChat = () => {
     setUnseenChat(0);
     setChatOpen(true);
@@ -415,478 +478,335 @@ export const RoomScreen: React.FC<Props> = ({
     setSheetTraveler(traveler);
   };
 
+  const lineId = activeRoomId.split(':')[1] || '';
+  const stationId = activeRoomId.split(':')[0] || '';
+  const signStation = getStationById(stationId);
+  const towards = activePreset.direction.replace(/^towards\s+/i, '');
+  const rail = railFor(activeRoomId, activePreset.station);
+  const presenceKnown = !!data && !error;
+  const chatReady = !!socket && socketConnected;
+  const myTags = currentUser?.interestTags || [];
+  const onlyMe = !!data && data.travelers.length === 1 && data.travelers[0].id === currentUser?.id;
+  const snapshotForHub: EngagementSnapshot | null = engagementSnap
+    ? { ...engagementSnap, reactions: { ...engagementSnap.reactions, ...roomReactions } }
+    : null;
+
+  // You first, then whoever shares the most interests; long rooms show the
+  // first few and let you expand, so chat and games stay within reach.
+  const sortedTravelers = data ? [...data.travelers].sort((a, b) => {
+    if (a.id === currentUser?.id) return -1;
+    if (b.id === currentUser?.id) return 1;
+    const shared = (t: RoomPresenceTraveler) => (t.interestTags || []).filter(x => myTags.includes(x)).length;
+    return shared(b) - shared(a);
+  }) : [];
+  const visibleTravelers = showAllRiders ? sortedTravelers : sortedTravelers.slice(0, RIDERS_PREVIEW);
+  const hiddenRiders = sortedTravelers.length - visibleTravelers.length;
+
+  const skeletonRows = (dim: boolean) => (
+    <div className="list-group" aria-hidden="true" style={dim ? { opacity: 0.55 } : undefined}>
+      {[0, 1, 2].map(idx => (
+        <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 12px 14px 16px', borderTop: idx ? '1px solid var(--border-subtle)' : undefined }}>
+          <Skeleton width={48} height={48} borderRadius="var(--radius-squircle)" delayMs={idx * 120} />
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <Skeleton width="42%" height={14} delayMs={idx * 120 + 40} />
+            <Skeleton width="70%" height={12} delayMs={idx * 120 + 80} />
+            <div style={{ display: 'flex', gap: 6 }}>
+              <Skeleton width={64} height={24} borderRadius="var(--radius-pill)" delayMs={idx * 120 + 100} />
+              <Skeleton width={52} height={24} borderRadius="var(--radius-pill)" delayMs={idx * 120 + 120} />
+            </div>
+          </div>
+          <Skeleton width={96} height={40} borderRadius="var(--radius-pill)" delayMs={idx * 120 + 140} />
+        </div>
+      ))}
+    </div>
+  );
+
   return (
-    <div className="animate-fade-in">
-      {/* Nav bar — large title collapses into the compact one on scroll */}
-      <div className={`nav-bar${collapsed ? ' collapsed' : ''}`}>
+    <div className="animate-fade-in" style={lineStyle(lineId || activePreset.color)}>
+      {/* Top bar: the sign's name slides in here once it scrolls away */}
+      <div className={`nav-bar${collapsed ? ' collapsed' : ''}`} style={{ marginBottom: 4 }}>
         <div className="nav-bar-top">
           {onBack ? (
-            <button onClick={onBack} className="icon-btn" aria-label="Back to home">
-              <ArrowLeft size={18} />
-            </button>
+            <IconButton label="Back to home" variant="plain" onClick={onBack} style={{ marginLeft: -12 }}>
+              <ArrowLeftIcon size={24} aria-hidden="true" />
+            </IconButton>
           ) : (
             <span style={{ width: 'var(--tap)' }} />
           )}
 
-          <span className="nav-bar-compact">
-            {activePreset.station}{data && !error ? ` · ${liveCount} live` : ''}
+          <span className="nav-bar-compact" aria-hidden={!collapsed}>
+            {activePreset.station}
+            {presenceKnown && <span className="tnum" style={{ color: 'var(--text-secondary)', fontWeight: 480 }}> · {liveCount} here</span>}
           </span>
 
-          <button
-            onClick={handleManualRefresh}
-            className="icon-btn"
-            aria-label="Refresh presence"
-            disabled={isRefreshing}
-          >
-            <RefreshCw size={16} className={isRefreshing ? 'animate-spin' : ''} />
-          </button>
+          <IconButton label="Refresh who's here" variant="plain" onClick={handleManualRefresh} disabled={isRefreshing} style={{ marginRight: -12 }}>
+            <ArrowClockwiseIcon size={22} aria-hidden="true" className={isRefreshing ? 'animate-spin' : undefined} />
+          </IconButton>
         </div>
+      </div>
 
-        <h1 className="nav-bar-large">Live Room</h1>
+      {/* Platform sign */}
+      <section aria-label="This platform" style={{ marginBottom: 24 }}>
+        <StationSign
+          name={activePreset.station}
+          hindiName={signStation?.hindiName}
+          lines={lineId && getLineById(lineId) ? [lineId] : []}
+          towards={towards}
+        />
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingBottom: 8 }}>
-          <span
-            aria-hidden="true"
-            className={data && !error ? 'animate-pulse-glow' : undefined}
-            style={{
-              width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
-              background: data && !error ? 'var(--presence-active)' : 'var(--presence-other)'
-            }}
-          />
-          <span role="status" style={{ fontSize: 13, color: 'var(--text-secondary)', fontWeight: 600 }}>
-            {error
-              ? 'Live presence unavailable'
-              : !data
-                ? 'Checking who\'s here…'
-                : `${liveCount} ${liveCount === 1 ? 'traveler' : 'travelers'} live`}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginTop: 16, minHeight: 32, ['--stack-ring' as string]: 'var(--bg-base)' } as React.CSSProperties}>
+          <span role="status" style={{ minWidth: 0 }}>
+            {presenceKnown ? (
+              <PresenceStack
+                people={data!.travelers.map(t => ({ id: t.id, name: t.pseudonym || t.username, avatarBg: t.avatarBg }))}
+                count={liveCount}
+                label="here now"
+                live
+              />
+            ) : error ? (
+              <span className="type-label" style={{ color: 'var(--text-secondary)' }}>Presence unavailable</span>
+            ) : (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
+                <Skeleton width={64} height={28} borderRadius="var(--radius-pill)" />
+                <span className="sr-only">Checking who's here</span>
+              </span>
+            )}
           </span>
           {lastUpdated && (
-            <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 'auto' }}>
-              {error ? `Last updated ${lastUpdated}` : `Updated ${lastUpdated}`}
+            <span className="type-meta tnum" style={{ color: 'var(--text-muted)', flexShrink: 0 }}>
+              {error ? 'Last seen' : 'Updated'} {lastUpdated}
             </span>
           )}
         </div>
-      </div>
 
-      {/* Context picker — station via segmented control, then line → direction */}
-      <div className="section-head"><h3>Station</h3></div>
-      <div className="segmented" role="tablist" aria-label="Pick your station" style={{ marginBottom: 20 }}>
-        {stations.map(station => (
-          <button
-            key={station}
-            role="tab"
-            aria-selected={station === pickerStation}
-            className="segmented-option"
-            onClick={() => setPickerStation(station)}
-          >
-            {station}
-          </button>
-        ))}
-      </div>
-
-      <div className="section-head"><h3>Line &amp; direction</h3></div>
-      <div className="list-group">
-        {stationRooms.map(preset => {
-          const isActive = preset.id === activeRoomId;
-          return (
-            <button
-              key={preset.id}
-              className="list-row navigable"
-              aria-current={isActive || undefined}
-              onClick={() => setActiveRoomId(preset.id)}
-            >
-              {/* Metro line brand colour — decorative identity, stays literal */}
-              <span
-                style={{
-                  width: 10, height: 10, borderRadius: '50%',
-                  background: preset.color, flexShrink: 0
-                }}
-              />
-              <span className="row-text">
-                <span className="row-title">{preset.line}</span>
-                <span className="row-sub">{preset.direction}</span>
-              </span>
-              {isActive && (
-                <Check size={16} style={{ color: 'var(--accent-text)', flexShrink: 0 }} />
-              )}
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Current Room Glass Panel Hero */}
-      <div
-        className="glass-panel"
-        style={{
-          padding: 16,
-          marginBottom: 16,
-          position: 'relative',
-          overflow: 'hidden'
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div
-            className="avatar"
-            style={{
-              width: 46,
-              height: 46,
-              background: `linear-gradient(135deg, ${activePreset.color}, var(--accent-fill-from))`,
-              color: 'white'
-            }}
-          >
-            <Train size={22} />
+        {rail && (
+          <div style={{ marginTop: 16, padding: '12px 4px 8px', background: 'var(--bg-surface)', borderRadius: 'var(--radius-card)' }}>
+            <LineRail
+              orientation="horizontal"
+              stations={rail.stops}
+              currentIndex={rail.index}
+              window={2}
+              ariaLabel={`${rail.line.name} towards ${towards}, around ${activePreset.station}`}
+            />
           </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-              <span style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-primary)' }}>
-                {activePreset.station}
-              </span>
-              <span
-                style={{
-                  fontSize: 11,
-                  fontWeight: 700,
-                  padding: '2px 8px',
-                  borderRadius: 999,
-                  background: 'var(--bg-surface)',
-                  color: 'var(--text-secondary)',
-                  border: '1px solid var(--border-subtle)'
-                }}
-              >
-                {activePreset.line}
-              </span>
-            </div>
-            <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 2, display: 'flex', alignItems: 'center', gap: 4 }}>
-              <MapPin size={13} style={{ color: 'var(--accent-text)' }} />
-              {activePreset.direction}
-            </div>
-          </div>
+        )}
+        <p className="type-meta" style={{ color: 'var(--text-muted)', marginTop: 8 }}>
+          You picked this platform. Others see the station and line, never your location.
+        </p>
+      </section>
 
-          <div style={{ textAlign: 'right', flexShrink: 0 }}>
-            <div
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 6,
-                padding: '4px 10px',
-                borderRadius: 'var(--radius-full)',
-                background: 'var(--bg-surface)',
-                border: '1px solid var(--border-subtle)',
-                fontSize: 12,
-                fontWeight: 700,
-                color: data && !error ? 'var(--presence-active)' : 'var(--text-muted)'
-              }}
-            >
-              <div
-                aria-hidden="true"
-                style={{
-                  width: 7,
-                  height: 7,
-                  borderRadius: '50%',
-                  background: data && !error ? 'var(--presence-active)' : 'var(--presence-other)'
-                }}
-                className={data && !error ? 'animate-pulse-glow' : undefined}
-              />
-              <span>{data && !error ? `${data.count} live` : error ? 'Offline' : '…'}</span>
-            </div>
-          </div>
-        </div>
-
-        {currentUser && (
-          <button
+      {/* Room chat: the one primary action here */}
+      {currentUser && (
+        <div style={{ marginBottom: 24 }}>
+          <Button
+            type="button"
+            fullWidth
+            size="lg"
             onClick={openChat}
-            disabled={!socket || !socketConnected}
-            className="btn-primary press"
-            aria-label={unseenChat > 0 ? `Open room chat, ${unseenChat} new ${unseenChat === 1 ? 'message' : 'messages'}` : 'Open room chat'}
-            style={{
-              marginTop: 14, width: '100%', minHeight: 48, borderRadius: 'var(--radius-full)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-              fontSize: 15, fontWeight: 700,
-              opacity: !socket || !socketConnected ? 0.55 : 1
-            }}
+            disabled={!chatReady}
+            icon={<ChatCircleDotsIcon size={22} />}
+            aria-label={unseenChat > 0 ? `Open platform chat, ${unseenChat} new ${unseenChat === 1 ? 'message' : 'messages'}` : 'Open platform chat'}
           >
-            <MessageCircle size={18} aria-hidden="true" />
-            {!socket || !socketConnected ? 'Chat reconnecting…' : 'Room chat'}
+            {chatReady ? 'Platform chat' : 'Chat reconnecting'}
             {unseenChat > 0 && (
               <span
                 aria-hidden="true"
+                className="tnum"
                 style={{
-                  minWidth: 22, height: 22, padding: '0 6px', borderRadius: 'var(--radius-full)',
-                  background: 'var(--text-on-accent)', color: 'var(--accent-purple)',
-                  fontSize: 12, fontWeight: 800, display: 'inline-flex', alignItems: 'center', justifyContent: 'center'
+                  minWidth: 24, height: 24, padding: '0 7px', marginLeft: 4, borderRadius: 'var(--radius-pill)',
+                  background: 'var(--ink-fixed)', color: '#FFFFFF',
+                  fontSize: 13, fontWeight: 650, display: 'inline-flex', alignItems: 'center', justifyContent: 'center'
                 }}
               >
                 {unseenChat > 99 ? '99+' : unseenChat}
               </span>
             )}
-          </button>
-        )}
+          </Button>
+          <p className="type-meta" style={{ color: 'var(--text-muted)', marginTop: 8, textAlign: 'center' }}>
+            Everyone on this platform can read it. Messages clear after your commute.
+          </p>
+        </div>
+      )}
+
+      {/* Who's here */}
+      <div className="section-head">
+        <h2>On this platform</h2>
+        {data && <span className="type-meta tnum" style={{ color: 'var(--text-muted)' }}>{data.travelers.length} {data.travelers.length === 1 ? 'rider' : 'riders'}</span>}
       </div>
 
-      {/* Error state */}
       {error && (
         <div
           role="alert"
-          className="glass-panel"
           style={{
-            padding: '8px 8px 8px 14px',
-            marginBottom: 16,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 10,
-            borderColor: 'var(--status-danger)'
+            display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12,
+            padding: '8px 8px 8px 16px', borderRadius: 'var(--radius-card)',
+            background: 'var(--bg-surface)', boxShadow: 'inset 4px 0 0 var(--status-danger)', overflow: 'hidden'
           }}
         >
-          <AlertTriangle size={20} aria-hidden="true" style={{ color: 'var(--status-danger)', flexShrink: 0 }} />
-          <div style={{ flex: 1, fontSize: 14, color: 'var(--text-primary)', lineHeight: 1.4 }}>
+          <WarningCircleIcon size={22} aria-hidden="true" style={{ color: 'var(--danger-text)', flexShrink: 0 }} />
+          <div className="type-meta" style={{ flex: 1, color: 'var(--text-primary)' }}>
             {error}
-            {data && <span style={{ color: 'var(--text-muted)' }}> Showing the last list we saw.</span>}
+            {data && <span style={{ color: 'var(--text-secondary)' }}> Showing the last list we saw.</span>}
           </div>
-          <button
-            onClick={handleManualRefresh}
-            className="btn-secondary press"
-            disabled={isRefreshing}
-            style={{ minHeight: 48, padding: '0 16px', fontSize: 14, flexShrink: 0 }}
-          >
-            {isRefreshing ? 'Retrying…' : 'Retry'}
-          </button>
+          <Button type="button" variant="tonal" size="sm" onClick={handleManualRefresh} isLoading={isRefreshing}>
+            Retry
+          </Button>
         </div>
       )}
 
-      {/* Section Heading with count */}
-      <div className="section-head" style={{ marginBottom: 12 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <Users size={16} style={{ color: 'var(--accent-text)' }} />
-          <h3>Travelers here{data ? ` (${data.travelers.length})` : ''}</h3>
-        </div>
-        <button
-          onClick={handleManualRefresh}
-          className="link"
-          disabled={isRefreshing}
-          style={{ minHeight: 48, padding: '0 4px', background: 'none', border: 'none', cursor: 'pointer' }}
-        >
-          {isRefreshing ? 'Refreshing…' : 'Refresh'}
-        </button>
-      </div>
-
-      {/* Loading — skeleton cards, never a spinner */}
-      {loading && !data && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }} aria-busy="true" aria-live="polite">
-          <span className="sr-only">Loading travelers</span>
-          {[1, 2, 3, 4].map(idx => (
-            <div key={idx} className="glass-soft" style={{ padding: 14, display: 'flex', alignItems: 'center', gap: 12 }}>
-              <div className="skeleton" style={{ width: 48, height: 48, borderRadius: '50%', flexShrink: 0 }} />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div className="skeleton" style={{ height: 14, width: '40%', marginBottom: 8 }} />
-                <div className="skeleton" style={{ height: 12, width: '75%' }} />
-              </div>
-            </div>
-          ))}
+      {/* Loading (and failed first load): rows shaped like the real list */}
+      {!data && (loading || error) && (
+        <div aria-busy={loading || undefined}>
+          {loading && <span className="sr-only">Loading riders</span>}
+          {skeletonRows(!!error)}
         </div>
       )}
 
-      {/* Empty State */}
       {!loading && data && data.travelers.length === 0 && (
-        <div
-          className="glass-panel"
-          style={{
-            padding: 32,
-            textAlign: 'center',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            gap: 12
-          }}
-        >
-          <div
-            className="avatar"
-            style={{
-              width: 56,
-              height: 56,
-              background: 'var(--bg-surface)',
-              color: 'var(--text-muted)'
-            }}
-          >
-            <Users size={24} />
-          </div>
-          <div>
-            <h4 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>No one here yet</h4>
-            <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '4px 0 0', lineHeight: 1.5 }}>
-              Nobody has checked into {activePreset.line} · {activePreset.direction} right now.
-            </p>
-          </div>
-          <button onClick={handleManualRefresh} className="pill-button secondary" disabled={isRefreshing}>
-            <RefreshCw size={15} className={isRefreshing ? 'animate-spin' : ''} />
-            {isRefreshing ? 'Checking…' : 'Check again'}
-          </button>
-        </div>
+        <EmptyState lineName={activePreset.line} stationName={activePreset.station} direction={activePreset.direction} />
       )}
 
-      {/* Travelers List */}
       {data && data.travelers.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {data.travelers.map(traveler => {
+        <ul className="list-group stagger" style={{ listStyle: 'none', padding: 0, marginBottom: onlyMe || hiddenRiders > 0 ? 8 : 24 }}>
+          {visibleTravelers.map((traveler, idx) => {
             const isMe = traveler.id === currentUser?.id;
             const isConnected = connectedIds.has(traveler.id);
-            const initials = (traveler.pseudonym || traveler.username)
-              .replace(/^@/, '')
-              .substring(0, 2)
-              .toUpperCase();
             // Server derives this per user from their heartbeat TTL.
-            const presence = (traveler as { presenceState?: string }).presenceState === 'active' ? 'active' : 'away';
+            const active = (traveler as { presenceState?: string }).presenceState === 'active';
             const displayName = traveler.pseudonym || traveler.username.replace(/^@/, '');
+            const tags = traveler.interestTags || [];
+            const shared = isMe ? [] : tags.filter(t => myTags.includes(t));
+            const rest = tags.filter(t => !shared.includes(t));
+            const shownTags = [...shared, ...rest].slice(0, 3);
+            const more = tags.length - shownTags.length;
 
             return (
-              <div
+              <li
                 key={traveler.id}
-                className="glass-panel animate-fade-in"
-                role="button"
-                tabIndex={0}
-                aria-label={`${displayName}${isMe ? ' (you)' : ''}, ${presence === 'active' ? 'active now' : 'away'}. View profile`}
                 style={{
-                  padding: 14,
-                  display: 'flex',
-                  alignItems: 'flex-start',
-                  gap: 12,
-                  cursor: 'pointer',
-                  transition: 'transform 0.15s ease, border-color 0.15s ease'
-                }}
-                onClick={() => handleTravelerTap(traveler)}
-                onKeyDown={e => {
-                  if (e.target !== e.currentTarget) return;
-                  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleTravelerTap(traveler); }
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  padding: '0 12px 0 0',
+                  borderTop: idx ? '1px solid var(--border-subtle)' : undefined
                 }}
               >
-                {/* Avatar with live active dot */}
-                <div className="avatar-wrap">
-                  <div
-                    className="avatar"
-                    style={{
-                      width: 48,
-                      height: 48,
-                      fontSize: 14,
-                      background:
-                        traveler.avatarBg ||
-                        'linear-gradient(135deg, var(--accent-fill-from), var(--accent-fill-to))'
-                    }}
-                  >
-                    {initials}
-                  </div>
-                  <div
-                    className={`avatar-dot ${presence === 'active' ? 'active' : 'other'}`}
-                    title={presence === 'active' ? 'Active now' : 'Away'}
-                    aria-hidden="true"
-                  />
-                </div>
-
-                {/* Traveler Info */}
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--text-primary)' }}>
-                      {traveler.pseudonym || traveler.username}
+                <button
+                  type="button"
+                  onClick={() => handleTravelerTap(traveler)}
+                  aria-label={`${displayName}${isMe ? ' (you)' : ''}, ${active ? 'active now' : 'away'}${shared.length ? `, ${shared.length} shared ${shared.length === 1 ? 'interest' : 'interests'}` : ''}. View profile`}
+                  className="press-row"
+                  style={{
+                    flex: 1, minWidth: 0, display: 'flex', alignItems: 'flex-start', gap: 12,
+                    padding: '14px 0 14px 16px', background: 'none', border: 'none', textAlign: 'left',
+                    color: 'inherit', cursor: 'pointer'
+                  }}
+                >
+                  <Avatar name={displayName} seed={traveler.id} bg={traveler.avatarBg} size={48} presence={active ? 'active' : 'other'} you={isMe} />
+                  <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    <span style={{ display: 'flex', alignItems: 'baseline', gap: 6, minWidth: 0 }}>
+                      <span className="type-label" style={{ fontSize: 16, lineHeight: '22px', color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {displayName}
+                      </span>
+                      {(isMe || !active) && (
+                        <span className="type-meta" style={{ color: 'var(--text-muted)', flexShrink: 0 }}>
+                          {isMe ? 'You' : 'Away'}
+                        </span>
+                      )}
                     </span>
-                    <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                      {traveler.username.startsWith('@') ? traveler.username : `@${traveler.username}`}
-                    </span>
-                    {presence === 'away' && (
-                      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>· away</span>
-                    )}
-                    {isMe && (
+                    {traveler.bio && (
                       <span
-                        style={{
-                          fontSize: 10,
-                          fontWeight: 700,
-                          color: 'var(--accent-text)',
-                          background: 'var(--bg-surface)',
-                          padding: '1px 6px',
-                          borderRadius: 999,
-                          border: '1px solid var(--border-purple)'
-                        }}
+                        className="type-meta"
+                        style={{ color: 'var(--text-secondary)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
                       >
-                        You
+                        {traveler.bio}
                       </span>
                     )}
-                  </div>
-
-                  {/* Bio */}
-                  {traveler.bio && (
-                    <p
-                      style={{
-                        fontSize: 13,
-                        color: 'var(--text-secondary)',
-                        margin: '4px 0 6px',
-                        lineHeight: 1.35
-                      }}
-                    >
-                      {traveler.bio}
-                    </p>
-                  )}
-
-                  {/* Tags */}
-                  {traveler.interestTags && traveler.interestTags.length > 0 && (
-                    <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginTop: 4 }}>
-                      {traveler.interestTags.map(t => {
-                        const meta = tagMeta(t);
-                        return (
-                          <span
-                            key={t}
-                            className="tag-pill"
-                            style={{
-                              padding: '2px 8px',
-                              fontSize: 11,
-                              background: 'var(--bg-surface)',
-                              border: '1px solid var(--border-subtle)'
-                            }}
-                          >
-                            <span>{meta.emoji}</span> {meta.label}
-                          </span>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-
-                {/* Connect / Say Hi button */}
-                {!isMe && (
-                  <button
-                    onClick={e => {
-                      e.stopPropagation();
-                      if (!isConnected) handleConnectClick(traveler);
-                    }}
-                    onKeyDown={e => e.stopPropagation()}
-                    disabled={isConnected}
-                    aria-label={isConnected ? `Request sent to ${displayName}` : `Send connection request to ${displayName}`}
-                    className={isConnected ? 'btn-secondary press' : 'btn-primary press'}
-                    style={{
-                      padding: '0 14px',
-                      fontSize: 13,
-                      fontWeight: 700,
-                      borderRadius: 'var(--radius-full)',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 4,
-                      flexShrink: 0,
-                      minHeight: 48,
-                      alignSelf: 'center'
-                    }}
-                  >
-                    {isConnected ? (
-                      <>
-                        <Check size={13} />
-                        <span>Sent</span>
-                      </>
-                    ) : (
-                      <>
-                        <UserPlus size={13} />
-                        <span>Connect</span>
-                      </>
+                    {shownTags.length > 0 && (
+                      <span style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
+                        {shownTags.map(t => (
+                          <Chip key={t} shared={shared.includes(t)} variant={shared.includes(t) ? 'outline' : 'quiet'} style={rowChip}>
+                            {tagLabel(t)}
+                          </Chip>
+                        ))}
+                        {more > 0 && <span className="type-meta tnum" style={{ color: 'var(--text-muted)', alignSelf: 'center' }}>+{more}</span>}
+                      </span>
                     )}
-                  </button>
+                  </span>
+                </button>
+
+                {!isMe && (
+                  <Button
+                    type="button"
+                    variant="tonal"
+                    size="sm"
+                    disabled={isConnected}
+                    icon={isConnected ? <CheckIcon size={18} /> : <UserPlusIcon size={18} />}
+                    onClick={() => { if (!isConnected) handleConnectClick(traveler); }}
+                    aria-label={isConnected ? `Request sent to ${displayName}` : `Send connection request to ${displayName}`}
+                  >
+                    {isConnected ? 'Sent' : 'Connect'}
+                  </Button>
                 )}
-              </div>
+              </li>
             );
           })}
-        </div>
+        </ul>
       )}
+      {hiddenRiders > 0 && (
+        <Button type="button" variant="tonal" fullWidth onClick={() => setShowAllRiders(true)} style={{ marginBottom: 24 }}>
+          <span className="tnum">{`Show all ${sortedTravelers.length} riders`}</span>
+        </Button>
+      )}
+      {onlyMe && (
+        <p className="type-meta" style={{ color: 'var(--text-muted)', marginBottom: 24, padding: '0 4px' }}>
+          Only you so far. Riders show up here as they reach this platform, and the list updates live.
+        </p>
+      )}
+
+      {/* Games: secondary to the people and the chat */}
+      {currentUser && (
+        <section aria-labelledby="room-games-title" style={{ marginBottom: 24 }}>
+          <div className="section-head">
+            <h2 id="room-games-title">Games</h2>
+          </div>
+          <EngagementHub
+            room={chatRoom}
+            snapshot={snapshotForHub}
+            currentUser={currentUser}
+            socket={chatReady ? socket : null}
+            onReaction={(targetId, emoji, targetType) => socket?.emit('reaction_toggle', { targetId, targetType, userId: currentUser.id, emoji, roomId: activeRoomId })}
+          />
+        </section>
+      )}
+
+      {/* Switch platform */}
+      <section aria-labelledby="room-switch-title">
+        <div className="section-head">
+          <h2 id="room-switch-title">Change platform</h2>
+        </div>
+        <div role="group" aria-label="Station" style={{ display: 'flex', gap: 8, overflowX: 'auto', scrollbarWidth: 'none', margin: '0 -16px 12px', padding: '0 16px' }}>
+          {stations.map(station => (
+            <Chip key={station} selected={station === pickerStation} onClick={() => setPickerStation(station)} style={{ flexShrink: 0 }}>
+              {station}
+            </Chip>
+          ))}
+        </div>
+        <ListGroup label="Line and direction">
+          {stationRooms.map(preset => {
+            const isActive = preset.id === activeRoomId;
+            return (
+              <ListRow
+                key={preset.id}
+                onClick={() => { setActiveRoomId(preset.id); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                aria-label={`${preset.line}, ${preset.direction}${isActive ? ', current platform' : ''}`}
+                leading={<span aria-hidden="true" style={{ width: 14, height: 14, borderRadius: 4, background: preset.color, display: 'inline-block' }} />}
+                title={preset.line}
+                subtitle={preset.direction}
+                trailing={isActive ? <CheckIcon size={20} weight="bold" style={{ color: 'var(--text-primary)' }} /> : undefined}
+              />
+            );
+          })}
+        </ListGroup>
+      </section>
 
       {/* Room chat — full-screen over the room */}
       {chatOpen && currentUser && (
@@ -956,3 +876,6 @@ export const RoomScreen: React.FC<Props> = ({
     </div>
   );
 };
+
+/** Interest chips inside a rider row: smaller than filter chips (the row is the tap target). */
+const rowChip: React.CSSProperties = { minHeight: 26, padding: '3px 10px', fontSize: 13, lineHeight: '18px' };

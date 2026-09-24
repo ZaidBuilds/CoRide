@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { SmilePlus } from 'lucide-react';
+import { SmileyIcon } from '@phosphor-icons/react';
 import { pushBackHandler } from '../../utils/nativeBridge';
 
 /** Must match the server's allow-list in the reaction_toggle handler. */
@@ -22,7 +22,7 @@ interface Props {
 }
 
 /**
- * Reaction chips + an add-reaction button. Every tappable thing has a 44px+
+ * Reaction chips + an add-reaction button. Every tappable thing has a 48px
  * hit area (the visible pill sits inside a transparent button). The picker
  * opens inline under the chips rather than as a floating popover, so it can
  * never be clipped by a scrolling message list.
@@ -70,16 +70,15 @@ export const ReactionBar: React.FC<Props> = ({ counts = {}, myReactions = [], on
                 height: pill,
                 padding: '0 8px',
                 borderRadius: 'var(--radius-full)',
-                background: mine ? 'var(--bg-accent-soft, var(--bg-surface-raised))' : 'var(--bg-surface)',
-                border: `1px solid ${mine ? 'var(--accent-purple)' : 'var(--border-subtle)'}`,
+                background: mine ? 'var(--ink)' : 'var(--bg-tonal)',
+                color: mine ? 'var(--ink-inverse)' : 'var(--text-primary)',
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: 4,
-                fontSize: compact ? 12 : 13,
-                color: 'var(--text-primary)'
+                fontSize: compact ? 13 : 14
               }}>
                 <span aria-hidden="true">{emoji}</span>
-                <span style={{ fontWeight: 700, fontSize: compact ? 11 : 12 }}>{c}</span>
+                <span className="tnum" style={{ fontWeight: 600, fontSize: compact ? 12 : 13 }}>{c}</span>
               </span>
             </button>
           );
@@ -95,14 +94,13 @@ export const ReactionBar: React.FC<Props> = ({ counts = {}, myReactions = [], on
             width: pill,
             height: pill,
             borderRadius: '50%',
-            background: open ? 'var(--bg-surface-raised)' : 'var(--bg-surface)',
-            border: '1px solid var(--border-subtle)',
-            color: 'var(--text-secondary)',
+            background: open ? 'var(--ink)' : 'var(--bg-tonal)',
+            color: open ? 'var(--ink-inverse)' : 'var(--text-secondary)',
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center'
           }}>
-            <SmilePlus size={compact ? 14 : 16} aria-hidden="true" />
+            <SmileyIcon size={compact ? 16 : 18} aria-hidden="true" />
           </span>
         </button>
       </div>
@@ -113,14 +111,13 @@ export const ReactionBar: React.FC<Props> = ({ counts = {}, myReactions = [], on
           className="animate-fade-in"
           style={{
             marginTop: 8,
-            background: 'var(--bg-surface-raised)',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: 'var(--radius-lg)',
+            background: 'var(--bg-elevated)',
+            borderRadius: 'var(--radius-card)',
             padding: 4,
             display: 'grid',
-            gridTemplateColumns: 'repeat(5, 44px)',
+            gridTemplateColumns: 'repeat(5, 48px)',
             gap: 2,
-            boxShadow: 'var(--shadow-md)'
+            boxShadow: 'var(--shadow-float)'
           }}
         >
           {EMOJIS.map(e => {
@@ -133,11 +130,12 @@ export const ReactionBar: React.FC<Props> = ({ counts = {}, myReactions = [], on
                 aria-pressed={mine}
                 aria-label={`React ${e}`}
                 style={{
-                  width: 44,
-                  height: 44,
+                  width: 48,
+                  height: 48,
                   borderRadius: 'var(--radius-md)',
-                  background: mine ? 'var(--bg-surface)' : 'transparent',
-                  border: mine ? '1px solid var(--accent-purple)' : '1px solid transparent',
+                  background: mine ? 'var(--bg-tonal)' : 'transparent',
+                  border: 'none',
+                  boxShadow: mine ? 'inset 0 0 0 2px var(--ink)' : undefined,
                   fontSize: 22,
                   cursor: 'pointer',
                   padding: 0
@@ -154,7 +152,7 @@ export const ReactionBar: React.FC<Props> = ({ counts = {}, myReactions = [], on
 };
 
 const hitArea: React.CSSProperties = {
-  minHeight: 44,
+  minHeight: 48,
   minWidth: 44,
   padding: '0 2px',
   background: 'none',

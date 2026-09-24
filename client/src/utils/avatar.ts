@@ -30,10 +30,11 @@ export function avatarColor(seed: string, bg?: string | null): string {
 }
 
 export function initials(name?: string, max = 2): string {
-  const parts = (name || '').replace(/^@/, '').trim().split(/[\s._-]+/).filter(Boolean);
-  if (!parts.length) return '?';
+  const raw = (name || '').replace(/^@/, '').trim();
+  // Split on separators and camelCase humps; drop number-only parts so "QuietStorm_91" gives "QS", not "Q9".
+  const parts = raw.split(/[\s._-]+|(?<=[a-z])(?=[A-Z])/).filter(p => /^\p{L}/u.test(p));
+  if (!parts.length) return raw ? raw[0].toUpperCase() : '?';
   const a = parts[0][0] ?? '';
   const b = parts.length > 1 ? parts[parts.length - 1][0] ?? '' : '';
   return (max < 2 ? a : a + b).toUpperCase();
 }
-

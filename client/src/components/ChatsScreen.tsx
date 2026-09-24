@@ -1,8 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Lock, MessageCircle, RefreshCw, WifiOff } from 'lucide-react';
+import { ArrowClockwiseIcon, ChatCircleIcon, LockSimpleIcon, WifiSlashIcon } from '@phosphor-icons/react';
 import type { Socket } from 'socket.io-client';
 import { authHeaders } from '../utils/auth';
 import { API } from '../config';
+import { Avatar } from './ui/Avatar';
+import { EmptyState } from './ui/EmptyState';
+import { IconButton } from './ui/IconButton';
+import { ListGroup, ListRow } from './ui/ListRow';
+import { ScreenHeader } from './ui/ScreenHeader';
+import { Skeleton } from './ui/Skeleton';
 
 /** Minimal peer info the app needs to open a thread. */
 export interface ChatPeer {
@@ -10,6 +16,7 @@ export interface ChatPeer {
   pseudonym?: string;
   username?: string;
   avatarBg?: string;
+  favoriteLineId?: string;
 }
 
 interface ChatSummary {
@@ -34,6 +41,8 @@ interface Props {
   onSelect: (id: string, peer?: ChatPeer) => void;
   /** Optional — when given, a new_dm refreshes previews/unread instantly. */
   socket?: Socket | null;
+  /** Optional: where the empty state sends people ("Find people"). */
+  onFindPeople?: () => void;
 }
 
 const REFRESH_MS = 20000;
@@ -69,7 +78,7 @@ function fromFriends(friends: FriendLike[]): ChatSummary[] {
  * (last message, real unread count from the server's read markers), newest
  * activity first. Nothing here is fabricated.
  */
-export const ChatsScreen: React.FC<Props> = ({ friends, onSelect, socket = null }) => {
+export const ChatsScreen: React.FC<Props> = ({ friends, onSelect, socket = null, onFindPeople }) => {
   const [chats, setChats] = useState<ChatSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -149,49 +158,44 @@ export const ChatsScreen: React.FC<Props> = ({ friends, onSelect, socket = null 
 
   return (
     <div className="animate-fade-in">
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 12, minHeight: 48 }}>
-        <h1 style={{ fontSize: 24, fontWeight: 900, margin: 0, color: 'var(--text-primary)' }}>
-          Chats
-          {totalUnread > 0 && <span className="sr-only">, {totalUnread} unread</span>}
-        </h1>
-        {!loading && (
-          <button
-            onClick={manualRefresh}
-            className="icon-btn"
-            aria-label="Refresh chats"
-            disabled={refreshing}
-          >
-            <RefreshCw size={18} className={refreshing ? 'animate-spin' : ''} />
-          </button>
-        )}
-      </div>
+      <ScreenHeader
+        title="Chats"
+        size="large"
+        subtitle={totalUnread > 0 ? <span className="tnum">{totalUnread} unread</span> : undefined}
+        actions={!loading ? (
+          <IconButton label="Refresh chats" variant="plain" onClick={manualRefresh} disabled={refreshing}>
+            <ArrowClockwiseIcon size={22} aria-hidden="true" className={refreshing ? 'animate-spin' : undefined} />
+          </IconButton>
+        ) : undefined}
+      />
 
       {error && (
         <div
           role="status"
           style={{
-            display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10,
-            padding: '8px 12px', borderRadius: 'var(--radius-md)', fontSize: 13,
-            color: 'var(--text-secondary)', background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)'
+            display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12,
+            padding: '0 4px 0 16px', borderRadius: 'var(--radius-card)',
+            background: 'var(--bg-surface)', boxShadow: 'inset 4px 0 0 var(--status-warn)', overflow: 'hidden'
           }}
         >
-          <WifiOff size={15} style={{ color: 'var(--status-warning)', flexShrink: 0 }} />
-          <span style={{ flex: 1 }}>{error}</span>
-          <button onClick={manualRefresh} className="press" style={{ minHeight: 40, padding: '0 10px', background: 'none', border: 'none', color: 'var(--accent-text)', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
-            Retry
-          </button>
+          <WifiSlashIcon size={18} aria-hidden="true" style={{ color: 'var(--warning-text)', flexShrink: 0 }} />
+          <span className="type-meta" style={{ flex: 1, color: 'var(--text-secondary)', padding: '12px 0' }}>{error}</span>
+          <button type="button" onClick={manualRefresh} className="link-btn">Retry</button>
         </div>
       )}
 
       {loading && (
         <div className="list-group" aria-busy="true">
           <span className="sr-only">Loading chats</span>
-          {[0, 1, 2].map(i => (
-            <div key={i} aria-hidden="true" style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', minHeight: 72 }}>
-              <div className="skeleton" style={{ width: 48, height: 48, borderRadius: '50%', flexShrink: 0 }} />
-              <div style={{ flex: 1 }}>
-                <div className="skeleton" style={{ height: 14, width: '38%', marginBottom: 8 }} />
-                <div className="skeleton" style={{ height: 12, width: '70%' }} />
+          {[0, 1, 2, 3].map(i => (
+            <div key={i} aria-hidden="true" style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', minHeight: 76, borderTop: i ? '1px solid var(--border-subtle)' : undefined }}>
+              <Skeleton width={48} height={48} borderRadius="var(--radius-squircle)" delayMs={i * 90} />
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                  <Skeleton width="36%" height={14} delayMs={i * 90 + 40} />
+                  <Skeleton width={40} height={12} delayMs={i * 90 + 60} />
+                </div>
+                <Skeleton width="68%" height={12} delayMs={i * 90 + 80} />
               </div>
             </div>
           ))}
@@ -199,31 +203,16 @@ export const ChatsScreen: React.FC<Props> = ({ friends, onSelect, socket = null 
       )}
 
       {!loading && rows.length === 0 && (
-        <div
-          style={{
-            textAlign: 'center', padding: '32px 20px', borderRadius: 'var(--radius-lg)',
-            background: 'var(--bg-card)', border: '1px solid var(--border-card)'
-          }}
-        >
-          <div
-            aria-hidden="true"
-            style={{
-              width: 56, height: 56, borderRadius: '50%', margin: '0 auto 12px',
-              background: 'var(--bg-surface-raised)', color: 'var(--accent-text)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center'
-            }}
-          >
-            <MessageCircle size={26} />
-          </div>
-          <p style={{ fontSize: 16, fontWeight: 800, color: 'var(--text-primary)', margin: '0 0 4px' }}>No chats yet</p>
-          <p style={{ fontSize: 14, color: 'var(--text-secondary)', margin: 0, lineHeight: 1.45 }}>
-            When someone accepts your connection request, you can message them here.
-          </p>
-        </div>
+        <EmptyState
+          icon={<ChatCircleIcon size={24} />}
+          title="No chats yet"
+          description="When someone accepts your connection request, your conversation shows up here."
+          action={onFindPeople ? { label: 'Find people on your line', onClick: onFindPeople } : undefined}
+        />
       )}
 
       {!loading && rows.length > 0 && (
-        <ul className="list-group" style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+        <ul className="list-group stagger" style={{ listStyle: 'none', margin: '0 0 24px', padding: 0 }}>
           {rows.map((c, i) => {
             const name = displayName(c.peer);
             const unread = c.unread > 0;
@@ -231,49 +220,42 @@ export const ChatsScreen: React.FC<Props> = ({ friends, onSelect, socket = null 
             const mine = !!c.lastMessage && c.lastMessage.senderId !== c.id;
             const preview = c.lastMessage
               ? `${mine ? 'You: ' : ''}${c.lastMessage.content}`
-              : 'Connected — say hi';
+              : 'Connected. Say hi';
             const label = [
               `Chat with ${name}`,
               unread ? `${c.unread} unread` : null,
               c.lastMessage ? `last message ${relativeTime(c.lastMessage.timestamp)}: ${preview}` : 'no messages yet'
             ].filter(Boolean).join(', ');
             return (
-              <li key={c.id} style={i > 0 ? { borderTop: '1px solid var(--border-subtle)' } : undefined}>
+              <li key={c.id}>
                 <button
+                  type="button"
                   onClick={() => onSelect(c.id, c.peer)}
                   aria-label={label}
-                  className="press"
-                  style={{
-                    width: '100%', minHeight: 72, display: 'flex', alignItems: 'center', gap: 12,
-                    padding: '10px 14px', background: 'none', border: 'none', textAlign: 'left',
-                    cursor: 'pointer', color: 'inherit'
-                  }}
+                  className="list-row"
+                  style={{ minHeight: 76, padding: '0 16px', gap: 12, cursor: 'pointer', alignItems: 'stretch' }}
                 >
-                  <div
-                    className="avatar"
-                    aria-hidden="true"
-                    style={{ width: 48, height: 48, fontSize: 16, boxShadow: 'none', background: c.peer.avatarBg || 'var(--accent-purple)' }}
-                  >
-                    {name.slice(0, 2).toUpperCase()}
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+                    <Avatar name={name} seed={c.id} bg={c.peer.avatarBg} size={48} />
+                  </span>
+                  <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '14px 0', borderTop: i > 0 ? '1px solid var(--border-subtle)' : undefined }}>
                     <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
-                      <span style={{ fontSize: 16, fontWeight: unread ? 800 : 700, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      <span className="type-label" style={{ fontSize: 16, lineHeight: '22px', fontWeight: unread ? 650 : 560, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         {name}
                       </span>
                       {c.lastMessage && (
-                        <span style={{ fontSize: 12, flexShrink: 0, fontWeight: unread ? 700 : 500, color: unread ? 'var(--accent-text)' : 'var(--text-muted)' }}>
+                        <span className="type-meta tnum" style={{ flexShrink: 0, fontWeight: unread ? 600 : 480, color: unread ? 'var(--text-primary)' : 'var(--text-muted)' }}>
                           {relativeTime(c.lastMessage.timestamp)}
                         </span>
                       )}
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2 }}>
                       <span
+                        className="type-meta"
                         style={{
-                          flex: 1, minWidth: 0, fontSize: 14,
-                          color: unread ? 'var(--text-primary)' : 'var(--text-muted)',
-                          fontWeight: unread ? 600 : 400,
-                          fontStyle: c.lastMessage ? 'normal' : 'italic',
+                          flex: 1, minWidth: 0, fontSize: 14, lineHeight: '19px',
+                          color: unread ? 'var(--text-primary)' : 'var(--text-secondary)',
+                          fontWeight: unread ? 520 : 420,
                           whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'
                         }}
                       >
@@ -282,10 +264,11 @@ export const ChatsScreen: React.FC<Props> = ({ friends, onSelect, socket = null 
                       {unread && (
                         <span
                           aria-hidden="true"
+                          className="tnum"
                           style={{
-                            minWidth: 22, height: 22, padding: '0 7px', borderRadius: 'var(--radius-full)',
-                            background: 'var(--accent-purple)', color: 'var(--text-on-accent, #fff)',
-                            fontSize: 12, fontWeight: 800, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                            minWidth: 22, height: 22, padding: '0 7px', borderRadius: 'var(--radius-pill)',
+                            background: 'var(--signal)', color: 'var(--ink-fixed)',
+                            fontSize: 12, fontWeight: 650, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                             flexShrink: 0
                           }}
                         >
@@ -301,15 +284,14 @@ export const ChatsScreen: React.FC<Props> = ({ friends, onSelect, socket = null 
         </ul>
       )}
 
-      <div style={{ marginTop: 14, background: 'var(--bg-card)', border: '1px solid var(--border-card)', borderRadius: 'var(--radius-lg)', padding: 12, display: 'flex', gap: 10, alignItems: 'center' }}>
-        <div aria-hidden="true" style={{ width: 36, height: 36, borderRadius: '50%', background: 'var(--bg-surface-raised)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--accent-text)', flexShrink: 0 }}>
-          <Lock size={16} />
-        </div>
-        <div>
-          <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--text-primary)' }}>Only your connections can message you</div>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 1 }}>Report or block anyone from the ⋮ menu inside a chat.</div>
-        </div>
-      </div>
+      <ListGroup>
+        <ListRow
+          leading={<LockSimpleIcon size={22} />}
+          title="Only your connections can message you"
+          subtitle="Report or block anyone from the menu inside a chat."
+          wrap
+        />
+      </ListGroup>
     </div>
   );
 };

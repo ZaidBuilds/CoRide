@@ -154,7 +154,7 @@ export function useChatMessages(
           ? "You're offline. Messages will load when you reconnect."
           : err instanceof Error && !/Failed to fetch|NetworkError|Load failed/i.test(err.message)
             ? err.message
-            : "Couldn't reach CoRide. Retrying…");
+            : "Couldn't reach CoRide. Retrying.");
       }
       return false;
     } finally {
@@ -187,7 +187,7 @@ export function useChatMessages(
       if (json.message) merge([json.message]);
     } catch (err) {
       const rejected = err instanceof SendError && err.rejected;
-      const message = err instanceof SendError ? err.message : 'Not sent — check your connection.';
+      const message = err instanceof SendError ? err.message : 'Not sent. Check your connection.';
       updateOutbox(prev => prev.map(o => o.clientId === item.clientId ? { ...o, status: 'failed', error: message, rejected } : o));
     }
   }, [currentUserId, peerId, merge, updateOutbox]);

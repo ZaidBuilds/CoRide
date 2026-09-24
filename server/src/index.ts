@@ -408,6 +408,8 @@ app.get('/api/room/:roomId', async (req, res) => {
       avatarBg: p.avatarBg,
       interestTags: p.interestTags || [],
       bio: p.bio ?? '',
+      vibeTagline: p.vibeTagline ?? '',
+      favoriteLineId: p.favoriteLineId ?? '',
       trustTier: p.trustTier || 'regular',
       presenceState: states.get(p.id) || (p.id === viewer ? 'active' : 'away')
     }));

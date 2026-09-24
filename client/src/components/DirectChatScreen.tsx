@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { ArrowLeft, ShieldAlert, UserX, MoreVertical, WifiOff, RefreshCw } from 'lucide-react';
+import { ArrowLeftIcon, ArrowClockwiseIcon, DotsThreeVerticalIcon, FlagIcon, ProhibitIcon, WifiSlashIcon } from '@phosphor-icons/react';
 import type { Socket } from 'socket.io-client';
 import type { UserProfile, RoomPresenceTraveler } from '../types';
 import { useChatMessages, useKeyboardSafeHeight, MAX_MESSAGE_LENGTH } from '../hooks/useChatMessages';
@@ -7,6 +7,11 @@ import { MessageList, ChatComposer, type ChatListItem } from './MessageList';
 import { ReportSheet } from './ReportSheet';
 import { triggerHaptic, pushBackHandler } from '../utils/nativeBridge';
 import { Toast } from './ui/Toast';
+import { Avatar } from './ui/Avatar';
+import { Button } from './ui/Button';
+import { IconButton } from './ui/IconButton';
+import { LinePill } from './ui/LinePill';
+import { getLineById } from '../data/metroData';
 import { authHeaders } from '../utils/auth';
 import { API } from '../config';
 
@@ -15,6 +20,8 @@ interface Peer {
   pseudonym?: string;
   username?: string;
   avatarBg?: string;
+  /** The line they usually ride, if their profile says. Fetched when absent. */
+  favoriteLineId?: string;
 }
 
 interface Props {
@@ -42,7 +49,20 @@ export function DirectChatScreen({ currentUser, peer, onBack, onBlocked, socket 
   const keyboardHeight = useKeyboardSafeHeight();
 
   const name = peer.pseudonym || peer.username?.replace(/^@/, '') || 'Friend';
-  const initials = name.slice(0, 2).toUpperCase();
+
+  // Their usual line (profile.favoriteLineId) for the header pill. Only shown
+  // when the profile actually has one; never guessed.
+  const [usualLineId, setUsualLineId] = useState<string | undefined>(peer.favoriteLineId);
+  useEffect(() => {
+    if (peer.favoriteLineId) return;
+    let alive = true;
+    fetch(`${API}/api/profile/${encodeURIComponent(peer.id)}`, { headers: { ...authHeaders() } })
+      .then(r => (r.ok ? r.json() : null))
+      .then(j => { if (alive && j?.profile?.favoriteLineId) setUsualLineId(j.profile.favoriteLineId); })
+      .catch(() => { /* header just shows the name */ });
+    return () => { alive = false; };
+  }, [peer.id, peer.favoriteLineId]);
+  const usualLine = usualLineId ? getLineById(usualLineId) : undefined;
 
   const showToast = useCallback((msg: string) => setToastMsg(msg), []);
 
@@ -140,62 +160,55 @@ export function DirectChatScreen({ currentUser, peer, onBack, onBlocked, socket 
         flexDirection: 'column',
         height: keyboardHeight ? `${keyboardHeight}px` : '100%',
         minHeight: 0,
-        background: 'var(--bg-canvas)'
+        background: 'var(--bg-base)'
       }}
     >
       {/* Header */}
-      <div
-        className="glass"
+      <header
         style={{
           display: 'flex',
           alignItems: 'center',
           gap: 8,
-          padding: '8px 8px 8px 4px',
+          padding: '8px 4px 8px 4px',
           paddingTop: 'calc(8px + var(--safe-top))',
-          borderRadius: 0,
-          borderLeft: 'none',
-          borderRight: 'none',
-          borderTop: 'none',
-          borderBottom: '1px solid var(--border-card)',
+          minHeight: 'calc(64px + var(--safe-top))',
+          background: 'var(--bg-base)',
+          borderBottom: '1px solid var(--border-subtle)',
           position: 'relative',
           zIndex: 10,
           flexShrink: 0
         }}
       >
         {onBack && (
-          <button onClick={onBack} className="icon-btn" aria-label="Back to chats" style={{ background: 'transparent', border: 'none' }}>
-            <ArrowLeft size={22} />
-          </button>
+          <IconButton label="Back to chats" variant="plain" onClick={onBack}>
+            <ArrowLeftIcon size={24} aria-hidden="true" />
+          </IconButton>
         )}
 
-        <div
-          className="avatar"
-          aria-hidden="true"
-          style={{
-            width: 40,
-            height: 40,
-            fontSize: 14,
-            boxShadow: 'none',
-            background: peer.avatarBg || 'linear-gradient(135deg, var(--signal-500), var(--signal-600))'
-          }}
-        >
-          {initials}
-        </div>
+        <Avatar name={name} seed={peer.id} bg={peer.avatarBg} size={40} />
 
-        <h1 style={{ flex: 1, minWidth: 0, margin: 0, fontSize: 17, fontWeight: 700, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {name}
-        </h1>
+        <div style={{ flex: 1, minWidth: 0, marginLeft: 4 }}>
+          <h1 className="type-headline" style={{ color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {name}
+          </h1>
+          {usualLine && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+              <span className="type-meta" style={{ color: 'var(--text-muted)' }}>Usually rides</span>
+              <LinePill line={usualLine} size="sm" />
+            </div>
+          )}
+        </div>
 
         <button
           ref={menuBtnRef}
-          onClick={() => setShowMenu(v => !v)}
-          className="icon-btn"
+          type="button"
+          className="icon-btn plain"
           aria-label={`More options for ${name}`}
           aria-haspopup="menu"
           aria-expanded={showMenu}
-          style={{ background: 'transparent', border: 'none' }}
+          onClick={() => { void triggerHaptic('light'); setShowMenu(v => !v); }}
         >
-          <MoreVertical size={22} />
+          <DotsThreeVerticalIcon size={24} weight="bold" aria-hidden="true" />
         </button>
 
         {showMenu && (
@@ -208,13 +221,13 @@ export function DirectChatScreen({ currentUser, peer, onBack, onBlocked, socket 
               position: 'absolute',
               top: 'calc(100% - 4px)',
               right: 8,
-              background: 'var(--bg-surface-raised)',
-              border: '1px solid var(--border-subtle)',
-              borderRadius: 'var(--radius-md)',
-              boxShadow: 'var(--shadow-lg)',
-              padding: '4px 0',
+              background: 'var(--bg-elevated)',
+              borderRadius: 'var(--radius-card)',
+              boxShadow: 'var(--shadow-float)',
+              padding: '6px 0',
               zIndex: 30,
-              minWidth: 200
+              minWidth: 220,
+              overflow: 'hidden'
             }}
           >
             <button
@@ -222,36 +235,36 @@ export function DirectChatScreen({ currentUser, peer, onBack, onBlocked, socket 
               onClick={() => { setShowMenu(false); setShowReportSheet(true); }}
               style={menuItem}
             >
-              <ShieldAlert size={18} style={{ color: 'var(--status-warning)' }} /> Report {name}
+              <FlagIcon size={20} aria-hidden="true" style={{ color: 'var(--text-secondary)' }} /> Report {name}
             </button>
             <button
               role="menuitem"
               onClick={() => { setShowMenu(false); setShowBlockConfirm(true); }}
-              style={{ ...menuItem, color: 'var(--status-danger)' }}
+              style={{ ...menuItem, color: 'var(--danger-text)' }}
             >
-              <UserX size={18} /> Block {name}
+              <ProhibitIcon size={20} aria-hidden="true" /> Block {name}
             </button>
           </div>
         )}
-      </div>
+      </header>
 
-      {/* Connection / load problems — one honest line, never a wall. */}
+      {/* Connection / load problems: one honest line, never a wall. */}
       {(!online || (error && !loading)) && (
         <div
           role="status"
           style={{
-            display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0,
-            padding: '4px 8px 4px 14px', fontSize: 13, color: 'var(--text-secondary)',
-            background: 'var(--bg-surface)', borderBottom: '1px solid var(--border-subtle)'
+            display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0,
+            padding: '0 4px 0 16px',
+            background: 'var(--bg-surface)', boxShadow: 'inset 4px 0 0 var(--status-warn)'
           }}
         >
-          <WifiOff size={15} style={{ color: 'var(--status-warning)', flexShrink: 0 }} />
-          <span style={{ flex: 1 }}>
-            {!online ? "You're offline — messages will send when you reconnect." : error}
+          <WifiSlashIcon size={18} aria-hidden="true" style={{ color: 'var(--warning-text)', flexShrink: 0 }} />
+          <span className="type-meta" style={{ flex: 1, color: 'var(--text-secondary)', padding: '12px 0' }}>
+            {!online ? "You're offline. Messages send when you reconnect." : error}
           </span>
           {online && (
-            <button onClick={refresh} className="press" aria-label="Retry loading messages" style={{ ...menuItem, width: 'auto', padding: '0 12px', color: 'var(--accent-text)' }}>
-              <RefreshCw size={15} /> Retry
+            <button onClick={refresh} className="press" aria-label="Retry loading messages" style={{ ...menuItem, width: 'auto', padding: '0 12px', fontSize: 14 }}>
+              <ArrowClockwiseIcon size={16} aria-hidden="true" /> Retry
             </button>
           )}
         </div>
@@ -267,23 +280,17 @@ export function DirectChatScreen({ currentUser, peer, onBack, onBlocked, socket 
         onDiscard={discard}
         empty={
           error ? (
-            <p style={{ fontSize: 14, color: 'var(--text-muted)', textAlign: 'center', margin: 0 }}>
+            <p className="type-body" style={{ color: 'var(--text-secondary)', textAlign: 'center' }}>
               Couldn't load this conversation.
             </p>
           ) : (
-            <div style={{ textAlign: 'center', maxWidth: 260 }}>
-              <div
-                className="avatar"
-                aria-hidden="true"
-                style={{ width: 64, height: 64, fontSize: 22, margin: '0 auto 12px', background: peer.avatarBg || 'var(--accent-purple)' }}
-              >
-                {initials}
-              </div>
-              <p style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)', margin: '0 0 4px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', maxWidth: 280 }}>
+              <Avatar name={name} seed={peer.id} bg={peer.avatarBg} size={64} />
+              <p className="type-headline" style={{ color: 'var(--text-primary)', margin: '14px 0 4px' }}>
                 You and {name} are connected
               </p>
-              <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0, lineHeight: 1.45 }}>
-                Say hello — maybe ask which coach they usually board.
+              <p className="type-body" style={{ color: 'var(--text-secondary)' }}>
+                Say hello. You could ask which coach they usually board.
               </p>
             </div>
           )
@@ -330,7 +337,7 @@ export function DirectChatScreen({ currentUser, peer, onBack, onBlocked, socket 
           style={{
             position: 'fixed',
             inset: 0,
-            background: 'var(--scrim, rgba(8, 9, 12, 0.75))',
+            background: 'var(--scrim)',
             zIndex: 100,
             display: 'flex',
             alignItems: 'center',
@@ -345,14 +352,12 @@ export function DirectChatScreen({ currentUser, peer, onBack, onBlocked, socket 
             aria-describedby="dm-block-desc"
             onClick={e => e.stopPropagation()}
             style={{
-              background: 'var(--bg-surface-raised)',
-              border: '1px solid var(--border-subtle)',
-              borderRadius: 'var(--radius-xl)',
-              padding: 20,
+              background: 'var(--bg-elevated)',
+              borderRadius: 'var(--radius-sheet)',
+              padding: 24,
               maxWidth: 360,
               width: '100%',
-              textAlign: 'center',
-              boxShadow: 'var(--shadow-lg)'
+              boxShadow: 'var(--shadow-float)'
             }}
           >
             <div
@@ -360,61 +365,43 @@ export function DirectChatScreen({ currentUser, peer, onBack, onBlocked, socket 
               style={{
                 width: 48,
                 height: 48,
-                borderRadius: '50%',
-                background: 'var(--bg-surface)',
-                color: 'var(--status-danger)',
+                borderRadius: 'var(--radius-squircle)',
+                background: 'var(--bg-tonal)',
+                color: 'var(--danger-text)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                margin: '0 auto 12px'
+                marginBottom: 16
               }}
             >
-              <UserX size={24} />
+              <ProhibitIcon size={24} />
             </div>
-            <h3 id="dm-block-title" style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-primary)', margin: '0 0 6px' }}>
+            <h3 id="dm-block-title" className="type-title" style={{ color: 'var(--text-primary)', marginBottom: 8 }}>
               Block {name}?
             </h3>
-            <p id="dm-block-desc" style={{ fontSize: 14, color: 'var(--text-secondary)', margin: '0 0 18px', lineHeight: 1.45 }}>
-              They'll disappear from your rooms, your connection ends, and neither of you can message the other.
+            <p id="dm-block-desc" className="type-body" style={{ color: 'var(--text-secondary)', marginBottom: 20 }}>
+              They disappear from your rooms, your connection ends, and neither of you can message the other.
             </p>
-            <div style={{ display: 'flex', gap: 10 }}>
-              <button
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Button
+                type="button"
+                variant="tonal"
                 autoFocus
                 onClick={() => setShowBlockConfirm(false)}
                 disabled={blocking}
-                className="press"
-                style={{
-                  flex: 1,
-                  minHeight: 48,
-                  borderRadius: 'var(--radius-pill)',
-                  background: 'var(--bg-surface)',
-                  border: '1px solid var(--border-subtle)',
-                  color: 'var(--text-primary)',
-                  fontWeight: 700,
-                  fontSize: 15,
-                  cursor: 'pointer'
-                }}
+                style={{ flex: 1 }}
               >
                 Cancel
-              </button>
-              <button
+              </Button>
+              <Button
+                type="button"
+                variant="danger"
                 onClick={handleBlockConfirm}
-                disabled={blocking}
-                className="press btn-danger"
-                style={{
-                  background: 'var(--danger-fill)',
-                  color: '#fff',
-                  border: 'none',
-                  flex: 1,
-                  minHeight: 48,
-                  borderRadius: 'var(--radius-pill)',
-                  fontWeight: 700,
-                  fontSize: 15,
-                  cursor: blocking ? 'progress' : 'pointer'
-                }}
+                isLoading={blocking}
+                style={{ flex: 1 }}
               >
-                {blocking ? 'Blocking…' : 'Block'}
-              </button>
+                Block
+              </Button>
             </div>
           </div>
         </div>
@@ -432,11 +419,12 @@ const menuItem: React.CSSProperties = {
   background: 'none',
   border: 'none',
   color: 'var(--text-primary)',
-  fontSize: 15,
-  fontWeight: 600,
+  fontSize: 16,
+  fontWeight: 500,
   display: 'flex',
   alignItems: 'center',
-  gap: 10,
+  gap: 12,
   cursor: 'pointer',
-  textAlign: 'left'
+  textAlign: 'left',
+  borderRadius: 'var(--radius-pill)'
 };

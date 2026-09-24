@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
-import { HelpCircle, Lightbulb, Timer } from 'lucide-react';
+import { CheckIcon, LightbulbIcon, QuestionIcon, XIcon } from '@phosphor-icons/react';
 import type { TwentyQState } from '../../types/engagement';
 import type { Socket } from 'socket.io-client';
 import type { UserProfile } from '../../types';
-import { gameInput, gameSubmit, panelTitle, timerChip, errorLine } from './gameStyles';
+import { gameInput, submitStyle, panelTitle, timerChip, errorLine, gameWell } from './gameStyles';
 
 interface Props {
   game: TwentyQState;
@@ -12,10 +12,11 @@ interface Props {
   roomId: string;
 }
 
-const ANSWER_COLOR: Record<'yes' | 'no' | 'maybe', string> = {
-  yes: 'var(--status-success)',
-  no: 'var(--status-danger)',
-  maybe: 'var(--status-warning)'
+/** Yes = ink, no = danger, maybe = tonal. Text always says the word too. */
+const ANSWER_STYLE: Record<'yes' | 'no' | 'maybe', React.CSSProperties> = {
+  yes: { background: 'var(--ink)', color: 'var(--ink-inverse)' },
+  no: { background: 'var(--danger-fill)', color: '#FFFFFF' },
+  maybe: { background: 'var(--bg-tonal)', color: 'var(--text-primary)' }
 };
 
 export const TwentyQuestionsPanel: React.FC<Props> = ({ game, currentUser, socket, roomId }) => {
@@ -49,64 +50,74 @@ export const TwentyQuestionsPanel: React.FC<Props> = ({ game, currentUser, socke
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-        <h3 style={panelTitle}>❓ 20 Questions</h3>
+        <h3 style={panelTitle}>20 Questions</h3>
         <span style={timerChip}>
-          <Timer size={12} aria-hidden="true" /> {game.remaining} questions left
+          {game.remaining} left
         </span>
       </div>
 
-      <div style={{ padding: 12, borderRadius: 'var(--radius-lg)', background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', textAlign: 'center' }}>
-        <div style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
-          <Lightbulb size={13} aria-hidden="true" /> {game.secretCategory} · hint
+      <div style={gameWell}>
+        <div className="type-meta" style={{ color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <LightbulbIcon size={16} aria-hidden="true" /> Hint · {game.secretCategory}
         </div>
-        <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--text-primary)', marginTop: 6 }}>{game.secretHint}</div>
-        {!isFinished && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>Ask yes/no questions · guess anytime</div>}
+        <div className="type-headline" style={{ color: 'var(--text-primary)', marginTop: 6 }}>{game.secretHint}</div>
+        {!isFinished && <div className="type-meta" style={{ color: 'var(--text-muted)', marginTop: 4 }}>Ask yes or no questions. Guess any time.</div>}
       </div>
 
-      <ol aria-label="Questions asked" aria-live="polite" style={{ maxHeight: 200, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6, listStyle: 'none', margin: 0, padding: 0 }}>
+      <ol aria-label="Questions asked" aria-live="polite" style={{ maxHeight: 220, overflowY: 'auto', display: 'flex', flexDirection: 'column', listStyle: 'none', margin: 0, padding: 0 }}>
         {game.asked.slice(-10).map((a, i) => (
-          <li key={`${a.at}_${i}`} style={{ padding: '8px 10px', borderRadius: 'var(--radius-md)', background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-            <div style={{ fontSize: 13, color: 'var(--text-primary)', flex: 1, minWidth: 0, overflowWrap: 'anywhere' }}>
-              <span style={{ fontWeight: 700, color: 'var(--text-muted)', fontSize: 12 }}>{a.askerName}: </span>{a.q}
+          <li key={`${a.at}_${i}`} style={{ padding: '10px 0', borderTop: i ? '1px solid var(--border-subtle)' : undefined, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+            <div className="type-meta" style={{ color: 'var(--text-primary)', flex: 1, minWidth: 0, overflowWrap: 'anywhere', fontSize: 14 }}>
+              <span style={{ color: 'var(--text-muted)' }}>{a.askerName}: </span>{a.q}
             </div>
-            <span style={{
-              padding: '2px 8px',
-              borderRadius: 'var(--radius-full)',
-              fontSize: 12,
-              fontWeight: 800,
-              background: 'var(--bg-elevated)',
-              color: ANSWER_COLOR[a.a] || 'var(--text-secondary)',
-              border: `1px solid ${ANSWER_COLOR[a.a] || 'var(--border-subtle)'}`,
-              flexShrink: 0
-            }}>
-              {a.a.toUpperCase()}
+            <span
+              className="type-meta"
+              style={{
+                padding: '3px 10px',
+                borderRadius: 'var(--radius-pill)',
+                fontWeight: 600,
+                flexShrink: 0,
+                ...(ANSWER_STYLE[a.a] || ANSWER_STYLE.maybe)
+              }}
+            >
+              {a.a === 'yes' ? 'Yes' : a.a === 'no' ? 'No' : 'Maybe'}
             </span>
           </li>
         ))}
-        {game.asked.length === 0 && <li style={{ fontSize: 13, color: 'var(--text-muted)', textAlign: 'center', padding: 12 }}>No questions yet — ask the first one.</li>}
+        {game.asked.length === 0 && <li className="type-meta" style={{ color: 'var(--text-muted)', padding: '8px 0' }}>No questions yet. Ask the first one.</li>}
       </ol>
 
       {isFinished ? (
-        <div role="status" style={{ padding: 12, borderRadius: 'var(--radius-lg)', background: 'var(--bg-surface)', border: `1px solid ${winner ? 'var(--status-success)' : 'var(--border-subtle)'}`, textAlign: 'center' }}>
-          <div style={{ fontSize: 16, fontWeight: 900, color: 'var(--text-primary)' }}>
-            {winner ? `🎉 ${winner} got it — ${game.secretWord}!` : `The answer was ${game.secretWord}`}
+        <div role="status" style={{ ...gameWell, ...(winner ? { background: 'var(--ink)', color: 'var(--ink-inverse)' } : {}) }}>
+          <div className="type-headline" style={{ color: winner ? 'var(--ink-inverse)' : 'var(--text-primary)' }}>
+            {winner ? `${winner} got it: ${game.secretWord}` : `The answer was ${game.secretWord}`}
           </div>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>{game.guessAttempts.length} guesses · {game.asked.length}/20 asked</div>
+          <div className="type-meta tnum" style={{ opacity: 0.8, marginTop: 4, color: winner ? 'var(--ink-inverse)' : 'var(--text-secondary)' }}>
+            {game.guessAttempts.length} guesses · {game.asked.length}/20 asked
+          </div>
         </div>
       ) : (
         <>
           <form onSubmit={ask} style={{ display: 'flex', gap: 8 }}>
             <input value={q} onChange={e => setQ(e.target.value)} maxLength={80} aria-label="Ask a yes or no question" placeholder="Is it something you eat?" style={gameInput} />
-            <button type="submit" disabled={!q.trim()} className="btn-primary press" style={gameSubmit}><HelpCircle size={16} aria-hidden="true" /> Ask</button>
+            <button type="submit" disabled={!q.trim()} className="press" style={submitStyle(!!q.trim())}><QuestionIcon size={18} aria-hidden="true" /> Ask</button>
           </form>
           <form onSubmit={doGuess} style={{ display: 'flex', gap: 8 }}>
-            <input value={guess} onChange={e => setGuess(e.target.value)} maxLength={30} aria-label={`Guess the ${game.secretCategory}`} placeholder={`Guess the ${game.secretCategory}…`} style={gameInput} />
-            <button type="submit" disabled={!guess.trim()} className="btn-secondary press" style={gameSubmit}>Guess</button>
+            <input value={guess} onChange={e => setGuess(e.target.value)} maxLength={30} aria-label={`Guess the ${game.secretCategory}`} placeholder={`Guess the ${game.secretCategory}`} style={gameInput} />
+            <button type="submit" disabled={!guess.trim()} className="press" style={submitStyle(!!guess.trim())}>Guess</button>
           </form>
           {err && <div role="alert" style={errorLine}>{err}</div>}
           {game.guessAttempts.length > 0 && (
-            <div style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'center' }}>
-              Recent guesses: {game.guessAttempts.slice(-3).map(g => `${g.guess} ${g.correct ? '✓' : '✗'}`).join(' · ')}
+            <div className="type-meta" style={{ color: 'var(--text-muted)', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '4px 10px' }}>
+              <span>Recent guesses</span>
+              {game.guessAttempts.slice(-3).map((g, i) => (
+                <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: 'var(--text-secondary)' }}>
+                  {g.guess}
+                  {g.correct
+                    ? <CheckIcon size={14} weight="bold" aria-label="correct" />
+                    : <XIcon size={14} weight="bold" aria-label="wrong" style={{ color: 'var(--danger-text)' }} />}
+                </span>
+              ))}
             </div>
           )}
         </>

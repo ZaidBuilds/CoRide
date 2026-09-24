@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import { Clock, Trophy, Check, X } from 'lucide-react';
+import { CheckIcon, ClockIcon, XIcon } from '@phosphor-icons/react';
+import { Avatar } from '../ui/Avatar';
 import type { TriviaState } from '../../types/engagement';
 import type { Socket } from 'socket.io-client';
 import type { UserProfile } from '../../types';
-import { panelTitle, timerChip, errorLine } from './gameStyles';
+import { panelTitle, timerChip, errorLine, gameWell, playerPill } from './gameStyles';
 
 interface Props {
   game: TriviaState;
@@ -42,24 +43,26 @@ export const TriviaPanel: React.FC<Props> = ({ game, currentUser, socket, roomId
   if (game.status === 'finished') {
     const sorted = [...game.players].sort((a, b) => (game.scores[b.userId] || 0) - (game.scores[a.userId] || 0));
     return (
-      <div style={{ textAlign: 'center' }}>
-        <h3 style={{ ...panelTitle, justifyContent: 'center', fontSize: 16 }}>🏁 Trivia finished</h3>
-        <ol style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 6, listStyle: 'none', padding: 0 }}>
-          {sorted.map((p, i) => (
-            <li key={p.userId} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', borderRadius: 'var(--radius-md)', background: 'var(--bg-surface)', border: `1px solid ${i === 0 ? 'var(--status-warning)' : 'var(--border-subtle)'}`, color: 'var(--text-primary)' }}>
-              <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700 }}>
-                <span aria-hidden="true" style={{ width: 22, height: 22, borderRadius: 6, background: p.avatarBg, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 11 }}>{i + 1}</span>
-                {p.pseudonym}{p.userId === currentUser.id ? ' (you)' : ''}
-              </span>
-              <span style={{ fontWeight: 900 }}>{game.scores[p.userId] || 0}</span>
-            </li>
-          ))}
+      <div>
+        <h3 style={panelTitle}>Trivia finished</h3>
+        <ol style={{ marginTop: 12, display: 'flex', flexDirection: 'column', listStyle: 'none', padding: 0 }}>
+          {sorted.map((p, i) => {
+            const me = p.userId === currentUser.id;
+            return (
+              <li key={p.userId} style={{ display: 'flex', alignItems: 'center', gap: 12, minHeight: 52, padding: '6px 0', borderTop: i ? '1px solid var(--border-subtle)' : undefined, color: 'var(--text-primary)' }}>
+                <span className="type-label tnum" style={{ width: 20, color: 'var(--text-muted)' }}>{i + 1}</span>
+                <Avatar name={p.pseudonym} seed={p.userId} bg={p.avatarBg} size={32} you={me} />
+                <span className="type-label" style={{ flex: 1, minWidth: 0, fontSize: 15 }}>{me ? 'You' : p.pseudonym}</span>
+                <span className="type-headline tnum">{game.scores[p.userId] || 0}</span>
+              </li>
+            );
+          })}
         </ol>
       </div>
     );
   }
 
-  if (!q) return <div role="status" style={{ padding: 12, color: 'var(--text-muted)' }}>Loading question…</div>;
+  if (!q) return <div role="status" className="type-meta" style={{ padding: 12, color: 'var(--text-muted)' }}>Loading question</div>;
 
   const progress = ((game.currentIndex + 1) / game.questions.length) * 100;
   const reveal = game.reveals.find(r => r.qIndex === game.currentIndex);
@@ -67,19 +70,19 @@ export const TriviaPanel: React.FC<Props> = ({ game, currentUser, socket, roomId
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-        <h3 style={panelTitle}>⚡ Fast Trivia</h3>
-        <span style={{ ...timerChip, ...(secs < 5 ? { color: 'var(--status-danger)', borderColor: 'var(--status-danger)' } : {}) }}>
-          <Clock size={12} aria-hidden="true" /> Q {game.currentIndex + 1}/{game.questions.length} · {secs}s
+        <h3 style={panelTitle}>Fast Trivia</h3>
+        <span style={{ ...timerChip, ...(secs < 5 ? { background: 'var(--danger-fill)', color: '#FFFFFF' } : {}) }}>
+          <ClockIcon size={14} aria-hidden="true" /> Q {game.currentIndex + 1}/{game.questions.length} · {secs}s
         </span>
       </div>
-      <div aria-hidden="true" style={{ height: 4, borderRadius: 2, background: 'var(--bg-surface)', overflow: 'hidden' }}>
-        <div style={{ width: `${progress}%`, height: '100%', background: 'var(--accent-purple)', transition: 'width 0.3s' }} />
+      <div aria-hidden="true" style={{ height: 4, borderRadius: 2, background: 'var(--bg-tonal)', overflow: 'hidden' }}>
+        <div style={{ width: `${progress}%`, height: '100%', background: 'var(--ink)', transition: 'width var(--dur-slow) var(--ease-standard)' }} />
       </div>
 
-      <div style={{ padding: 14, borderRadius: 'var(--radius-lg)', background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)' }}>
-        <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1.4 }}>{q.text}</div>
-        {q.textHi && <div lang="hi" style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 4 }}>{q.textHi}</div>}
-        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{q.category}</div>
+      <div style={gameWell}>
+        <div className="type-meta" style={{ color: 'var(--text-muted)', marginBottom: 6 }}>{q.category}</div>
+        <div className="type-headline" style={{ color: 'var(--text-primary)', fontSize: 17, lineHeight: '23px' }}>{q.text}</div>
+        {q.textHi && <div lang="hi" className="type-meta" style={{ color: 'var(--text-secondary)', marginTop: 4 }}>{q.textHi}</div>}
       </div>
 
       <div role="group" aria-label="Answers" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -87,10 +90,18 @@ export const TriviaPanel: React.FC<Props> = ({ game, currentUser, socket, roomId
           const isChosen = chosen === i;
           const isCorrect = !!reveal && reveal.correct === i;
           const isWrongChosen = isChosen && !!reveal && reveal.correct !== i;
-          const border = isCorrect ? 'var(--status-success)' : isWrongChosen ? 'var(--status-danger)' : isChosen ? 'var(--accent-purple)' : 'var(--border-subtle)';
+          const fill: React.CSSProperties = isCorrect
+            ? { background: 'var(--signal)', color: 'var(--ink-fixed)', borderColor: 'var(--signal)' }
+            : isWrongChosen
+              ? { background: 'var(--danger-fill)', color: '#FFFFFF', borderColor: 'var(--danger-fill)' }
+              : isChosen
+                ? { background: 'var(--ink)', color: 'var(--ink-inverse)', borderColor: 'var(--ink)' }
+                : { background: 'transparent', color: 'var(--text-primary)', borderColor: 'var(--border-strong)' };
+          const dim = !!reveal && !isCorrect && !isChosen;
           return (
             <button
               key={i}
+              type="button"
               onClick={() => answer(i)}
               disabled={hasAnswered || !!reveal}
               aria-pressed={isChosen}
@@ -98,13 +109,13 @@ export const TriviaPanel: React.FC<Props> = ({ game, currentUser, socket, roomId
               style={{
                 textAlign: 'left',
                 minHeight: 48,
-                padding: '10px 14px',
-                borderRadius: 'var(--radius-md)',
-                background: isChosen ? 'var(--bg-surface-raised)' : 'var(--bg-elevated)',
-                border: `${isChosen || isCorrect ? 2 : 1}px solid ${border}`,
-                color: 'var(--text-primary)',
-                fontSize: 14,
-                fontWeight: 600,
+                padding: '10px 16px',
+                borderRadius: 'var(--radius-pill)',
+                border: '1px solid',
+                ...fill,
+                opacity: dim ? 0.5 : 1,
+                fontSize: 15,
+                fontWeight: 560,
                 cursor: hasAnswered || reveal ? 'default' : 'pointer',
                 display: 'flex',
                 justifyContent: 'space-between',
@@ -112,15 +123,15 @@ export const TriviaPanel: React.FC<Props> = ({ game, currentUser, socket, roomId
                 gap: 8
               }}
             >
-              <span>{String.fromCharCode(65 + i)}. {opt}</span>
-              {isCorrect && <Check size={18} aria-label="Correct answer" style={{ color: 'var(--status-success)', flexShrink: 0 }} />}
-              {isWrongChosen && <X size={18} aria-label="Wrong" style={{ color: 'var(--status-danger)', flexShrink: 0 }} />}
+              <span><span style={{ opacity: 0.6, marginRight: 8 }}>{String.fromCharCode(65 + i)}</span>{opt}</span>
+              {isCorrect && <CheckIcon size={18} weight="bold" aria-label="Correct answer" style={{ flexShrink: 0 }} />}
+              {isWrongChosen && <XIcon size={18} weight="bold" aria-label="Wrong" style={{ flexShrink: 0 }} />}
             </button>
           );
         })}
       </div>
       {hasAnswered && !reveal && (
-        <div role="status" style={{ fontSize: 13, color: 'var(--text-secondary)', textAlign: 'center' }}>Locked in — answer revealed when the timer ends.</div>
+        <div role="status" className="type-meta" style={{ color: 'var(--text-secondary)' }}>Locked in. The answer shows when the timer ends.</div>
       )}
       {err && <div role="alert" style={errorLine}>{err}</div>}
 
@@ -128,17 +139,20 @@ export const TriviaPanel: React.FC<Props> = ({ game, currentUser, socket, roomId
         {game.players.map(p => {
           const answered = game.answers[p.userId] !== null && game.answers[p.userId] !== undefined;
           return (
-            <li key={p.userId} style={{ fontSize: 12, padding: '4px 10px', borderRadius: 'var(--radius-full)', background: 'var(--bg-surface)', border: `1px solid ${answered ? 'var(--status-success)' : 'var(--border-subtle)'}`, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 5 }}>
-              <span aria-hidden="true" style={{ width: 14, height: 14, borderRadius: 4, background: p.avatarBg, display: 'inline-block' }} />
-              {p.pseudonym} · {game.scores[p.userId] || 0}
+            <li key={p.userId} style={playerPill(false)}>
+              <Avatar name={p.pseudonym} seed={p.userId} bg={p.avatarBg} size={24} />
+              {p.userId === currentUser.id ? 'You' : p.pseudonym}
+              <span className="tnum" style={{ opacity: 0.72 }}>{game.scores[p.userId] || 0}</span>
               <span className="sr-only">{answered ? ', answered' : ', thinking'}</span>
-              <span aria-hidden="true">{answered ? '✓' : '…'}</span>
+              {answered
+                ? <CheckIcon size={14} weight="bold" aria-hidden="true" style={{ color: 'var(--success-text)' }} />
+                : <ClockIcon size={14} aria-hidden="true" style={{ opacity: 0.6 }} />}
             </li>
           );
         })}
       </ul>
-      <div style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
-        <Trophy size={11} aria-hidden="true" /> 15s per question · {game.questions.length} questions · {game.players.length} playing
+      <div className="type-meta tnum" style={{ color: 'var(--text-muted)' }}>
+        15s per question · {game.questions.length} questions · {game.players.length} playing
       </div>
     </div>
   );

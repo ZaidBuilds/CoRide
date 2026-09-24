@@ -1,10 +1,13 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { ArrowLeft, Shield, Users, X, Pin } from 'lucide-react';
+import { ArrowLeftIcon, PushPinIcon, ShieldCheckIcon, XIcon } from '@phosphor-icons/react';
 import type { Socket } from 'socket.io-client';
 import type { ContextRoom, UserProfile } from '../types';
 import { ReactionBar } from './engagement/ReactionBar';
 import { useKeyboardSafeHeight } from '../hooks/useChatMessages';
 import { MessageList, ChatComposer, type ChatListItem } from './MessageList';
+import { IconButton } from './ui/IconButton';
+import { LinePill } from './ui/LinePill';
+import { lineStyle } from '../utils/lineStyle';
 
 interface Props {
   room: ContextRoom;
@@ -220,97 +223,97 @@ export const ChatView: React.FC<Props> = ({ room, currentUser, onSendMessage, on
     return out;
   }, [room.messages, pending, currentUser.id, currentUser.pseudonym]);
 
+
   const otherTyping = (typingUsers || []).filter(u => u.userId !== currentUser.id);
   const online = room.userCount || room.users.length;
-  const title = room.lineName || room.stationName;
-  const subtitle = [room.stationName !== title ? room.stationName : null, room.direction].filter(Boolean).join(' · ');
+  const title = room.stationName || room.lineName || 'Room chat';
+  const towards = room.direction ? room.direction.replace(/^towards\s+/i, '') : '';
+  const lineRef = room.lineId || room.lineColor || null;
+  const live = online > 0 && !!socket?.connected;
 
   const typingNames = otherTyping.map(u => u.pseudonym);
   const typingText = typingNames.length === 0 ? ''
-    : typingNames.length === 1 ? `${typingNames[0]} is typing…`
-    : typingNames.length === 2 ? `${typingNames[0]} and ${typingNames[1]} are typing…`
-    : `${typingNames.length} people are typing…`;
+    : typingNames.length === 1 ? `${typingNames[0]} is typing`
+    : typingNames.length === 2 ? `${typingNames[0]} and ${typingNames[1]} are typing`
+    : `${typingNames.length} people are typing`;
 
   return (
     <div
       className="animate-fade-in"
       style={{
+        ...lineStyle(lineRef),
         position: 'fixed',
         top: 0,
         left: 0,
         right: 0,
         ...(keyboardHeight ? { height: keyboardHeight } : { bottom: 0 }),
-        maxWidth: 520,
+        maxWidth: 'var(--shell-max)',
         margin: '0 auto',
         zIndex: 60,
         display: 'flex',
         flexDirection: 'column',
-        background: 'var(--bg-canvas)'
+        background: 'var(--bg-base)'
       }}
     >
-      {/* Header — who's in this conversation */}
-      <div
-        className="glass"
+      {/* Header: which platform this conversation belongs to */}
+      <header
         style={{
-          display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0,
+          display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0,
           padding: '8px 12px 8px 4px',
           paddingTop: 'calc(8px + var(--safe-top))',
-          borderRadius: 0, borderLeft: 'none', borderRight: 'none', borderTop: 'none',
-          borderBottom: '1px solid var(--border-card)'
+          minHeight: 'calc(64px + var(--safe-top))',
+          background: 'var(--bg-base)',
+          borderBottom: '1px solid var(--border-subtle)',
+          boxShadow: 'inset 0 -3px 0 var(--line)'
         }}
       >
-        <button onClick={onBack} aria-label="Leave chat" className="icon-btn" style={{ background: 'transparent', border: 'none' }}>
-          <ArrowLeft size={22} />
-        </button>
-        <span
-          aria-hidden="true"
-          style={{ width: 10, height: 10, borderRadius: '50%', background: room.lineColor || 'var(--accent-purple)', flexShrink: 0 }}
-        />
+        <IconButton label="Leave chat" variant="plain" onClick={onBack}>
+          <ArrowLeftIcon size={24} aria-hidden="true" />
+        </IconButton>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <h1 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          <h1 className="type-headline" style={{ color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
             {title}
           </h1>
-          {subtitle && (
-            <div style={{ fontSize: 12, color: 'var(--text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {subtitle}
-            </div>
-          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2, minWidth: 0 }}>
+            {lineRef && <LinePill line={lineRef} label={room.lineName || undefined} size="sm" />}
+            {towards && (
+              <span className="type-meta" style={{ color: 'var(--text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                Towards {towards}
+              </span>
+            )}
+          </div>
         </div>
         <span
+          className="type-label tnum"
           aria-label={`${online} ${online === 1 ? 'person' : 'people'} in this room`}
-          style={{
-            display: 'inline-flex', alignItems: 'center', gap: 5, flexShrink: 0,
-            padding: '4px 10px', borderRadius: 'var(--radius-full)',
-            background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)',
-            fontSize: 13, fontWeight: 700, color: 'var(--text-secondary)'
-          }}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexShrink: 0, color: 'var(--text-primary)', paddingLeft: 8 }}
         >
-          <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: '50%', background: online > 0 ? 'var(--presence-active)' : 'var(--presence-other)' }} />
-          <Users size={14} aria-hidden="true" /> {online}
+          {live && <span className="live-dot pulse" aria-hidden="true" />}
+          <span aria-hidden="true">{online}</span>
+          <span aria-hidden="true" style={{ color: 'var(--text-secondary)', fontWeight: 480 }}>here</span>
         </span>
-      </div>
+      </header>
 
       {/* Pinned room rules */}
       {showPinned && (
         <div
           style={{
-            margin: '8px 12px 0', padding: '4px 4px 4px 12px', flexShrink: 0,
-            borderRadius: 'var(--radius-lg)', background: 'var(--bg-surface)',
-            border: '1px solid var(--border-purple)', display: 'flex', gap: 8, alignItems: 'center'
+            margin: '8px 12px 0', padding: '0 0 0 14px', flexShrink: 0,
+            borderRadius: 'var(--radius-card)', background: 'var(--bg-surface)',
+            display: 'flex', gap: 10, alignItems: 'center'
           }}
         >
-          <Pin size={16} aria-hidden="true" style={{ color: 'var(--accent-text)', flexShrink: 0 }} />
-          <div style={{ flex: 1, fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.4, padding: '6px 0' }}>
-            <strong style={{ color: 'var(--text-primary)' }}>Room rules:</strong> be kind, no spam, and don't share personal info.
-          </div>
-          <button
+          <PushPinIcon size={18} aria-hidden="true" style={{ color: 'var(--text-secondary)', flexShrink: 0 }} />
+          <p className="type-meta" style={{ flex: 1, color: 'var(--text-secondary)', padding: '10px 0' }}>
+            <strong style={{ color: 'var(--text-primary)', fontWeight: 600 }}>Room rules.</strong> Be kind, no spam, and keep personal details to yourself.
+          </p>
+          <IconButton
+            label="Dismiss room rules"
+            variant="plain"
             onClick={() => { setShowPinned(false); try { sessionStorage.setItem(PINNED_KEY, '1'); } catch { /* private mode */ } }}
-            aria-label="Dismiss room rules"
-            className="tap-target"
-            style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
           >
-            <X size={18} />
-          </button>
+            <XIcon size={18} aria-hidden="true" />
+          </IconButton>
         </div>
       )}
 
@@ -322,10 +325,12 @@ export const ChatView: React.FC<Props> = ({ room, currentUser, onSendMessage, on
         onRetry={retry}
         onDiscard={discard}
         empty={
-          <div style={{ textAlign: 'center', maxWidth: 260 }}>
-            <p style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)', margin: '0 0 4px' }}>It's quiet in here</p>
-            <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0, lineHeight: 1.45 }}>
-              {online > 1 ? `${online - 1} other ${online - 1 === 1 ? 'person is' : 'people are'} in this room. Say hi!` : 'Be the first to say hi.'}
+          <div style={{ textAlign: 'center', maxWidth: 280 }}>
+            <p className="type-headline" style={{ color: 'var(--text-primary)', marginBottom: 4 }}>It's quiet on this platform</p>
+            <p className="type-body" style={{ color: 'var(--text-secondary)' }}>
+              {online > 1
+                ? `${online - 1} other ${online - 1 === 1 ? 'person is' : 'people are'} here. Say hi.`
+                : 'Messages you send here reach everyone who joins this room.'}
             </p>
           </div>
         }
@@ -364,17 +369,17 @@ export const ChatView: React.FC<Props> = ({ room, currentUser, onSendMessage, on
           <div
             aria-live="polite"
             style={{
-              display: 'flex', gap: 8, alignItems: 'center', alignSelf: 'flex-start', marginTop: 10,
-              padding: '8px 12px', borderRadius: 'var(--radius-lg)',
-              background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)'
+              display: 'flex', gap: 10, alignItems: 'center', alignSelf: 'flex-start', marginTop: 12,
+              padding: '10px 14px', borderRadius: `18px 18px 18px 6px`,
+              background: 'var(--bg-surface)'
             }}
           >
-            <span aria-hidden="true" style={{ display: 'flex', gap: 3 }}>
+            <span aria-hidden="true" style={{ display: 'flex', gap: 4 }}>
               {[0, 0.2, 0.4].map(d => (
                 <span key={d} style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--text-muted)', animation: `pulseGlow 1s infinite ${d}s` }} />
               ))}
             </span>
-            <span style={{ fontSize: 13, color: 'var(--text-secondary)', fontStyle: 'italic' }}>{typingText}</span>
+            <span className="type-meta" style={{ color: 'var(--text-secondary)' }}>{typingText}</span>
           </div>
         ) : null}
       />
@@ -390,13 +395,14 @@ export const ChatView: React.FC<Props> = ({ room, currentUser, onSendMessage, on
       />
 
       <div
+        className="type-meta"
         style={{
-          padding: '2px 0 4px', paddingBottom: keyboardHeight ? 4 : 'calc(4px + var(--safe-bottom))',
-          textAlign: 'center', fontSize: 11, color: 'var(--text-muted)', background: 'var(--bg-elevated)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, flexShrink: 0
+          padding: '0 16px 6px', paddingBottom: keyboardHeight ? 6 : 'calc(6px + var(--safe-bottom))',
+          fontSize: 12, color: 'var(--text-muted)', background: 'var(--bg-surface)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, flexShrink: 0
         }}
       >
-        <Shield size={11} aria-hidden="true" /> Ephemeral · clears after your commute
+        <ShieldCheckIcon size={14} aria-hidden="true" /> Messages clear after your commute
       </div>
     </div>
   );

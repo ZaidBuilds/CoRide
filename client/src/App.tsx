@@ -489,7 +489,7 @@ export function App() {
   };
 
   const handleHeroCheckIn = async (lineId: string, stationId: string, direction: string) => {
-    if (!user) throw new Error('Still signing you in — try again in a moment.');
+    if (!user) throw new Error('Still signing you in. Try again in a moment.');
     const stationName = DELHI_METRO_LINES.find(l => l.id === lineId)?.stations.find(s => s.id === stationId)?.name || stationId;
     const ok = await loc.override(stationId, lineId, direction || undefined);
     // CheckInScreen shows this error instead of a false "Checked in".
@@ -532,7 +532,7 @@ export function App() {
    * profile sheet can show "sent" or a real error (not an optimistic lie).
    */
   const sendConnectRequest = (targetUserId: string): Promise<void> => new Promise((resolve, reject) => {
-    if (!user) { reject(new Error('Still signing you in — try again in a moment.')); return; }
+    if (!user) { reject(new Error('Still signing you in. Try again in a moment.')); return; }
     if (!socket.connected) { reject(new Error("You're offline. Try again when you're connected.")); return; }
     pendingRequestRef.current += 1;
     const done = () => { pendingRequestRef.current -= 1; clearTimeout(timer); socket.off('connection_result', onResult); };
@@ -776,7 +776,7 @@ export function App() {
             activeRoom={trainRoom || stationRoom}
             onOpenChat={fid => {
               const f = friends.find(x => x.id === fid || x.friendId === fid);
-              if (f) openDirectChat({ id: f.friendId, pseudonym: f.friendProfile.pseudonym, username: f.friendProfile.username, avatarBg: f.friendProfile.avatarBg });
+              if (f) openDirectChat({ id: f.friendId, pseudonym: f.friendProfile.pseudonym, username: f.friendProfile.username, avatarBg: f.friendProfile.avatarBg, favoriteLineId: (f.friendProfile as { favoriteLineId?: string }).favoriteLineId });
             }}
             onOpenProfile={p => setSelectedUser(p)}
             onContextUpdated={c => setContext(c)}
@@ -802,10 +802,11 @@ export function App() {
         {view === 'chats' && (
           <ChatsScreen
             friends={friends}
+            onFindPeople={() => goTab('people')}
             socket={socket}
             onSelect={(id, peer) => {
               const f = friends.find(x => x.friendId === id || x.id === id);
-              if (f) openDirectChat({ id: f.friendId, pseudonym: f.friendProfile.pseudonym, username: f.friendProfile.username, avatarBg: f.friendProfile.avatarBg });
+              if (f) openDirectChat({ id: f.friendId, pseudonym: f.friendProfile.pseudonym, username: f.friendProfile.username, avatarBg: f.friendProfile.avatarBg, favoriteLineId: (f.friendProfile as { favoriteLineId?: string }).favoriteLineId });
               else if (peer) openDirectChat(peer);
             }}
           />

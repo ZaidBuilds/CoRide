@@ -1,17 +1,19 @@
 import { useEffect, useState } from 'react';
-import { Radio, Users, Train } from 'lucide-react';
 import type { ContextRoom } from '../types';
+import { getStationById } from '../data/metroData';
+import { lineStyle } from '../utils/lineStyle';
+import { LinePill } from './ui/LinePill';
+import { PresenceStack } from './ui/PresenceStack';
+import { StationSign } from './ui/StationSign';
 
 interface Props {
   room: ContextRoom | null;
   compact?: boolean;
 }
 
-function shortDirection(dir?: string): string {
+function towardsName(dir?: string): string {
   if (!dir) return '';
-  const raw = dir.replace(/^Towards\s+/i, '').trim();
-  const first = raw.split(/[/,]/)[0]?.trim() || raw;
-  return first.split(/\s+/)[0] || raw;
+  return dir.replace(/^Towards\s+/i, '').trim();
 }
 
 function formatISTNow(): string {
@@ -28,9 +30,9 @@ function formatISTNow(): string {
 }
 
 /**
- * Current room summary: line, direction, local time and how many people are
- * in the room right now. The live dot only pulses when someone is actually
- * here — an empty room reads as empty, not "Live".
+ * The room you're in, as a platform sign: station, line pill, "Towards X",
+ * then who's here and the local time. The live dot only pulses when someone
+ * is actually here; an empty room reads as empty, not "Live".
  */
 export const LiveRoomHeader: React.FC<Props> = ({ room, compact }) => {
   const [now, setNow] = useState(formatISTNow);
@@ -42,67 +44,53 @@ export const LiveRoomHeader: React.FC<Props> = ({ room, compact }) => {
 
   if (!room) return null;
 
-  const dirShort = shortDirection(room.direction);
-  const line = room.lineName || 'Metro';
+  const towards = towardsName(room.direction);
+  const lineRef = room.lineId || room.lineColor || null;
   const count = room.userCount ?? room.users?.length ?? 0;
-  const live = count > 0;
-  const people = `${count} ${count === 1 ? 'person' : 'people'} here now`;
+  const people = (room.users || []).map(u => ({ id: u.id, name: u.pseudonym || u.username, avatarBg: u.avatarBg }));
+  const stationName = (room.stationName || '').replace(/\s*\(.*\)\s*$/, '') || room.lineName || 'Metro';
+  const hindi = room.stationId ? getStationById(room.stationId)?.hindiName : undefined;
 
   if (compact) {
     return (
       <div
         role="status"
+        className="type-label"
         style={{
-          display: 'inline-flex', alignItems: 'center', gap: 8,
-          padding: '6px 12px', borderRadius: 'var(--radius-full)',
-          background: 'var(--bg-surface)', border: '1px solid var(--border-purple)',
-          fontSize: 12, fontWeight: 700, color: 'var(--accent-text)'
+          ...lineStyle(lineRef),
+          display: 'inline-flex', alignItems: 'center', gap: 8, minHeight: 36,
+          padding: '4px 14px 4px 6px', borderRadius: 'var(--radius-pill)',
+          background: 'var(--bg-surface)', color: 'var(--text-primary)'
         }}
       >
-        <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: '50%', background: room.lineColor || 'var(--accent-purple)', display: 'inline-block' }} />
-        {line}{dirShort ? ` · ${dirShort}` : ''} · {now} — {people}
-        {live && <Radio size={12} aria-hidden="true" className="animate-pulse-glow" style={{ color: 'var(--presence-active)' }} />}
+        {lineRef && <LinePill line={lineRef} label={room.lineName || undefined} size="sm" />}
+        <span style={{ whiteSpace: 'nowrap' }}>{towards ? `Towards ${towards}` : stationName}</span>
+        <span aria-hidden="true" style={{ color: 'var(--text-muted)' }}>·</span>
+        {count > 0 && <span className="live-dot pulse" aria-hidden="true" />}
+        <span className="tnum" style={{ whiteSpace: 'nowrap' }}>{count} here</span>
       </div>
     );
   }
 
   return (
-    <div
+    <section
       role="status"
-      style={{
-        display: 'flex', alignItems: 'center', gap: 12,
-        padding: 14,
-        borderRadius: 'var(--radius-xl)',
-        background: 'var(--bg-card)',
-        border: '1px solid var(--border-purple)',
-        boxShadow: 'var(--shadow-md)'
-      }}
+      aria-label={`${stationName}, ${room.lineName || 'Metro'}${towards ? `, towards ${towards}` : ''}. ${count} ${count === 1 ? 'person' : 'people'} here now.`}
+      className="card has-stub"
+      style={{ ...lineStyle(lineRef), ['--stack-ring' as string]: 'var(--bg-surface)' } as React.CSSProperties}
     >
-      <div
-        aria-hidden="true"
-        style={{
-          width: 40, height: 40, borderRadius: '50%', flexShrink: 0,
-          background: room.lineColor || 'var(--accent-purple)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff'
-        }}
-      >
-        <Train size={20} />
-      </div>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-          {line}
-          {dirShort && <><span aria-hidden="true" style={{ opacity: 0.5 }}>•</span> {dirShort}</>}
-          <span aria-hidden="true" style={{ opacity: 0.5 }}>•</span> {now}
-        </div>
-        <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 2, display: 'flex', alignItems: 'center', gap: 6 }}>
-          <Users size={13} aria-hidden="true" /> {people}
-        </div>
-      </div>
-      <div
-        aria-hidden="true"
-        className={live ? 'animate-pulse-glow' : undefined}
-        style={{ width: 10, height: 10, borderRadius: '50%', flexShrink: 0, background: live ? 'var(--presence-active)' : 'var(--presence-other)' }}
+      <StationSign
+        name={stationName}
+        hindiName={hindi}
+        lines={lineRef ? [lineRef] : []}
+        towards={towards || undefined}
+        size="compact"
+        as="h2"
       />
-    </div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginTop: 14 }}>
+        <PresenceStack people={people} count={count} label="here now" live={count > 0} />
+        <span className="type-meta tnum" style={{ color: 'var(--text-muted)', flexShrink: 0 }}>{now} IST</span>
+      </div>
+    </section>
   );
 };
