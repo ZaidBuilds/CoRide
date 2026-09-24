@@ -3,15 +3,15 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
-    <meta name="theme-color" content="#0B0D12" />
+    <meta name="theme-color" content="#0C0E11" />
     <meta name="color-scheme" content="dark light" />
-    <meta name="description" content="CoRide — meet people riding your Delhi Metro line right now. Pseudonymous, live, and safe." />
+    <meta name="description" content="CoRide: see who is riding your Delhi Metro line right now. Pseudonymous and live." />
     <meta name="format-detection" content="telephone=no" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="manifest" href="/manifest.webmanifest" />
-    <title>CoRide — Delhi Metro commuters</title>
+    <title>CoRide · Delhi Metro</title>
     <script>
       // Resolve the theme before first paint (mirrors utils/theme.ts).
       (function () {
@@ -22,7 +22,7 @@
         }
         document.documentElement.setAttribute('data-theme', t);
         var m = document.querySelector('meta[name="theme-color"]');
-        if (m) m.setAttribute('content', t === 'light' ? '#F4F5F8' : '#0B0D12');
+        if (m) m.setAttribute('content', t === 'light' ? '#ECEEEA' : '#0C0E11');
       })();
     </script>
   </head>

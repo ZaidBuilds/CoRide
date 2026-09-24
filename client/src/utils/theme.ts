@@ -16,7 +16,7 @@ export type Theme = 'light' | 'dark' | 'system';
 const KEY = 'coride:theme';
 
 /** Screen background per theme — must match --bg-base in index.css. */
-export const THEME_BG = { light: '#F4F5F8', dark: '#0B0D12' } as const;
+export const THEME_BG = { light: '#ECEEEA', dark: '#0C0E11' } as const;
 
 const listeners = new Set<(resolved: 'light' | 'dark') => void>();
 

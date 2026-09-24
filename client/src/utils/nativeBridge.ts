@@ -60,7 +60,7 @@ export async function triggerHaptic(type: 'light' | 'medium' | 'heavy' | 'succes
 }
 
 /** Colours must match --bg-base in index.css. */
-const BAR_BG = { light: '#F4F5F8', dark: '#0B0D12' } as const;
+const BAR_BG = { light: '#ECEEEA', dark: '#0C0E11' } as const;
 
 /**
  * Match the Android status + navigation bars to the in-app theme.

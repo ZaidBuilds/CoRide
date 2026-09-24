@@ -1,9 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, ArrowRight, Check, Users, EyeOff, ShieldCheck, ExternalLink, ChevronDown } from 'lucide-react';
+import { ArrowLeftIcon, ArrowRightIcon, UsersThreeIcon, EyeSlashIcon, ShieldCheckIcon, ArrowUpRightIcon, CaretDownIcon, CheckIcon } from '@phosphor-icons/react';
 import type { UserProfile } from '../types';
 import { INTEREST_TAXONOMY } from '../types';
 import { Button } from './ui/Button';
 import { IconButton } from './ui/IconButton';
+import { BrandMark } from './ui/BrandMark';
+import { Chip } from './ui/Chip';
+import { LinePill } from './ui/LinePill';
+import { DELHI_METRO_LINES } from '../data/metroData';
 import { PermissionPrimer } from './onboarding/PermissionPrimer';
 import { ONBOARDING_KEYS } from './onboarding/keys';
 import { pushBackHandler, triggerHaptic } from '../utils/nativeBridge';
@@ -11,7 +15,7 @@ import { authHeaders } from '../utils/auth';
 import { API } from '../config';
 
 /**
- * First-run flow. Short and honest — three steps at most, and App.tsx only
+ * First-run flow. Short and honest: three steps at most, and App.tsx only
  * passes the ones this user still needs:
  *
  *   welcome   what CoRide is + 18+ confirmation + community rules / privacy (required)
@@ -152,11 +156,11 @@ export const OnboardingScreen: React.FC<Props> = ({ user, steps, onFinish }) => 
     finish(locationDenied ? 'denied' : 'manual');
   };
 
-  // ── Footer (sticky, thumb reach) per step ──
+  // ── Footer (sticky, thumb reach) per step. One lime CTA per screen. ──
   let footer: React.ReactNode = null;
   if (step === 'welcome') {
     footer = (
-      <Button type="button" fullWidth size="lg" disabled={!isAdult || !acceptsRules} onClick={acceptWelcome} iconEnd={<ArrowRight size={18} aria-hidden="true" />}>
+      <Button type="button" fullWidth size="lg" disabled={!isAdult || !acceptsRules} onClick={acceptWelcome} iconEnd={<ArrowRightIcon size={20} weight="bold" />}>
         Agree and continue
       </Button>
     );
@@ -170,7 +174,7 @@ export const OnboardingScreen: React.FC<Props> = ({ user, steps, onFinish }) => 
           disabled={!nameValid || tags.length < MIN_TAGS}
           isLoading={saving}
           onClick={saveProfile}
-          iconEnd={<ArrowRight size={18} aria-hidden="true" />}
+          iconEnd={<ArrowRightIcon size={20} weight="bold" />}
         >
           {tags.length < MIN_TAGS ? `Pick ${MIN_TAGS - tags.length} more` : 'Continue'}
         </Button>
@@ -183,7 +187,7 @@ export const OnboardingScreen: React.FC<Props> = ({ user, steps, onFinish }) => 
     ) : (
       <>
         <Button type="button" fullWidth size="lg" isLoading={locating} onClick={requestLocation}>Allow location</Button>
-        <Button type="button" variant="ghost" fullWidth onClick={chooseManually}>Not now — I'll pick my station</Button>
+        <Button type="button" variant="ghost" fullWidth onClick={chooseManually}>Not now, I'll pick my station</Button>
       </>
     );
   }
@@ -199,23 +203,22 @@ export const OnboardingScreen: React.FC<Props> = ({ user, steps, onFinish }) => 
         display: 'flex', flexDirection: 'column',
       }}
     >
-      {/* Top bar: back + progress */}
+      {/* Top bar: back (or the mark on step 1) + progress */}
       <div style={{ padding: 'calc(8px + var(--safe-top)) var(--gutter) 8px', maxWidth: 480, width: '100%', margin: '0 auto', display: 'flex', alignItems: 'center', gap: 12, minHeight: 64 }}>
         {index > 0 ? (
-          <IconButton label="Back" variant="plain" onClick={() => setIndex(index - 1)}>
-            <ArrowLeft size={22} aria-hidden="true" />
+          <IconButton label="Back" variant="plain" onClick={() => setIndex(index - 1)} style={{ marginLeft: -12 }}>
+            <ArrowLeftIcon size={24} aria-hidden="true" />
           </IconButton>
         ) : (
-          <span style={{ width: 'var(--tap)' }} aria-hidden="true" />
+          <BrandMark size={32} wordmark />
         )}
         {steps.length > 1 && (
-          <div style={{ flex: 1, display: 'flex', gap: 6 }} role="progressbar" aria-label="Setup progress" aria-valuemin={1} aria-valuemax={steps.length} aria-valuenow={index + 1} aria-valuetext={`Step ${index + 1} of ${steps.length}`}>
+          <div style={{ flex: 1, display: 'flex', gap: 4, justifyContent: 'flex-end' }} role="progressbar" aria-label="Setup progress" aria-valuemin={1} aria-valuemax={steps.length} aria-valuenow={index + 1} aria-valuetext={`Step ${index + 1} of ${steps.length}`}>
             {steps.map((s, i) => (
-              <span key={s} style={{ flex: 1, height: 4, borderRadius: 999, background: i <= index ? 'var(--accent)' : 'var(--border-subtle)', transition: 'background-color var(--dur-std) var(--ease-standard)' }} />
+              <span key={s} style={{ width: i === index ? 28 : 12, height: 4, borderRadius: 999, background: i <= index ? 'var(--ink)' : 'var(--border-strong)', transition: 'width var(--dur-std) var(--ease-standard), background-color var(--dur-std) var(--ease-standard)' }} />
             ))}
           </div>
         )}
-        <span style={{ width: 'var(--tap)' }} aria-hidden="true" />
       </div>
 
       {/* Scrollable content */}
@@ -227,7 +230,8 @@ export const OnboardingScreen: React.FC<Props> = ({ user, steps, onFinish }) => 
 
           {step === 'profile' && (
             <div className="animate-fade-in">
-              <h1 className="type-title" style={{ color: 'var(--text-primary)', marginBottom: 8 }}>Set up your profile</h1>
+              <p className="type-meta" style={{ color: 'var(--text-muted)', marginTop: 8 }}>Your profile</p>
+              <h1 className="type-display" style={{ color: 'var(--text-primary)', margin: '4px 0 8px' }}>What should riders call you?</h1>
               <p className="type-body" style={{ color: 'var(--text-secondary)', marginBottom: 24 }}>
                 Riders on your line see this name and your interests. Use a nickname, not your real name.
               </p>
@@ -244,48 +248,31 @@ export const OnboardingScreen: React.FC<Props> = ({ user, steps, onFinish }) => 
                 aria-describedby="onb-name-help"
                 aria-invalid={!nameValid && pseudonym.length > 0}
               />
-              <p id="onb-name-help" className="type-caption" style={{ color: !nameValid && pseudonym.length > 0 ? 'var(--danger-text)' : 'var(--text-muted)', marginTop: 6, marginBottom: 24 }}>
-                {!nameValid && pseudonym.length > 0 ? 'Use 2–20 characters.' : `${trimmed.length}/20 characters`}
+              <p id="onb-name-help" className="type-meta tnum" style={{ color: !nameValid && pseudonym.length > 0 ? 'var(--danger-text)' : 'var(--text-muted)', marginTop: 6, marginBottom: 28 }}>
+                {!nameValid && pseudonym.length > 0 ? 'Use 2 to 20 characters.' : `${trimmed.length}/20 characters`}
               </p>
 
-              <div id="onb-tags-label" className="field-label" style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <div id="onb-tags-label" className="field-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
                 <span>Interests</span>
-                <span aria-live="polite" style={{ fontWeight: 600, color: tags.length >= MIN_TAGS ? 'var(--success-text)' : 'var(--text-muted)' }}>
-                  {tags.length} of {MIN_TAGS}–{MAX_TAGS} picked
+                <span aria-live="polite" className="tnum" style={{ fontWeight: 560, color: tags.length >= MIN_TAGS ? 'var(--text-primary)' : 'var(--text-muted)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  {tags.length >= MIN_TAGS && <CheckIcon size={14} weight="bold" aria-hidden="true" />}
+                  {tags.length} picked, {MIN_TAGS} to {MAX_TAGS}
                 </span>
               </div>
-              <div role="group" aria-labelledby="onb-tags-label" style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              <div role="group" aria-labelledby="onb-tags-label" style={{ display: 'flex', flexWrap: 'wrap', gap: '12px 8px', marginTop: 4 }}>
                 {INTEREST_TAXONOMY.map(t => {
                   const active = tags.includes(t.id);
                   const full = !active && tags.length >= MAX_TAGS;
                   return (
-                    <button
-                      key={t.id}
-                      type="button"
-                      aria-pressed={active}
-                      disabled={full}
-                      onClick={() => toggleTag(t.id)}
-                      className="press"
-                      style={{
-                        minHeight: 40,
-                        padding: '8px 14px 8px 12px',
-                        borderRadius: 'var(--radius-sm)',
-                        border: `1px solid ${active ? 'transparent' : 'var(--border-strong)'}`,
-                        background: active ? 'var(--accent-container)' : 'transparent',
-                        color: active ? 'var(--accent-text)' : 'var(--text-primary)',
-                        fontSize: 14, fontWeight: 600,
-                        display: 'inline-flex', alignItems: 'center', gap: 6,
-                        cursor: full ? 'default' : 'pointer',
-                      }}
-                    >
-                      {active ? <Check size={16} aria-hidden="true" /> : <span aria-hidden="true">{t.emoji}</span>}
+                    <Chip key={t.id} selected={active} disabled={full} onClick={() => toggleTag(t.id)}
+                      icon={active ? <CheckIcon size={14} weight="bold" /> : undefined}>
                       {t.label}
-                    </button>
+                    </Chip>
                   );
                 })}
               </div>
               {saveError && (
-                <p role="alert" className="type-label" style={{ color: 'var(--danger-text)', fontWeight: 500, marginTop: 16 }}>{saveError}</p>
+                <p role="alert" className="type-label" style={{ color: 'var(--danger-text)', marginTop: 16 }}>{saveError}</p>
               )}
             </div>
           )}
@@ -295,7 +282,7 @@ export const OnboardingScreen: React.FC<Props> = ({ user, steps, onFinish }) => 
       </div>
 
       {/* Sticky actions */}
-      <div style={{ borderTop: '1px solid var(--border-subtle)', background: 'var(--bg-base)' }}>
+      <div style={{ background: 'var(--bg-base)' }}>
         <div style={{ maxWidth: 480, margin: '0 auto', padding: '12px var(--gutter) calc(12px + var(--safe-bottom))', display: 'flex', flexDirection: 'column', gap: 4 }}>
           {footer}
         </div>
@@ -309,14 +296,17 @@ const RULES = [
   'Be respectful. No harassment, hate speech, threats or sexual messages.',
   "Don't follow, photograph or approach anyone who hasn't agreed to meet.",
   'No spam, scams or advertising.',
-  'Report or block anyone who makes you uncomfortable — reported accounts are reviewed and can be restricted or removed.',
+  'Report or block anyone who makes you uncomfortable. We review reported accounts and can restrict or remove them.',
 ];
 
 const VALUE_POINTS = [
-  { icon: <Users size={18} />, text: 'See who is riding your line and station right now' },
-  { icon: <EyeOff size={18} />, text: 'Pseudonymous — no phone number or real name needed' },
-  { icon: <ShieldCheck size={18} />, text: 'Only people you accept can message you' },
+  { icon: <UsersThreeIcon size={22} />, title: 'Your line, right now', text: 'See who is at your station or on your train.' },
+  { icon: <EyeSlashIcon size={22} />, title: 'No real name, no phone number', text: 'You pick a nickname. That is all riders see.' },
+  { icon: <ShieldCheckIcon size={22} />, title: 'You decide who can message you', text: 'Only people you accept can start a chat.' },
 ];
+
+// Real lines from metroData, deduplicated by colour, for the hero strip.
+const HERO_LINES = DELHI_METRO_LINES.filter((l, i, all) => all.findIndex(x => x.color.toLowerCase() === l.color.toLowerCase()) === i);
 
 function WelcomeStep({ isAdult, setIsAdult, acceptsRules, setAcceptsRules }: {
   isAdult: boolean; setIsAdult: (v: boolean) => void;
@@ -324,47 +314,65 @@ function WelcomeStep({ isAdult, setIsAdult, acceptsRules, setAcceptsRules }: {
 }) {
   return (
     <div className="animate-fade-in">
-      <img src="/favicon.svg" alt="" width={56} height={56} style={{ borderRadius: 16, margin: '8px 0 20px' }} />
-      <h1 className="type-title" style={{ color: 'var(--text-primary)', marginBottom: 8 }}>Meet your fellow commuters</h1>
-      <p className="type-body" style={{ color: 'var(--text-secondary)', marginBottom: 20 }}>
-        CoRide connects people travelling the same Delhi Metro line at the same time.
+      <p className="type-meta" style={{ color: 'var(--text-muted)', marginTop: 20 }}>For Delhi Metro riders</p>
+      <h1 style={{ fontSize: 52, lineHeight: '50px', fontWeight: 700, fontStretch: '76%', letterSpacing: '-0.01em', color: 'var(--text-primary)', margin: '6px 0 16px' }}>
+        See who&rsquo;s riding your line.
+      </h1>
+      <p className="type-body" style={{ color: 'var(--text-secondary)', maxWidth: 360 }}>
+        CoRide shows the people at your station and on your train, right now. Say hello, or just ride.
       </p>
 
-      <ul style={{ listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 24 }}>
+      {/* The line colours are the product's visual language; these are the real lines CoRide covers. */}
+      <div aria-hidden="true" style={{ display: 'flex', gap: 4, margin: '28px 0 8px' }}>
+        {HERO_LINES.map(l => (
+          <span key={l.id} style={{ flex: 1, height: 6, borderRadius: 999, background: l.color }} />
+        ))}
+      </div>
+      <p className="type-meta" style={{ color: 'var(--text-muted)', marginBottom: 20, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6 }}>
+        <span>Works on every line, from</span>
+        <LinePill line={DELHI_METRO_LINES[0]} size="sm" />
+        <span>to</span>
+        <LinePill line={DELHI_METRO_LINES.find(l => l.id === 'grey') ?? DELHI_METRO_LINES[DELHI_METRO_LINES.length - 1]} size="sm" />
+      </p>
+
+      <ul className="list-group" style={{ listStyle: 'none', marginBottom: 12 }}>
         {VALUE_POINTS.map(p => (
-          <li key={p.text} style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-            <span aria-hidden="true" style={{ width: 36, height: 36, borderRadius: 'var(--radius-md)', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--accent-container)', color: 'var(--accent-text)', flexShrink: 0 }}>{p.icon}</span>
-            <span className="type-label" style={{ color: 'var(--text-primary)', fontWeight: 500 }}>{p.text}</span>
+          <li key={p.title} className="list-row" style={{ alignItems: 'flex-start', paddingTop: 14, paddingBottom: 14 }}>
+            <span aria-hidden="true" className="row-lead" style={{ color: 'var(--text-primary)', marginTop: 1 }}>{p.icon}</span>
+            <span className="row-text">
+              <span className="row-title" style={{ whiteSpace: 'normal' }}>{p.title}</span>
+              <span className="row-sub" style={{ whiteSpace: 'normal', color: 'var(--text-secondary)' }}>{p.text}</span>
+            </span>
           </li>
         ))}
       </ul>
 
-      <details className="card" style={{ marginBottom: 16, padding: 0 }}>
-        <summary className="type-label onb-summary" style={{ cursor: 'pointer', minHeight: 'var(--tap)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 16px', fontWeight: 700, color: 'var(--text-primary)', listStyle: 'none' }}>
+      <details className="list-group" style={{ marginBottom: 20 }}>
+        <summary className="type-label onb-summary" style={{ cursor: 'pointer', minHeight: 56, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 16px', color: 'var(--text-primary)', listStyle: 'none' }}>
           Read the community rules
-          <ChevronDown size={18} aria-hidden="true" className="onb-chevron" style={{ color: 'var(--text-secondary)', transition: 'transform var(--dur-micro) var(--ease-standard)' }} />
+          <CaretDownIcon size={20} aria-hidden="true" className="onb-chevron" style={{ color: 'var(--text-secondary)', transition: 'transform var(--dur-micro) var(--ease-standard)' }} />
         </summary>
         <ol style={{ padding: '0 16px 16px 36px', display: 'flex', flexDirection: 'column', gap: 8 }}>
           {RULES.map(r => (
-            <li key={r} className="type-label" style={{ color: 'var(--text-secondary)', fontWeight: 400 }}>{r}</li>
+            <li key={r} className="type-label" style={{ color: 'var(--text-secondary)', fontWeight: 420 }}>{r}</li>
           ))}
         </ol>
       </details>
 
       <Checkbox id="onb-age" checked={isAdult} onChange={setIsAdult}>
-        I am 18 years of age or older.
+        I am 18 or older.
       </Checkbox>
       <Checkbox id="onb-rules" checked={acceptsRules} onChange={setAcceptsRules}>
         I agree to the community rules and the{' '}
-        <a href={`${API}/terms`} target="_blank" rel="noopener noreferrer" style={{ fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 2 }}>
-          Terms<ExternalLink size={12} aria-hidden="true" /><span className="sr-only"> (opens in browser)</span>
+        <a href={`${API}/terms`} target="_blank" rel="noopener noreferrer" style={{ fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 1 }}>
+          Terms<ArrowUpRightIcon size={13} weight="bold" aria-hidden="true" /><span className="sr-only"> (opens in browser)</span>
         </a>, and I accept the{' '}
-        <a href={`${API}/privacy`} target="_blank" rel="noopener noreferrer" style={{ fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 2 }}>
-          Privacy Policy<ExternalLink size={12} aria-hidden="true" /><span className="sr-only"> (opens in browser)</span>
+        <a href={`${API}/privacy`} target="_blank" rel="noopener noreferrer" style={{ fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 1 }}>
+          Privacy Policy<ArrowUpRightIcon size={13} weight="bold" aria-hidden="true" /><span className="sr-only"> (opens in browser)</span>
         </a>.
       </Checkbox>
-      <p className="type-caption" style={{ color: 'var(--text-muted)', marginTop: 8 }}>
-        Other riders in your room see your display name, avatar, interests and bio. Your chats are only visible to the people in them.
+      <p className="type-meta" style={{ color: 'var(--text-muted)', marginTop: 8 }}>
+        Riders in your room see your display name, avatar, interests and bio. Your chats are visible only to the people in them.
       </p>
     </div>
   );
@@ -372,15 +380,16 @@ function WelcomeStep({ isAdult, setIsAdult, acceptsRules, setAcceptsRules }: {
 
 function Checkbox({ id, checked, onChange, children }: { id: string; checked: boolean; onChange: (v: boolean) => void; children: React.ReactNode }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: '10px 0', minHeight: 'var(--tap)' }}>
+    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: '12px 0', minHeight: 'var(--tap)' }}>
       <input
         id={id}
         type="checkbox"
+        className="check"
         checked={checked}
         onChange={e => { void triggerHaptic('light'); onChange(e.target.checked); }}
-        style={{ width: 22, height: 22, margin: '1px 0 0', accentColor: 'var(--accent)', flexShrink: 0, cursor: 'pointer' }}
+        style={{ marginTop: -2 }}
       />
-      <label htmlFor={id} className="type-label" style={{ color: 'var(--text-primary)', fontWeight: 500, cursor: 'pointer' }}>
+      <label htmlFor={id} className="type-body" style={{ color: 'var(--text-primary)', cursor: 'pointer', fontSize: 15, lineHeight: '21px' }}>
         {children}
       </label>
     </div>

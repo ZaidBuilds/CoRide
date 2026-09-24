@@ -1,22 +1,21 @@
 import React, { useEffect } from 'react';
 
 /**
- * Toast — a Material-style snackbar for brief, non-blocking feedback
- * ("Request sent", "Profile saved"). Announced politely to screen readers.
- * Sits above the bottom nav (or the screen edge with `aboveNav={false}`).
+ * Toast: brief, non-blocking feedback ("Request sent", "Profile saved").
+ * An ink pill (inverse surface) above the tab bar, announced politely.
  *
- * App.tsx owns the app-wide instance: screens receive `showToast(msg)` or keep
- * their own local <Toast> for self-contained flows.
+ * App.tsx owns the app-wide instance; screens get `showToast(msg)`, or keep a
+ * local <Toast> for self-contained flows.
  *
  *   <Toast message={msg} onDismiss={() => setMsg(null)} />
  *   <Toast message="Blocked" actionLabel="Undo" onAction={undo} onDismiss={…} />
  *
- * Keep messages short, sentence case, no emoji — they read like system text.
+ * Copy: short, sentence case, no emoji, no exclamation marks.
  */
 interface ToastProps {
   message: string | null;
   onDismiss: () => void;
-  /** ms before auto-dismiss. Default 3500 (4500 when there is an action). */
+  /** ms before auto-dismiss. Default 3500 (4500 with an action). */
   duration?: number;
   actionLabel?: string;
   onAction?: () => void;

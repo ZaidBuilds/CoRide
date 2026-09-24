@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Radio, X, Bell, MapPin } from 'lucide-react';
+import { BroadcastIcon as Radio, XIcon as X, BellIcon as Bell, MapPinIcon as MapPin } from '@phosphor-icons/react';
 import type { Socket } from 'socket.io-client';
 import { useSocket } from './hooks/useSocket';
 import { setToken, getToken, authHeaders } from './utils/auth';
@@ -36,6 +36,7 @@ import { IconButton } from './components/ui/IconButton';
 import { Skeleton } from './components/ui/Skeleton';
 import { ScreenHeader } from './components/ui/ScreenHeader';
 import { EmptyState } from './components/ui/EmptyState';
+import { BrandMark } from './components/ui/BrandMark';
 import { flushOfflineQueue } from './utils/offlineQueue';
 import { CheckInScreen } from './components/transit/CheckInScreen';
 import { DELHI_METRO_LINES } from './data/metroData';
@@ -750,15 +751,15 @@ export function App() {
       <div className="app-shell no-nav" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         {bootError ? (
           <EmptyState
-            icon={<Radio size={28} />}
+            icon={<Radio size={24} />}
             title="Can't reach CoRide"
             description="Check your internet connection. If you're underground, try again at the next station."
             action={{ label: 'Try again', onClick: () => { setBootError(false); setBootAttempt(n => n + 1); } }}
           />
         ) : (
           <div role="status" aria-live="polite" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
-            <img src="/favicon.svg" alt="" width={64} height={64} style={{ borderRadius: 18 }} />
-            <span className="type-label" style={{ color: 'var(--text-secondary)' }}>Connecting…</span>
+            <BrandMark size={64} />
+            <span className="type-label" style={{ color: 'var(--text-secondary)' }}>Connecting</span>
           </div>
         )}
       </div>
@@ -1046,14 +1047,14 @@ export function App() {
           role="region"
           aria-label="Notifications"
           className="card animate-fade-in"
-          style={{ position: 'fixed', bottom: 'calc(var(--nav-offset) + 12px)', left: 16, right: 16, maxWidth: 488, margin: '0 auto', zIndex: 39, display: 'flex', alignItems: 'center', gap: 8, padding: '8px 8px 8px 16px', boxShadow: 'var(--shadow-lg)', background: 'var(--bg-elevated)' }}
+          style={{ position: 'fixed', bottom: 'calc(var(--nav-offset) + 12px)', left: 16, right: 16, maxWidth: 488, margin: '0 auto', zIndex: 39, display: 'flex', alignItems: 'center', gap: 10, padding: '8px 4px 8px 16px', boxShadow: 'var(--shadow-float)', background: 'var(--bg-elevated)' }}
         >
-          <Bell size={18} aria-hidden="true" style={{ color: 'var(--accent-text)', flexShrink: 0 }} />
-          <span className="type-label" style={{ flex: 1, color: 'var(--text-primary)', fontWeight: 600 }}>
-            It's peak commute time. Get notified when people on your line are riding?
+          <Bell size={22} aria-hidden="true" style={{ color: 'var(--text-primary)', flexShrink: 0 }} />
+          <span className="type-label" style={{ flex: 1, color: 'var(--text-primary)' }}>
+            Peak hour. Get a nudge when people on your line are riding?
           </span>
-          <Button type="button" size="sm" onClick={() => { void requestPush(); dismissPushBanner(); }}>Turn on</Button>
-          <IconButton label="Dismiss" variant="plain" onClick={dismissPushBanner}><X size={18} aria-hidden="true" /></IconButton>
+          <Button type="button" size="sm" variant="secondary" onClick={() => { void requestPush(); dismissPushBanner(); }}>Turn on</Button>
+          <IconButton label="Dismiss" variant="plain" onClick={dismissPushBanner}><X size={20} aria-hidden="true" /></IconButton>
         </div>
       )}
 

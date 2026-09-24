@@ -2,43 +2,42 @@ import React from 'react';
 import { triggerHaptic } from '../../utils/nativeBridge';
 
 /**
- * Button — the app's standard action button (pill shape, ≥ 48px tall).
+ * Button: every action button in the app. Always a pill, always ≥ 48px to touch.
  *
- *   <Button onClick={save}>Save</Button>                      primary (brand fill)
- *   <Button variant="secondary" icon={<X size={16}/>}>Cancel</Button>
- *   <Button variant="tonal">…</Button>                          brand-tinted, lower emphasis
- *   <Button variant="ghost" size="sm">Skip</Button>             text-only
- *   <Button variant="danger">Block</Button>                     destructive only (Report/Block/Delete)
- *   <Button isLoading>Saving…</Button>                           spinner + aria-busy, click ignored
+ *   <Button onClick={join}>Join room</Button>                  primary: Signal Lime fill, ink text. ONE per screen.
+ *   <Button variant="secondary">Change station</Button>        ink fill (inverts in dark). Strong but not the hero.
+ *   <Button variant="tonal" icon={<BellIcon />}>Notify me</Button>  quiet grey fill. Most in-card actions.
+ *   <Button variant="ghost">Skip for now</Button>              text only, for escape hatches.
+ *   <Button variant="danger">Block</Button>                    Report / Block / Delete only.
+ *   <Button isLoading>Saving</Button>                          spinner + aria-busy, clicks ignored.
  *
- * Use ONE primary per screen. Like a native <button>, the default `type` is
- * "submit" — pass type="button" when it sits inside a <form> but must not submit.
- * Fires a light haptic on press.
+ * Icons: Phosphor at 20px (regular weight); `icon` leads, `iconEnd` trails.
+ * Default `type` is "submit" like a native button; pass type="button" in forms.
+ * size: sm (40px visual, 48px hit area) · md (48px) · lg (56px, onboarding/footer CTAs).
  */
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: 'primary' | 'secondary' | 'tonal' | 'ghost' | 'danger';
   size?: 'sm' | 'md' | 'lg';
   fullWidth?: boolean;
   isLoading?: boolean;
-  /** Leading icon (≈16–18px lucide icon). */
+  /** Leading icon (Phosphor, ~20px). */
   icon?: React.ReactNode;
-  /** Trailing icon, e.g. an arrow on a "Continue" button. */
+  /** Trailing icon, e.g. an arrow on "Continue". */
   iconEnd?: React.ReactNode;
 }
 
 const VARIANT: Record<NonNullable<ButtonProps['variant']>, React.CSSProperties> = {
-  primary: { background: 'var(--accent)', color: 'var(--text-on-accent)', border: '1px solid transparent' },
-  secondary: { background: 'var(--bg-surface-raised)', color: 'var(--text-primary)', border: '1px solid var(--border-subtle)' },
-  tonal: { background: 'var(--accent-container)', color: 'var(--accent-text)', border: '1px solid transparent' },
-  ghost: { background: 'transparent', color: 'var(--accent-text)', border: '1px solid transparent' },
-  danger: { background: 'var(--danger-fill)', color: '#FFFFFF', border: '1px solid transparent' },
+  primary: { background: 'var(--signal)', color: 'var(--ink-fixed)' },
+  secondary: { background: 'var(--ink)', color: 'var(--ink-inverse)' },
+  tonal: { background: 'var(--bg-tonal)', color: 'var(--text-primary)' },
+  ghost: { background: 'transparent', color: 'var(--text-primary)' },
+  danger: { background: 'var(--danger-fill)', color: '#FFFFFF' },
 };
 
-// sm is 40px visually (M3 standard); .touch-expand grows its hit area to 48px.
 const SIZE: Record<NonNullable<ButtonProps['size']>, React.CSSProperties> = {
-  sm: { minHeight: 40, padding: '8px 16px', fontSize: 13, lineHeight: '20px' },
-  md: { minHeight: 48, padding: '12px 20px', fontSize: 14, lineHeight: '20px' },
-  lg: { minHeight: 56, padding: '16px 24px', fontSize: 16, lineHeight: '24px' },
+  sm: { minHeight: 40, padding: '8px 16px', fontSize: 14, lineHeight: '18px', gap: 6 },
+  md: { minHeight: 48, padding: '12px 22px', fontSize: 15, lineHeight: '20px', gap: 8 },
+  lg: { minHeight: 56, padding: '16px 26px', fontSize: 17, lineHeight: '22px', gap: 10 },
 };
 
 export const Button: React.FC<ButtonProps> = ({
@@ -70,19 +69,21 @@ export const Button: React.FC<ButtonProps> = ({
       aria-disabled={inert || undefined}
       aria-busy={isLoading || undefined}
       onClick={handleClick}
-      className={`press ${size === 'sm' ? 'touch-expand ' : ''}${className}`.trim()}
+      className={`press ${size === 'sm' ? 'touch-expand ' : ''}${variant === 'ghost' ? 'btn-ghost-underline ' : ''}${className}`.trim()}
       style={{
         ...VARIANT[variant],
+        // Disabled: a flat grey pill (a dimmed lime reads as a muddy olive).
+        ...(disabled && variant !== 'ghost' ? { background: 'var(--bg-tonal)', color: 'var(--text-muted)' } : {}),
         ...SIZE[size],
+        border: 'none',
         width: fullWidth ? '100%' : undefined,
         borderRadius: 'var(--radius-pill)',
-        fontWeight: 700,
+        fontWeight: 600,
         display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
-        gap: 8,
         cursor: inert ? 'default' : 'pointer',
-        opacity: disabled ? 0.45 : 1,
+        opacity: disabled && variant === 'ghost' ? 0.5 : 1,
         whiteSpace: 'nowrap',
         ...style,
       }}
@@ -97,9 +98,9 @@ export const Button: React.FC<ButtonProps> = ({
         </>
       ) : (
         <>
-          {icon}
+          {icon && <span aria-hidden="true" style={{ display: 'inline-flex', flexShrink: 0 }}>{icon}</span>}
           {children}
-          {iconEnd}
+          {iconEnd && <span aria-hidden="true" style={{ display: 'inline-flex', flexShrink: 0 }}>{iconEnd}</span>}
         </>
       )}
     </button>

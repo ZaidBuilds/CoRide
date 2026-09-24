@@ -1,16 +1,16 @@
 import React from 'react';
-import { WifiOff, RefreshCw } from 'lucide-react';
+import { WifiSlashIcon, ArrowClockwiseIcon } from '@phosphor-icons/react';
 import { triggerHaptic } from '../../utils/nativeBridge';
 
 /**
- * OfflineBanner — shown while the live connection is down (e.g. in a tunnel).
- * Keep it honest: say what still works. App.tsx renders the app-wide one; don't
- * stack another on the same screen.
+ * OfflineBanner: shown while the live connection is down (tunnels, basements).
+ * A surface card with an amber stub. Say what still works; never fake a time.
+ * App.tsx renders the app-wide one; don't stack another on the same screen.
  *
  *   <OfflineBanner onRetry={reconnect} isReconnecting={status === 'connecting'} />
  */
 interface OfflineBannerProps {
-  /** When the app last had live data. Omit if unknown — never fake it. */
+  /** When the app last had live data. Omit if unknown. */
   lastSyncTime?: Date;
   onRetry?: () => void;
   isReconnecting?: boolean;
@@ -30,13 +30,13 @@ export const OfflineBanner: React.FC<OfflineBannerProps> = ({
 
   return (
     <div role="status" aria-live="polite" className="offline-banner">
-      <WifiOff size={18} aria-hidden="true" style={{ color: 'var(--warning-text)', flexShrink: 0 }} />
+      <WifiSlashIcon size={22} aria-hidden="true" style={{ color: 'var(--warning-text)', flexShrink: 0 }} />
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div className="type-label" style={{ fontWeight: 700, color: 'var(--text-primary)' }}>
-          {isReconnecting ? 'Reconnecting…' : "You're offline"}
+        <div className="type-label" style={{ color: 'var(--text-primary)' }}>
+          {isReconnecting ? 'Reconnecting' : "You're offline"}
         </div>
-        <div className="type-caption" style={{ color: 'var(--text-secondary)', marginTop: 2 }}>
-          {detail ?? `Live updates are paused. Direct messages you send are saved and delivered when you reconnect.${since}`}
+        <div className="type-meta" style={{ color: 'var(--text-secondary)', marginTop: 2 }}>
+          {detail ?? `Live updates are paused. Messages you send are saved and go out when you reconnect.${since}`}
         </div>
       </div>
       {onRetry && (
@@ -46,9 +46,9 @@ export const OfflineBanner: React.FC<OfflineBannerProps> = ({
           disabled={isReconnecting}
           className="link-btn"
           aria-label="Retry connection"
-          style={{ flexShrink: 0 }}
+          style={{ flexShrink: 0, textDecoration: 'none' }}
         >
-          <RefreshCw size={16} aria-hidden="true" style={{ animation: isReconnecting ? 'spin 1s linear infinite' : 'none' }} />
+          <ArrowClockwiseIcon size={18} aria-hidden="true" style={{ animation: isReconnecting ? 'spin 1s linear infinite' : 'none' }} />
           Retry
         </button>
       )}

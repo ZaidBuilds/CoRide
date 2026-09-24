@@ -2,7 +2,8 @@ import React, { useEffect, useId, useRef } from 'react';
 import { pushBackHandler } from '../../utils/nativeBridge';
 
 /**
- * Sheet — accessible modal bottom sheet.
+ * Sheet: accessible modal bottom sheet. Surface colour, 24px top corners,
+ * ink-tinted float shadow, spring-like 320ms rise (fade only under reduced motion).
  *
  *   <Sheet open={open} onClose={() => setOpen(false)} title="Report user">
  *     …content…

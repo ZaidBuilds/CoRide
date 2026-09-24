@@ -1,15 +1,15 @@
 import React from 'react';
 
 /**
- * Skeleton — placeholder block for content that is loading. Prefer skeletons
- * shaped like the real layout over spinners for lists and cards. Decorative:
- * hidden from screen readers — put `aria-busy="true"` on the region that is
- * loading (or a visually-hidden "Loading…" label) instead.
+ * Skeleton: placeholder shaped like the content that is loading. Prefer these
+ * over spinners for lists and cards. Decorative (aria-hidden); mark the loading
+ * region with aria-busy="true" or a visually hidden "Loading" label.
  *
  *   <Skeleton width={120} height={16} />
- *   <Skeleton width={48} height={48} borderRadius="50%" delayMs={150} />
+ *   <Skeleton width={48} height={48} borderRadius="var(--radius-squircle)" delayMs={150} />  // avatar
+ *   <Skeleton height={96} borderRadius="var(--radius-card)" />                               // card
  *
- * Pulse stops under prefers-reduced-motion.
+ * Uses --bg-tonal; the pulse stops under prefers-reduced-motion.
  */
 interface SkeletonProps extends React.HTMLAttributes<HTMLDivElement> {
   width?: string | number;
