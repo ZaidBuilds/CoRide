@@ -2,6 +2,7 @@
 node_modules/
 client/node_modules/
 server/node_modules/
+functions/node_modules/
 
 # Build
 client/dist/
@@ -36,7 +37,6 @@ Thumbs.db
 # Temp & Logs
 C:/Users/zaidn/AppData/Local/Temp/opencode/
 .claude/
-mobile/
 server_output.txt
 server_log.txt
 server/b2test.ts

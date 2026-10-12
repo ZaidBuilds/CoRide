@@ -24,9 +24,13 @@ class BillingService extends ChangeNotifier {
 
   Future<bool> purchaseRemoveAds() async {
     try {
-      await Purchases.purchaseProduct(AppConfig.productRemoveAds);
-      await refresh();
-      return premium;
+      final products = await Purchases.getProducts([AppConfig.productRemoveAds]);
+      if (products.isNotEmpty) {
+        await Purchases.purchaseStoreProduct(products.first);
+        await refresh();
+        return premium;
+      }
+      return false;
     } catch (_) {
       return false;
     }

@@ -406,6 +406,18 @@ export class RoomManager {
     return this.userProfiles.get(userId);
   }
 
+  public updateUserProfile(profile: UserProfile): void {
+    this.userProfiles.set(profile.id, profile);
+    this.persistProfile(profile);
+  }
+
+  public removeUserProfile(userId: string): void {
+    this.userProfiles.delete(userId);
+    for (const room of this.rooms.values()) {
+      room.userIds.delete(userId);
+    }
+  }
+
   public getRoomUsers(roomId: string): UserProfile[] {
     const room = this.rooms.get(roomId);
     if (!room) return [];

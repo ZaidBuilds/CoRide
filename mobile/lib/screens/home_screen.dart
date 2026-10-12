@@ -50,7 +50,7 @@ class HomeScreen extends StatelessWidget {
                 child: ListView.separated(
                   scrollDirection: Axis.horizontal,
                   itemCount: users.take(8).length,
-                  separatorBuilder: (_, __) => const SizedBox(width: 10),
+                  separatorBuilder: (context, index) => const SizedBox(width: 10),
                   itemBuilder: (_, i) {
                     final u = users[i];
                     return Column(children: [
@@ -67,18 +67,15 @@ class HomeScreen extends StatelessWidget {
         const SizedBox(height: 12),
         const Text('Quick Actions', style: TextStyle(fontWeight: FontWeight.w800)),
         const SizedBox(height: 8),
-        GridView.count(
-          crossAxisCount: 2,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          mainAxisSpacing: 8,
-          crossAxisSpacing: 8,
-          childAspectRatio: 2.4,
+        Row(
           children: [
-            _quick(context, Icons.chat_bubble, 'Chat Room', () => onQuick('chat')),
-            _quick(context, Icons.videogame_asset, 'Play Quiz', () => onQuick('quiz')),
-            _quick(context, Icons.bolt, 'Ice Breaker', () => onQuick('icebreaker')),
-            _quick(context, Icons.edit, 'Add Post', () => onQuick('post')),
+            Expanded(
+              child: _quick(context, Icons.chat_bubble, 'Room Chat', () => onQuick('chat')),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _quick(context, Icons.people, 'Discover', () => onQuick('people')),
+            ),
           ],
         ),
         if (ads.ready && ads.banner != null) ...[

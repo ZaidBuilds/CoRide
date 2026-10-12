@@ -1,0 +1,40 @@
+{
+  "project_info": {
+    "project_number": "205851170154",
+    "firebase_url": "https://coride-c9ace-default-rtdb.asia-southeast1.firebasedatabase.app",
+    "project_id": "coride-c9ace",
+    "storage_bucket": "coride-c9ace.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:205851170154:android:034be1498c6557c3384113",
+        "android_client_info": {
+          "package_name": "com.zaidbuilds.coride"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "205851170154-le73nn8u5gtjbgt9gkfhtq8r2k087lk2.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDUi-AVcLXXxEl2vl9_3B8yXXrKDjj_jhw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "205851170154-le73nn8u5gtjbgt9gkfhtq8r2k087lk2.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

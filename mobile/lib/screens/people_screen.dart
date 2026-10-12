@@ -74,7 +74,7 @@ class _PeopleScreenState extends State<PeopleScreen> {
           child: ListView.separated(
             padding: const EdgeInsets.all(12),
             itemCount: list.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 8),
+            separatorBuilder: (context, index) => const SizedBox(height: 8),
             itemBuilder: (_, i) {
               final u = list[i];
               final r = rankMap[u.id];

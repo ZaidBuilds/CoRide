@@ -2,10 +2,17 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'theme.dart';
 import 'models/models.dart';
 import 'services/api_client.dart';
 import 'services/socket_service.dart';
+import 'services/firebase_service.dart';
+import 'services/auth_service.dart';
+import 'services/monitoring_service.dart';
+import 'services/app_check_service.dart';
+import 'services/notification_service.dart';
 import 'ads/ads_service.dart';
 import 'billing/billing_service.dart';
 import 'screens/home_screen.dart';
@@ -14,10 +21,24 @@ import 'screens/chat_screen.dart';
 import 'screens/connect_screen.dart';
 import 'screens/profile_screen.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  final monitoring = MonitoringService();
+  try {
+    await Firebase.initializeApp();
+    FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+    await monitoring.init();
+    await AppCheckService().init();
+  } catch (e) {
+    debugPrint('[Firebase] initializeApp note: $e');
+  }
   runApp(
     MultiProvider(
       providers: [
+        Provider<MonitoringService>.value(value: monitoring),
+        ChangeNotifierProvider(create: (_) => AuthService()..ensureAuthenticated()),
+        ChangeNotifierProvider(create: (_) => NotificationService()..init()),
+        ChangeNotifierProvider(create: (_) => FirebaseService()..init()),
         ChangeNotifierProvider(create: (_) => SocketService()),
         ChangeNotifierProvider(create: (_) => AdsService()),
         ChangeNotifierProvider(create: (_) => BillingService()),
@@ -48,13 +69,22 @@ class _CoRideAppState extends State<CoRideApp> {
   Future<void> _boot() async {
     if (!mounted) return;
     final sock = context.read<SocketService>();
+    final ads = context.read<AdsService>();
+    final billing = context.read<BillingService>();
+
     sock.connect(
-      onUpdate: () => setState(() {}),
-      onToast: (m) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m))),
+      onUpdate: () {
+        if (mounted) setState(() {});
+      },
+      onToast: (m) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m)));
+        }
+      },
     );
     // init ads (UMP gate inside AdsService caller) + billing stubs
-    await context.read<AdsService>().init(canRequestAds: () async => true);
-    await context.read<BillingService>().init();
+    await ads.init(canRequestAds: () async => true);
+    await billing.init();
 
     UserProfile? p = await ApiClient.loadLocalProfile();
     if (p != null) {
@@ -64,20 +94,29 @@ class _CoRideAppState extends State<CoRideApp> {
       try {
         p = await ApiClient.randomProfile();
       } catch (e) {
-        setState(() => error = 'Backend unreachable. Start server :4000 or set API_BASE_URL. ($e)');
+        if (mounted) {
+          setState(() => error = 'Backend unreachable. Start server :4000 or set API_BASE_URL. ($e)');
+        }
         return;
       }
     }
-    final profile = p!;
-    setState(() => me = profile);
+    final profile = p;
+    if (mounted) {
+      setState(() => me = profile);
+    }
     await ApiClient.saveLocalProfile(profile);
+    if (mounted) {
+      context.read<FirebaseService>().syncUserProfile(profile);
+      context.read<MonitoringService>().setUserId(profile.id);
+      context.read<NotificationService>().syncTokenToUser(profile.id);
+    }
     await ApiClient.track('session_start', profile.id, {});
     await _detectAndJoin();
     _hb = Timer.periodic(const Duration(seconds: 25), (_) {
       final s = sock.stationRoom;
       final t = sock.trainRoom;
-      if (s != null) sock.heartbeat(p!.id, s.id);
-      if (t != null) sock.heartbeat(p!.id, t.id);
+      if (s != null) sock.heartbeat(profile.id, s.id);
+      if (t != null) sock.heartbeat(profile.id, t.id);
     });
   }
 
@@ -112,6 +151,15 @@ class _CoRideAppState extends State<CoRideApp> {
       setState(() => context.read<SocketService>().context = train.context);
       sock.joinRoom(station.room.id, p);
       sock.joinRoom(train.room.id, p);
+      if (mounted) {
+        final fb = context.read<FirebaseService>();
+        fb.joinRoomPresence(
+          roomId: station.room.id,
+          userId: p.id,
+          lat: pos?.latitude,
+          lng: pos?.longitude,
+        );
+      }
       await ApiClient.track('context_detected', p.id, {'station': train.context['stationName']});
     } catch (e) {
       setState(() => error = 'Detect failed: $e');
@@ -121,6 +169,9 @@ class _CoRideAppState extends State<CoRideApp> {
   @override
   void dispose() {
     _hb?.cancel();
+    try {
+      context.read<FirebaseService>().leaveRoomPresence();
+    } catch (_) {}
     super.dispose();
   }
 
@@ -129,6 +180,10 @@ class _CoRideAppState extends State<CoRideApp> {
     return MaterialApp(
       title: 'CoRide',
       theme: corideTheme(),
+      navigatorObservers: [
+        if (context.read<MonitoringService>().analyticsObserver != null)
+          context.read<MonitoringService>().analyticsObserver!,
+      ],
       home: Scaffold(
         body: SafeArea(child: _body()),
         bottomNavigationBar: NavigationBar(

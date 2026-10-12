@@ -357,4 +357,5 @@ export class ConnectionManager {
       !this.isRestricted(uid)
     );
   }
+
 }

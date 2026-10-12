@@ -10,7 +10,7 @@ class ApiClient {
   static Future<Map<String, String>> _headers(String? userId) async {
     return {
       'Content-Type': 'application/json',
-      if (userId != null) 'x-user-id': userId,
+      'x-user-id': ?userId,
     };
   }
 
@@ -43,12 +43,12 @@ class ApiClient {
       headers: await _headers(userId),
       body: jsonEncode({
         'userId': userId,
-        if (lat != null) 'lat': lat,
-        if (lng != null) 'lng': lng,
-        if (cellTowerId != null) 'cellTowerId': cellTowerId,
+        'lat': ?lat,
+        'lng': ?lng,
+        'cellTowerId': ?cellTowerId,
         'movementState': movementState,
-        if (speedKmh != null) 'speedKmh': speedKmh,
-        if (routeHistory != null) 'routeHistory': routeHistory,
+        'speedKmh': ?speedKmh,
+        'routeHistory': ?routeHistory,
         'userConfirmed': userConfirmed,
       }),
     );
