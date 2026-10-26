@@ -85,7 +85,7 @@ export function ProfileSheetContent({ traveler, joinedAt, titleId, activeRoomId,
   const shared = new Set((sharedTags ?? []).filter(t => tags.includes(t)));
   const orderedTags = [...tags.filter(t => shared.has(t)), ...tags.filter(t => !shared.has(t))];
 
-  // Where they're riding: the shared room (never coordinates, DESIGN.md §9).
+  // Where they're riding: the shared room (never coordinates, docs/DESIGN.md §9).
   const lineId = room?.lineId || (activeRoomId ? currentContext?.line : undefined);
   const line = lineId ? getLineById(lineId) : undefined;
   const stationId = room?.stationId || (activeRoomId ? currentContext?.station : undefined);

@@ -6,7 +6,7 @@ import type { CapacitorConfig } from '@capacitor/cli';
 const devHttp = process.env.CAP_CLEARTEXT === 'true';
 
 const config: CapacitorConfig = {
-  appId: 'com.coride.delhimetro',
+  appId: 'com.zaidbuilds.coride',
   appName: 'CoRide',
   webDir: 'dist',
   server: {

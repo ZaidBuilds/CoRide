@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ListNumbersIcon, MapTrifoldIcon, InfoIcon } from '@phosphor-icons/react';
 import type { UserProfile, ContextResult, ContextRoom, MetroLine } from '../types';
 import type { LocationContext } from '../hooks/useLocationContext';
-import type { MetroFriend } from './FriendsTab';
+import type { MetroFriend } from '../types';
 import { DELHI_METRO_LINES, getLineById } from '../data/metroData';
 import { FriendsMetroMap } from './FriendsMetroMap';
 import { railLayout, shortStationName, shortLineName, type RailCell, type RailGroup, type RailRow } from './transit/lineSegments';

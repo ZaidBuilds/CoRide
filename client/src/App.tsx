@@ -4,7 +4,7 @@ import { useSocket } from './hooks/useSocket';
 import { setToken, getToken, authHeaders } from './utils/auth';
 import { DiscoveryScreen } from './components/DiscoveryScreen';
 import { ChatView } from './components/ChatView';
-import type { MetroFriend } from './components/FriendsTab';
+import type { MetroFriend } from './types';
 import { StationPicker } from './components/StationPicker';
 import { EngagementHub } from './components/engagement/EngagementHub';
 import { ProfileEditor } from './components/personalization/ProfileEditor';

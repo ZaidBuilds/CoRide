@@ -112,7 +112,7 @@ export const HomeScreen: React.FC<Props> = ({
   const direction = (ctx?.direction || trainRoom?.direction || stationRoom?.direction || '').replace(/^Towards\s+/i, '').trim();
   const hasPlace = !!stationName && !noSignal;
 
-  // Honest wording (DESIGN.md §9): never claim more than the confidence supports.
+  // Honest wording (docs/DESIGN.md §9): never claim more than the confidence supports.
   const described = describeContext(
     ctx
       ? { ...ctx, stationName: ctx.stationName || stationName || '', lineName: ctx.lineName || lineName || '' }

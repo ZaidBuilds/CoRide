@@ -2,7 +2,6 @@
 node_modules/
 client/node_modules/
 server/node_modules/
-functions/node_modules/
 
 # Build
 client/dist/

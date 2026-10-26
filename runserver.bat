@@ -1,4 +1,0 @@
-@echo off
-echo [CoRide] Starting Backend Server on http://localhost:4000...
-cd server
-npm run dev

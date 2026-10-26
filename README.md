@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="client/src/assets/hero.png" alt="CoRide Hero" width="720" style="border-radius:16px;"/>
+  <img src="store/feature-graphic-1024x500.png" alt="CoRide" width="720"/>
 </p>
 
 <h1 align="center">CoRide — Strangers on the same train, now connected.</h1>
@@ -21,7 +21,7 @@
   <a href="#-architecture">Architecture</a> •
   <a href="#-features-mvp1-4">Features</a> •
   <a href="#-api">API</a> •
-  <a href="ARCHITECTURE.md">Full Arch →</a>
+  <a href="docs/ARCHITECTURE.md">Full Arch →</a>
 </p>
 
 ---
@@ -73,7 +73,7 @@ flowchart TD
   D --> L[Analytics]
 ```
 
-> Full mapping + prod swap → [`ARCHITECTURE.md`](ARCHITECTURE.md)
+> Full mapping + prod swap → [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 
 **Stack:** TypeScript strict, Vite 5 + React 19, Express 4, Socket.IO 4, `store.json` (MVP) → `Postgres + Drizzle`, in-mem → `Redis`, `PostHog` ready.
 
@@ -112,8 +112,7 @@ docker compose up --build
 
 ### 3) On your Android phone (the Play Store app)
 
-The Android app is `client/` wrapped with Capacitor (`client/android`).
-`mobile/` is an older Flutter prototype; it does **not** have the current design.
+The Android app is `client/` wrapped with Capacitor (`client/android`), app ID `com.zaidbuilds.coride`.
 
 Needs Android Studio (or the Android SDK) on your PC, and the phone in USB-debugging mode.
 
@@ -136,9 +135,26 @@ On Windows, `phone.bat 192.168.1.5` does steps 2 and 3 in one go (start the serv
 
 After **any** change in `client/src`, repeat `npm run build` and `npx cap sync android`.
 The phone only sees what was last synced, so skipping it shows an old version.
-For the Play Store build, use an `https://` API URL and **do not** set `CAP_CLEARTEXT` (see `PLAYSTORE_LAUNCH.md`).
+For the Play Store build, use an `https://` API URL and **do not** set `CAP_CLEARTEXT` (see [`docs/PLAYSTORE_LAUNCH.md`](docs/PLAYSTORE_LAUNCH.md)).
 
 ---
+
+## 📁 Project structure
+
+```
+CoRide/
+├── client/              React + Vite app (the Play Store app)
+│   ├── src/             screens, components/ui (design system), hooks, utils
+│   └── android/         Capacitor Android project (app ID com.zaidbuilds.coride)
+├── server/              Node + Express + Socket.IO API, location engine, tests
+│   └── public/          privacy, terms and account-deletion pages
+├── store/               Play Store listing copy, icon, feature graphic, screenshots
+├── docs/                DESIGN.md, PLAYSTORE_LAUNCH.md, ARCHITECTURE.md
+│   └── history/         earlier audits (AUDIT.md, SCREENS.md)
+├── docker-compose.yml   Postgres + Redis + API + web
+├── go.bat               Windows: start server and web client
+└── phone.bat            Windows: build and install on an Android phone
+```
 
 ## 🔧 Env
 

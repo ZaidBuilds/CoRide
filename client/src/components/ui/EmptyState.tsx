@@ -44,7 +44,7 @@ interface EmptyStateProps {
   pushEnabled?: boolean;
 }
 
-const PLAY_URL = 'https://play.google.com/store/apps/details?id=com.coride.delhimetro';
+const PLAY_URL = 'https://play.google.com/store/apps/details?id=com.zaidbuilds.coride';
 
 export const EmptyState: React.FC<EmptyStateProps> = props => {
   if (props.title) return <GenericEmpty {...props} />;

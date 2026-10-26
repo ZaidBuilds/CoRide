@@ -228,3 +228,14 @@ export interface RoomPresenceResponse {
   count: number;
   travelers: RoomPresenceTraveler[];
 }
+
+/** An accepted connection, as returned by GET /api/friends/:userId. */
+export interface MetroFriend {
+  id: string;
+  friendId: string;
+  friendProfile: UserProfile;
+  connectedAtLine: string;
+  connectedAtStation: string;
+  createdAt: number;
+  unreadCount: number;
+}
