@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- "Platform" brand. Keep in sync with client/src/index.css:
+         --signal (Signal Lime, fill only) and --bg-base (dark). -->
+    <color name="colorPrimary">#C8F031</color>
+    <color name="colorPrimaryDark">#0C0E11</color>
+    <color name="colorAccent">#C8F031</color>
+    <!-- Shown behind the WebView before first paint and behind the system bars
+         on devices that pad instead of drawing edge-to-edge. The app is
+         dark-first, so this matches the dark --bg-base. -->
+    <color name="coride_window_bg">#0C0E11</color>
+</resources>

@@ -110,12 +110,33 @@ docker compose up --build
 # web http://localhost:5173  api http://localhost:4000  pg :5432  redis :6379
 ```
 
-### Expo (when ready)
+### 3) On your Android phone (the Play Store app)
+
+The Android app is `client/` wrapped with Capacitor (`client/android`).
+`mobile/` is an older Flutter prototype; it does **not** have the current design.
+
+Needs Android Studio (or the Android SDK) on your PC, and the phone in USB-debugging mode.
 
 ```bash
-npx create-expo-app coride-native
-# reuse client/src/types.ts + engagement types + useCommuteNotifications (swap Notification → expo-notifications)
+# 1. Start the server, reachable from your phone over Wi-Fi
+npm run dev --prefix server                     # :4000
+
+# 2. Build the app pointing at your PC's local IP (ipconfig / ifconfig)
+cd client
+set VITE_API_URL=http://192.168.1.5:4000        # Windows (bash: export VITE_API_URL=...)
+npm run build
+
+# 3. Allow plain HTTP for this test build only, then install on the phone
+set CAP_CLEARTEXT=true                          # bash: export CAP_CLEARTEXT=true
+npx cap sync android
+npx cap run android                             # or: npx cap open android, then Run in Android Studio
 ```
+
+On Windows, `phone.bat 192.168.1.5` does steps 2 and 3 in one go (start the server first).
+
+After **any** change in `client/src`, repeat `npm run build` and `npx cap sync android`.
+The phone only sees what was last synced, so skipping it shows an old version.
+For the Play Store build, use an `https://` API URL and **do not** set `CAP_CLEARTEXT` (see `PLAYSTORE_LAUNCH.md`).
 
 ---
 
