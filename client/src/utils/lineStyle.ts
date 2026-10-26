@@ -3,7 +3,7 @@ import type { MetroLine } from '../types';
 import { getLineById } from '../data/metroData';
 
 /**
- * Line-colour helpers for the "app wears your line" idea (DESIGN.md §2).
+ * Line-colour helpers for the "app wears your line" idea (docs/DESIGN.md §2).
  *
  *   <section style={lineStyle(line)}>…</section>       // line object, id or hex
  *   <span style={{ color: readableInk(hex) }}>…</span>

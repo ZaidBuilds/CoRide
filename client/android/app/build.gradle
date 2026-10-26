@@ -9,10 +9,10 @@ if (keystorePropsFile.exists()) {
 }
 
 android {
-    namespace = "com.coride.delhimetro"
+    namespace = "com.zaidbuilds.coride"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "com.coride.delhimetro"
+        applicationId "com.zaidbuilds.coride"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1

@@ -3,7 +3,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { PlusIcon, MinusIcon, CornersOutIcon, CrosshairIcon, XIcon } from '@phosphor-icons/react';
 import type { FriendEntry, UserProfile, ContextResult, MetroLine, MetroStation } from '../types';
-import type { MetroFriend } from './FriendsTab';
+import type { MetroFriend } from '../types';
 import { DELHI_METRO_LINES, getLineById, getStationById } from '../data/metroData';
 import { linePaths } from './transit/lineSegments';
 import { resolvedTheme } from '../utils/theme';

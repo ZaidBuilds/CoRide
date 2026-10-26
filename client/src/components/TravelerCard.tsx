@@ -42,7 +42,7 @@ function trustWord(badge: string): string {
 }
 
 /**
- * Rider card (DESIGN.md §5): surface card with a --line stub, squircle avatar,
+ * Rider card (docs/DESIGN.md §5): surface card with a --line stub, squircle avatar,
  * name, tagline, up to three interests (shared ones in lime, listed first) and
  * one tonal action. The whole card opens the profile; the action button sits
  * above that hit area so each has its own focus stop and accessible name.
