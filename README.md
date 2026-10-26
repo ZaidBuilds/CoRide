@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="client/src/assets/hero.png" alt="CoRide Hero" width="720" style="border-radius:16px;"/>
+  <img src="store/feature-graphic-1024x500.png" alt="CoRide" width="720"/>
 </p>
 
 <h1 align="center">CoRide — Strangers on the same train, now connected.</h1>
